@@ -180,6 +180,7 @@ class ClassWitnessTest(unittest.TestCase):
                     target.communicate()
             self.assertEqual(observed.returncode, 0, observed.stderr.decode())
             self.assertEqual(target.returncode, 0, stderr.decode())
+            helper_argument_before = captured_file_identity(helper_arguments)
             expected = {name: (classes / (name + ".class")).read_bytes()
                         for name in bodies}
             record = read_witness(witness_path.read_bytes(), expected, profile="boolean")
@@ -262,13 +263,16 @@ class ClassWitnessTest(unittest.TestCase):
             helper_pid = int(helper_executions[0][0])
             self.assertEqual(helper_executions[0][1],
                              (helper_command[0], tuple(helper_command)))
-            self.assertEqual(jdi_bridge.verify_jdi_transport_v6(
+            transport_proof = jdi_bridge.verify_jdi_transport_v6(
                 retained_traces["worker-trace"], retained_traces["helper-trace"],
                 port, int(worker[0]), helper_pid, helper_command,
-                focused=False)["status"], "PROVED_JDI_RAW_EXCHANGE")
+                focused=False)
+            self.assertEqual(transport_proof["status"], "PROVED_JDI_RAW_EXCHANGE")
+            helper_after = {}
+            helper_input_reads = {}
             for name, data in helper_members.items():
-                self.assertEqual(captured_file_identity(helper / name),
-                                 helper_before[name])
+                helper_after[name] = captured_file_identity(helper / name)
+                self.assertEqual(helper_after[name], helper_before[name])
                 self.assertEqual((helper / name).read_bytes(), data)
                 path = str(helper / name)
                 if any(path in line for trace in helper_traces.values()
@@ -278,6 +282,7 @@ class ClassWitnessTest(unittest.TestCase):
                         data, (helper_command[0], tuple(helper_command)),
                         require_full_read=True)
                     self.assertGreater(proof["reads"], 0)
+                    helper_input_reads[name] = proof["reads"]
                     if name == "RotationJdiProbe.class":
                         with self.assertRaises(Rejected):
                             verify_stable_input(
@@ -298,6 +303,8 @@ class ClassWitnessTest(unittest.TestCase):
                 (str(helper_pid), helper_command[0], tuple(helper_command)),
                 exclusive=False, shared_writers=True, allow_initial_log_seek=True)
             self.assertEqual(helper_log["mirror_destination"], str(helper_arguments))
+            self.assertEqual(captured_file_identity(helper_arguments),
+                             helper_argument_before)
             from actual_capture_receipt import verify_helper_startup
             self.assertEqual(verify_helper_startup(
                 helper_arguments.read_bytes(), helper_pid, helper_command,
@@ -306,9 +313,11 @@ class ClassWitnessTest(unittest.TestCase):
             with zipfile.ZipFile(jdi_zip, "w") as archive:
                 for path in sorted(path for path in output.rglob("*") if path.is_file()):
                     archive.writestr(path.relative_to(output).as_posix(), path.read_bytes())
-            self.assertEqual(jdi_bridge.verify_jdi_file_writes(
+            jdi_file_proof = jdi_bridge.verify_jdi_file_writes(
                 helper_projected["legacy_zip"], jdi_zip.getvalue(),
-                output)["status"], "MATCHED_JDI_FILE_WRITES_UNPASSED_LOADER")
+                output)
+            self.assertEqual(jdi_file_proof["status"],
+                             "MATCHED_JDI_FILE_WRITES_UNPASSED_LOADER")
             self.assertEqual(captured_file_identity(agent), agent_before)
             self.assertEqual(captured_file_identity(JDK / "bin/java"), runtime_before)
             evidence_path = os.environ.get("DYN4K_FOCUSED_PILOT_EVIDENCE")
@@ -343,6 +352,14 @@ class ClassWitnessTest(unittest.TestCase):
                     "loader_object_id": bridge["loader_object_id"],
                     "definition_ordinal": focus["ordinal"],
                     "agent_input_reads": input_proof["reads"],
+                    "helper_class_before": helper_before,
+                    "helper_class_after": helper_after,
+                    "helper_input_reads": helper_input_reads,
+                    "helper_argument_before": helper_argument_before,
+                    "helper_argument_after": captured_file_identity(helper_arguments),
+                    "helper_argument_destination": helper_log["mirror_destination"],
+                    "raw_jdi_transport": transport_proof,
+                    "jdi_file_writes": jdi_file_proof,
                     "witness_destination": output_proof["mirror_destination"],
                     "files": {name: hashlib.sha256(data).hexdigest()
                               for name, data in payloads.items()},
