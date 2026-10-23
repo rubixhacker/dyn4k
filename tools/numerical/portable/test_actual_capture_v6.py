@@ -142,11 +142,19 @@ class FocusedReplayTest(unittest.TestCase):
                 archive.comment = comment
             return buffer.getvalue()
         producer = [(1, "41", 0, "+++ exited with 0 +++")]
-        result = actual_output_v6.verify_observer(
-            packed(rows), interpreter, paths, identities, producer, producer)
-        self.assertEqual(result["status"], "PROVED_V6_OUTPUT_OBSERVER")
         valid_zip = packed(rows)
+        result = actual_output_v6.verify_observer(
+            valid_zip, interpreter, paths, identities, producer, producer)
+        self.assertEqual(result["status"], "PROVED_V6_OUTPUT_OBSERVER")
         self.assertEqual(result["trace_sha256"], hashlib.sha256(valid_zip).hexdigest())
+        with patch.object(actual_output_v6, "MAX_OBSERVER_ARCHIVE_BYTES",
+                          len(valid_zip) - 1), patch.object(
+                              zipfile, "ZipFile",
+                              side_effect=AssertionError("oversized ZIP was parsed")):
+            with self.assertRaisesRegex(Rejected, "observer archive size"):
+                actual_output_v6.verify_observer(
+                    valid_zip, interpreter, paths, identities,
+                    producer, producer)
         declared_oversize = bytearray(valid_zip)
         local_header = declared_oversize.find(b"PK\x03\x04")
         central_header = declared_oversize.rfind(b"PK\x01\x02")
@@ -890,6 +898,19 @@ class FocusedReplayTest(unittest.TestCase):
                         FocusedRejected, "observer archive exceeds compressed size limit"):
                     load_version6_archive(root)
             read_bytes.assert_not_called()
+            observer.write_bytes(b"safe")
+            original_open = Path.open
+
+            def grown_open(path, *args, **kwargs):
+                if path == observer:
+                    return io.BytesIO(b"x" * 11)
+                return original_open(path, *args, **kwargs)
+
+            with patch.object(actual_output_v6, "MAX_OBSERVER_ARCHIVE_BYTES", 10), \
+                    patch.object(Path, "open", grown_open):
+                with self.assertRaisesRegex(
+                        FocusedRejected, "observer archive exceeds compressed size limit"):
+                    load_version6_archive(root)
 
     def test_boolean_only_root_still_fails_global_method_inventory(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
