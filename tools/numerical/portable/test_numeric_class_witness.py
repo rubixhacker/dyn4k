@@ -12,7 +12,28 @@ from numeric_producer_trace import verify_stable_input
 
 
 SOURCE = Path(__file__).with_name("class_witness") / "NumericClassWitness.java"
-JDK = Path("/tmp/dyn4k-tools/jdk21")
+JDK_HOME_ENV = "DYN4K_CLASS_WITNESS_JDK_HOME"
+
+
+def configured_jdk_home():
+    if JDK_HOME_ENV in os.environ:
+        supplied = os.environ[JDK_HOME_ENV]
+        if not supplied.strip():
+            raise RuntimeError(f"{JDK_HOME_ENV} must name a JDK directory")
+        jdk_home = Path(supplied)
+    else:
+        jdk_home = Path("/tmp/dyn4k-tools/jdk21")
+
+    if not jdk_home.is_dir():
+        raise RuntimeError(f"{JDK_HOME_ENV} is not a JDK directory: {jdk_home}")
+    for tool in ("java", "javac"):
+        executable = jdk_home / "bin" / tool
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise RuntimeError(f"{JDK_HOME_ENV} lacks executable bin/{tool}: {jdk_home}")
+    return jdk_home
+
+
+JDK = configured_jdk_home()
 
 
 def record(name="portable/PortableMatrixTest", value=b"class", origin="file:/fixture/"):

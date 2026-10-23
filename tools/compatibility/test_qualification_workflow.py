@@ -376,6 +376,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "-u DYN4K_PULLEY_CANDIDATE_JAR "
                  "-u DYN4K_PULLEY_REAL_CLASSPATH "
                  "-u DYN4K_PULLEY_CACHE_ROOT "
+                 "-u ANDROID_SDK_ROOT "
                  "PYTHONPATH=tools/numerical/portable:"
                  "tools/numerical/portable/boolean_rotation_jdi "
                  "python3 -B -m unittest -v "
@@ -383,7 +384,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "test_capture_actual test_rotation_oracle test_rotation_marker "
                  "test_prospective_compare test_witness test_source_guard "
                  "test_jdi_bridge test_pulley_jdi_v1 test_pulley_jdi_v2 "
-                 "test_pulley_jdi_classpath_v2 test_external_rotation_binding"),
+                 "test_pulley_jdi_classpath_v2 test_external_rotation_binding "
+                 "test_numeric_producer"),
                 ("name: Test bounded JDI wait on JDK 21",
                  "test -n \"${JAVA_HOME_21_X64:-}\" "
                  "test -x \"$JAVA_HOME_21_X64/bin/java\" "
@@ -396,6 +398,26 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "PYTHONDONTWRITEBYTECODE=1 "
                  "PYTHONPATH=tools/numerical/portable/boolean_rotation_jdi "
                  "python3 -B -m unittest -v test_jdi_wait"),
+                ("name: Test numeric class witness on JDK 21",
+                 "set -euo pipefail unset OLLAMA_API_KEY "
+                 "evidence=\"$RUNNER_TEMP/numeric-class-witness\" "
+                 "mkdir -p \"$evidence/home\" \"$evidence/tmp\" "
+                 "export HOME=\"$evidence/home\" "
+                 "export TMPDIR=\"$evidence/tmp\" "
+                 "export JAVA_TOOL_OPTIONS=\"-XX:-UsePerfData\" "
+                 "test -n \"${JAVA_HOME_21_X64:-}\" "
+                 "test -d \"$JAVA_HOME_21_X64\" "
+                 "test -x \"$JAVA_HOME_21_X64/bin/java\" "
+                 "test -x \"$JAVA_HOME_21_X64/bin/javac\" "
+                 "\"$JAVA_HOME_21_X64/bin/java\" -version 2>&1 | "
+                 "grep -Eq 'version \"21\\.' "
+                 "\"$JAVA_HOME_21_X64/bin/javac\" -version 2>&1 | "
+                 "grep -Eq '^javac 21\\.' "
+                 "command -v strace env -u OLLAMA_API_KEY "
+                 "DYN4K_CLASS_WITNESS_JDK_HOME=\"$JAVA_HOME_21_X64\" "
+                 "PYTHONDONTWRITEBYTECODE=1 "
+                 "PYTHONPATH=tools/numerical/portable "
+                 "python3 -B -m unittest -v test_numeric_class_witness"),
                 ("name: Test qualification manifest and publication contracts",
                  "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
                  "PYTHONPATH=tools/qualification python3 -B -m unittest -v "
@@ -595,10 +617,22 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "      - name: Test source-only numerical regressions\n"),
             ("push trigger filter", "  push:\n", "  push:\n    branches: [main]\n"),
         )
+        bounded_jdi = re.search(
+            r"(?ms)^      - name: Test bounded JDI wait on JDK 21\n"
+            r".*?(?=^      - (?:name|uses): |\Z)", source,
+        )
+        self.assertIsNotNone(bounded_jdi)
+        bounded_controls = {
+            "required JDK executable omitted",
+            "required JDK version omitted",
+            "required strace omitted",
+            "bounded JDI failure suppressed",
+        }
         for name, old, new in mutations:
             with self.subTest(mutation=name):
-                self.assertEqual(1, source.count(old), name)
-                mutated = source.replace(old, new, 1)
+                target = bounded_jdi.group(0) if name in bounded_controls else source
+                self.assertEqual(1, target.count(old), name)
+                mutated = source.replace(target, target.replace(old, new, 1), 1)
                 with self.assertRaises(AssertionError):
                     self.assert_source_checks_job_contract(mutated)
 
@@ -745,6 +779,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "      - name: Verify pinned GNU MPFR runtime",
              "      - name: Test source-only numerical regressions",
              "      - name: Test bounded JDI wait on JDK 21",
+             "      - name: Test numeric class witness on JDK 21",
              "      - name: Test qualification manifest and publication contracts",
              "      - name: Test independent qualification gate seams",
              "      - name: Test portable qualification source modules",
@@ -774,6 +809,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "-u DYN4K_PULLEY_CANDIDATE_JAR "
             "-u DYN4K_PULLEY_REAL_CLASSPATH "
             "-u DYN4K_PULLEY_CACHE_ROOT "
+             "-u ANDROID_SDK_ROOT "
             "PYTHONPATH=tools/numerical/portable:"
             "tools/numerical/portable/boolean_rotation_jdi "
             "python3 -B -m unittest -v "
@@ -781,9 +817,103 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "test_capture_actual test_rotation_oracle test_rotation_marker "
             "test_prospective_compare test_witness test_source_guard "
             "test_jdi_bridge test_pulley_jdi_v1 test_pulley_jdi_v2 "
-            "test_pulley_jdi_classpath_v2 test_external_rotation_binding",
+            "test_pulley_jdi_classpath_v2 test_external_rotation_binding "
+            "test_numeric_producer",
             command,
         )
+
+        observer = re.search(
+            r"(?ms)^      - name: Test numeric class witness on JDK 21\n"
+            r"        run: \|\n((?:          [^\n]*\n)+)", job,
+        )
+        self.assertIsNotNone(observer)
+        script = textwrap.dedent(observer.group(1))
+        command = " ".join(re.sub(r"\\\s*\n", " ", script).split())
+        self.assertEqual(
+            "set -euo pipefail unset OLLAMA_API_KEY "
+            "evidence=\"$RUNNER_TEMP/numeric-class-witness\" "
+            "mkdir -p \"$evidence/home\" \"$evidence/tmp\" "
+            "export HOME=\"$evidence/home\" export TMPDIR=\"$evidence/tmp\" "
+            "export JAVA_TOOL_OPTIONS=\"-XX:-UsePerfData\" "
+            "test -n \"${JAVA_HOME_21_X64:-}\" test -d \"$JAVA_HOME_21_X64\" "
+            "test -x \"$JAVA_HOME_21_X64/bin/java\" "
+            "test -x \"$JAVA_HOME_21_X64/bin/javac\" "
+            "\"$JAVA_HOME_21_X64/bin/java\" -version 2>&1 | "
+            "grep -Eq 'version \"21\\.' "
+            "\"$JAVA_HOME_21_X64/bin/javac\" -version 2>&1 | "
+            "grep -Eq '^javac 21\\.' command -v strace "
+            "env -u OLLAMA_API_KEY "
+            "DYN4K_CLASS_WITNESS_JDK_HOME=\"$JAVA_HOME_21_X64\" "
+            "PYTHONDONTWRITEBYTECODE=1 "
+            "PYTHONPATH=tools/numerical/portable "
+            "python3 -B -m unittest -v test_numeric_class_witness",
+            command,
+        )
+
+    def test_source_contract_rejects_observer_step_mutations(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assert_source_checks_job_contract(source)
+        mutations = (
+            ("observer step removed", "      - name: Test numeric class witness on JDK 21\n", ""),
+            ("observer command replaced by no-op", "python3 -B -m unittest -v test_numeric_class_witness",
+             "true # python3 -B -m unittest -v test_numeric_class_witness"),
+            ("observer command commented", "python3 -B -m unittest -v test_numeric_class_witness",
+             "# python3 -B -m unittest -v test_numeric_class_witness"),
+            ("observer command disabled by condition", "          test -n \"${JAVA_HOME_21_X64:-}\"\n",
+             "          if false; then test -n \"${JAVA_HOME_21_X64:-}\"; fi\n"),
+            ("observer failure suppressed", "python3 -B -m unittest -v test_numeric_class_witness",
+             "python3 -B -m unittest -v test_numeric_class_witness || true"),
+            ("explicit JDK input omitted", "DYN4K_CLASS_WITNESS_JDK_HOME=\"$JAVA_HOME_21_X64\" ", ""),
+            ("configured JDK directory check omitted", "          test -d \"$JAVA_HOME_21_X64\"\n", "          true\n"),
+            ("Java major check omitted", "grep -Eq 'version \"21\\.'", "cat"),
+            ("javac major check omitted", "grep -Eq '^javac 21\\.'", "cat"),
+            ("producer module omitted",
+             "              test_external_rotation_binding \\\n              test_numeric_producer\n",
+             "              test_external_rotation_binding\n"),
+        )
+        observer = re.search(
+            r"(?ms)^      - name: Test numeric class witness on JDK 21\n"
+            r".*?(?=^      - (?:name|uses): |\Z)", source,
+        )
+        self.assertIsNotNone(observer)
+        numerical = re.search(
+            r"(?ms)^      - name: Test source-only numerical regressions\n"
+            r".*?(?=^      - (?:name|uses): |\Z)", source,
+        )
+        self.assertIsNotNone(numerical)
+        for name, old, new in mutations:
+            with self.subTest(mutation=name):
+                if name == "observer step removed":
+                    target = source
+                elif name == "producer module omitted":
+                    target = numerical.group(0)
+                else:
+                    target = observer.group(0)
+                self.assertEqual(1, target.count(old), name)
+                replacement = target.replace(old, new, 1)
+                with self.assertRaises(AssertionError):
+                    self.assert_source_checks_job_contract(
+                        source.replace(target, replacement, 1))
+
+    def test_numeric_class_witness_configuration_rejects_explicit_bad_jdk(self):
+        module_path = Path(__file__).resolve().parents[1] / "numerical/portable"
+        with tempfile.TemporaryDirectory() as temporary:
+            invalid_jdk = Path(temporary) / "owned-missing-jdk"
+            for supplied in (str(invalid_jdk), ""):
+                with self.subTest(supplied=supplied):
+                    environment = os.environ.copy()
+                    environment.pop("OLLAMA_API_KEY", None)
+                    environment.pop("ANDROID_SDK_ROOT", None)
+                    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+                    environment["PYTHONPATH"] = str(module_path)
+                    environment["DYN4K_CLASS_WITNESS_JDK_HOME"] = supplied
+                    result = subprocess.run(
+                        ["python3", "-B", "-c", "import test_numeric_class_witness"],
+                        cwd=WORKFLOW.parents[2], env=environment,
+                        capture_output=True, text=True, check=False, timeout=5,
+                    )
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn("DYN4K_CLASS_WITNESS_JDK_HOME", result.stderr)
 
     def test_mac_mini_uses_verified_preinstalled_python(self):
         mac_mini = workflow_jobs(WORKFLOW.read_text())["hosted-mac"]
