@@ -86,6 +86,7 @@ PROSPECTIVE_NUMERIC_PROBE_CHECKER_REVISION = "375812a97de8cb3e439fc2a204e029de1a
 PROSPECTIVE_INVENTORY_FIX_CHECKER_REVISION = "df316d8900f850d22f9c933f6aac8250b1e10ed1"
 PROSPECTIVE_EXECUTABLE_CHECKER_REVISION = "fbaee1b16de2ff0633e2981e69cf59044b61c745"
 PROSPECTIVE_REPLAY_SCRATCH_REVISION = "122256c3bc8d998b6ad7661f69562d71061b1bb4"
+PROSPECTIVE_JVM8_SOURCE_REVISION = "b5159c3e769eb360fa69223d27d3b76b1a70e5f1"
 PROSPECTIVE_BRIDGE_CHECKER_REVISION = "6040b40265975b9091db430d79269cb5ea3d9868"
 PROSPECTIVE_ASSEMBLED_CHECKER_REVISION = "b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b"
 APPROVED_PROSPECTIVE_CHECKERS = {
@@ -130,11 +131,20 @@ PROSPECTIVE_REPLAY_SCRATCH_CHECKERS = {
     **APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS,
     "numeric_producer.py": "b0cf7d9adac33542b42399899a8b90d85ec2c0f0540ed2a3dfd9edbfc1c3e502",
 }
+APPROVED_PROSPECTIVE_JVM8_CHECKERS = {
+    **PROSPECTIVE_REPLAY_SCRATCH_CHECKERS,
+    "prospective_compare.py": "7797931a7a0564933b00e9c6fc8e5e31e4254d2f15dbaf7fe32b865f85ed8095",
+    "numeric_producer.py": "544fdd91a42cb2dc2b083fc9b14068d0f137a8bb36f92c033cf2f3c6d24a6352",
+    "numeric_producer_trace.py": "357d7707f720f6a2f0e17304a687a45c7951a7b1cafddf4b27c971c3583e6d5f",
+    "numeric_class_witness.py": "e528d55644ff793a79e89cdcb6365e119da074ecb9c2a79ac9d979f4e3411858",
+    "run.py": "2f53b8baed1907370b16b0ce48dbe039c396445f27c74c5f843e7ca06650c01b",
+    "class_witness/NumericClassWitness.java": "1bed2d631df60b6db97dc3cbdd8903917ccff234455ebafcc03808978321d564",
+}
 APPROVED_PROSPECTIVE_EXECUTABLE_SHARED = {
     path: APPROVED_POLICY[path] for path in
     ("tools/numerical/compare.py", "tools/numerical/physical.py")
 }
-PINNED_PROSPECTIVE_LOCAL_CHECKERS = dict(PROSPECTIVE_REPLAY_SCRATCH_CHECKERS)
+PINNED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_JVM8_CHECKERS)
 APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS = {
     **APPROVED_PROSPECTIVE_CHECKERS,
     "prospective_compare.py": "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f",
@@ -326,6 +336,11 @@ PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES = {
         "tools/numerical/portable/boolean_rotation_jdi/loaded_code.py")},
 }
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
+APPROVED_P2_JVM8_PRODUCERS = {
+    **P2_ROTATION_PREMISE_PRODUCERS,
+    "run.py": "2f53b8baed1907370b16b0ce48dbe039c396445f27c74c5f843e7ca06650c01b",
+}
+PINNED_P2_CURRENT_LOCAL_PRODUCERS = dict(APPROVED_P2_JVM8_PRODUCERS)
 APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS = {
     **APPROVED_P2_PRODUCERS,
     "baseline_capture.py": "b7bb228bde030d7fd6949ae3e7ca743a92060b436797835c6e4f7e12d779ad6c",
@@ -785,7 +800,9 @@ def _prospective_checker_binding(repository, candidate_sha):
         return checked.returncode == 0
 
     executable_window = descends_from(PROSPECTIVE_EXECUTABLE_CHECKER_REVISION)
-    if descends_from(PROSPECTIVE_REPLAY_SCRATCH_REVISION):
+    if descends_from(PROSPECTIVE_JVM8_SOURCE_REVISION):
+        approved = APPROVED_PROSPECTIVE_JVM8_CHECKERS
+    elif descends_from(PROSPECTIVE_REPLAY_SCRATCH_REVISION):
         approved = PROSPECTIVE_REPLAY_SCRATCH_CHECKERS
     elif executable_window:
         approved = APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS
@@ -937,7 +954,9 @@ def _p2_producer_binding(repository, candidate_sha):
     rotation_premise = descends_from(P2_ROTATION_PREMISE_SOURCE_REVISION)
     boolean_jdi_final = descends_from(P2_BOOLEAN_JDI_FINAL_SOURCE_REVISION)
     boolean_jdi = descends_from(P2_BOOLEAN_JDI_SOURCE_REVISION)
-    if jdk21_jdi or corrected_jdi or bounded_jdi:
+    if descends_from(PROSPECTIVE_JVM8_SOURCE_REVISION):
+        approved = APPROVED_P2_JVM8_PRODUCERS
+    elif jdk21_jdi or corrected_jdi or bounded_jdi:
         approved = P2_ROTATION_PREMISE_PRODUCERS
     elif rotation_premise:
         approved = P2_ROTATION_PREMISE_PRODUCERS
@@ -987,7 +1006,7 @@ def _p2_producer_binding(repository, candidate_sha):
     else:
         approved = APPROVED_P2_HISTORICAL_PRODUCERS
     source_dir = "tools/numerical/portable"
-    for name, local_approved in APPROVED_P2_LOCAL_PRODUCERS.items():
+    for name, local_approved in PINNED_P2_CURRENT_LOCAL_PRODUCERS.items():
         relative = f"{source_dir}/{name}"
         local = Path(__file__).resolve().parents[2] / relative
         committed = subprocess.check_output(
