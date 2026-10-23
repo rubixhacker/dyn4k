@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import posixpath
 import re
 import zipfile
 
@@ -69,52 +70,44 @@ def _opening(call):
     return match[1], match[2], fd, token
 
 
+_OBSERVER_PATH_OPERANDS = {
+    "open": (0,), "openat": (1,), "openat2": (1,), "creat": (0,),
+    "stat": (0,), "lstat": (0,), "newfstatat": (1,), "statx": (1,),
+    "rename": (0, 1), "renameat": (1, 3), "renameat2": (1, 3),
+    "unlink": (0,), "unlinkat": (1,), "truncate": (0,),
+    "execve": (0,), "execveat": (1,),
+}
+
+
+def _absolute_spelling(path):
+    return "/" + posixpath.normpath(path).lstrip("/")
+
+
 def _protected_observer_operand(call, paths):
     name = call.split("(", 1)[0]
-    path_positions = {
-        "open": (0,), "openat": (1,), "openat2": (1,), "creat": (0,),
-        "stat": (0,), "lstat": (0,), "newfstatat": (1,), "statx": (1,),
-        "rename": (0, 1), "renameat": (1, 3), "renameat2": (1, 3),
-        "unlink": (0,), "unlinkat": (1,), "truncate": (0,),
-        "execve": (0,), "execveat": (1,),
-    }.get(name, ())
+    normalized = {_absolute_spelling(path) for path in paths}
+    path_positions = _OBSERVER_PATH_OPERANDS.get(name, ())
     if path_positions:
         arguments = _arguments(call)
         for position in path_positions:
-            if position < len(arguments):
-                value = arguments[position]
-                if (value.startswith('"') and value.endswith('"') and
-                        quoted(value).decode("utf-8") in paths):
-                    return True
-    quoted_text = False
-    escaped = False
-    index = 0
-    while index < len(call):
-        char = call[index]
-        if quoted_text:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                quoted_text = False
-            index += 1
-            continue
-        if char == '"':
-            quoted_text = True
-            index += 1
-            continue
-        directory = call.startswith("AT_FDCWD<", index)
-        if directory or V6_FD_START.match(call, index):
-            fd, end = _version6_fd_token(call, index, directory=directory)
-            beginning = index + len(fd) + 1
-            closing = end - 1 - (len("(deleted)") if call[index:end].endswith(
-                "(deleted)") else 0)
-            if call[beginning:closing] in paths:
+            if position >= len(arguments):
                 return True
-            index = end
-            continue
-        index += 1
+            value = arguments[position]
+            if not value.startswith('"') or not value.endswith('"'):
+                return True
+            try:
+                path = quoted(value).decode("utf-8")
+            except UnicodeError:
+                return True
+            if not path.startswith("/"):
+                return True
+            if _absolute_spelling(path) in normalized:
+                return True
+    descriptors = []
+    _project_descriptors(call, version6_raw=True, descriptors=descriptors)
+    for _, path in descriptors:
+        if path.startswith("/") and _absolute_spelling(path) in normalized:
+            return True
     return False
 
 
@@ -185,7 +178,7 @@ def verify_observer(raw_zip, interpreter, paths, identities, worker_events,
     traces, aborted = normalize_rich_traces({names[0][6:]: raw})
     _require(not aborted, "version 6 observer syscall is incomplete")
     events = _events(traces, paths)
-    _validate_calls(events, set(paths))
+    _validate_calls(events, set(paths), version6_raw=True)
     expected_command = observer_command(interpreter, paths)
     execs = [(stamp, call) for stamp, _, _, call in events
              if call.startswith(("execve(", "execveat("))]

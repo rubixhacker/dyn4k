@@ -856,7 +856,7 @@ def make_version6_receipt(files, commit, runtime_executable=_PINNED_JAVA):
             "complete process traces exposed the environment")
     traces, aborted = normalize_rich_traces(raw_traces)
     events = _events(traces, protected)
-    _validate_calls(events, protected)
+    _validate_calls(events, protected, version6_raw=True)
     verify_launcher_input(metadata)
     jdi_bridge.verify_worker_launch_v6(
         events, metadata["worker_pid"], launcher_sha256=metadata["launcher_sha256"],

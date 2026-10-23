@@ -229,6 +229,73 @@ class FocusedReplayTest(unittest.TestCase):
         self.assertEqual(actual_output_v6.verify_observer(
             packed([*unprotected, *rows]), interpreter, paths, identities,
             producer, producer)["status"], "PROVED_V6_OUTPUT_OBSERVER")
+        unprotected_status = ('1.000002 newfstatat(AT_FDCWD, '
+                              '"/usr/lib/loader", {st_mode=S_IFREG}, 0) = 0')
+        self.assertEqual(actual_output_v6.verify_observer(
+            packed([unprotected[0], unprotected_status, unprotected[2], *rows]),
+            interpreter, paths, identities, producer, producer)["status"],
+            "PROVED_V6_OUTPUT_OBSERVER")
+        parent = str(Path(paths[0]).parent)
+        basename = Path(paths[0]).name
+        relative_prefix = (
+            f'1.000001 openat(AT_FDCWD, "{parent}", O_RDONLY|O_DIRECTORY) = 7<{parent}>',
+            f'1.000002 renameat(7<{parent}>, "{basename}", '
+            f'7<{parent}>, "{basename}.held") = 0',
+            f'1.000003 renameat(7<{parent}>, "{basename}.held", '
+            f'7<{parent}>, "{basename}") = 0',
+            f'1.000004 close(7<{parent}>) = 0')
+        with self.subTest(relative_rename=True):
+            with self.assertRaisesRegex(Rejected, "observer protected launch action"):
+                actual_output_v6.verify_observer(
+                    packed([*relative_prefix, *rows]), interpreter, paths,
+                    identities, producer, producer)
+        for operation in (
+                f'newfstatat(7<{parent}>, "{basename}", '
+                '{st_mode=S_IFREG}, 0) = 0',
+                f'statx(7<{parent}>, "{basename}", 0, STATX_BASIC_STATS, '
+                '{stx_mode=S_IFREG}) = 0'):
+            with self.subTest(relative_status=operation.split("(", 1)[0]):
+                with self.assertRaisesRegex(Rejected, "observer protected launch action"):
+                    actual_output_v6.verify_observer(
+                        packed([relative_prefix[0], "1.000002 " + operation,
+                                relative_prefix[-1].replace("1.000004", "1.000003"),
+                                *rows]), interpreter, paths, identities,
+                        producer, producer)
+        for label, operation in (
+                ("relative_cwd", f'stat("{basename}", {{st_mode=S_IFREG}}) = 0'),
+                ("empty_path", 'newfstatat(7</usr/lib/loader>, "", '
+                 '{st_mode=S_IFREG}, AT_EMPTY_PATH) = 0'),
+                ("lexical_absolute", f'rename("{parent}/./{basename}", '
+                 '"/usr/lib/loader") = 0'),
+                ("double_slash", f'stat("/{paths[0]}", '
+                 '{st_mode=S_IFREG}) = 0')):
+            with self.subTest(path_form=label):
+                with self.assertRaisesRegex(Rejected, "observer protected launch action"):
+                    actual_output_v6.verify_observer(
+                        packed([unprotected[0], "1.000002 " + operation,
+                                unprotected[2], *rows]), interpreter, paths,
+                        identities, producer, producer)
+        equal_time_status = (f'2.000004 newfstatat(7<{parent}>, "{basename}", '
+                             '{st_mode=S_IFREG}, 0) = 0')
+        with self.assertRaisesRegex(Rejected, "observer protected action"):
+            actual_output_v6.verify_observer(
+                packed([relative_prefix[0], *rows[:4], equal_time_status,
+                        relative_prefix[-1].replace("1.000004", "2.000004"),
+                        *rows[4:]]), interpreter, paths, identities,
+                producer, producer)
+        live_mention = '7<' + paths[0] + '>'
+        harmless = (f'1.000002 write(1<pipe:[8]>, {json.dumps(live_mention)}, '
+                    f'{len(live_mention)}) = {len(live_mention)}')
+        self.assertEqual(actual_output_v6.verify_observer(
+            packed([unprotected[0], harmless, unprotected[2], *rows]),
+            interpreter, paths, identities, producer, producer)["status"],
+            "PROVED_V6_OUTPUT_OBSERVER")
+        with self.assertRaisesRegex(Rejected, "protected descriptor"):
+            actual_output_v6.verify_observer(
+                packed([unprotected[0],
+                        f'1.000002 read(7<{paths[0]}>, "x", 1) = 1',
+                        unprotected[2], *rows]), interpreter, paths,
+                identities, producer, producer)
         mention = (f'1.000004 write(1<pipe:[8]>, '
                    f'{json.dumps(paths[0])}, {len(paths[0])}) = {len(paths[0])}')
         self.assertEqual(actual_output_v6.verify_observer(

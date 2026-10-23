@@ -20,6 +20,28 @@ def archived(rows):
 
 
 class ActualTraceTest(unittest.TestCase):
+    def test_structural_identity_ignores_quoted_live_descriptor_text(self):
+        protected = "/home/test/protected-output"
+        mentioned = f"7<{protected}>"
+        prefix = (b'1.000001 openat(AT_FDCWD, "/usr/lib/loader", O_RDONLY) = '
+                  b'7</usr/lib/loader>\n')
+        payload = (f'1.000002 write(1<pipe:[8]>, "{mentioned}", '
+                   f'{len(mentioned)}) = {len(mentioned)}\n').encode()
+        suffix = (b'1.000003 close(7</usr/lib/loader>) = 0\n'
+                  b'1.000004 +++ exited with 0 +++\n')
+        for strict in (False, True):
+            with self.subTest(version6_raw=strict):
+                good = checked_projection(
+                    archived({"trace.41": prefix + payload + suffix}),
+                    (protected,), version6_raw=strict)
+                self.assertEqual(good["threads"], 1)
+                changed = (f'1.000002 read(7<{protected}>, "x", 1) = 1\n').encode()
+                with self.assertRaisesRegex(TraceRejected,
+                                            "protected descriptor"):
+                    checked_projection(
+                        archived({"trace.41": prefix + changed + suffix}),
+                        (protected,), version6_raw=strict)
+
     def test_connected_socket_projection_keeps_complete_call(self):
         calls = (
             b'write(56<TCPv6:[[::ffff:127.0.0.1]:1234->[::ffff:127.0.0.1]:5678]>, "a->b", 4) = 4',

@@ -216,7 +216,7 @@ def _version6_fd_token(call, index, *, directory=False):
     return number, end
 
 
-def _project_descriptors(call, *, version6_raw=False):
+def _project_descriptors(call, *, version6_raw=False, descriptors=None):
     output = []
     quoted = False
     escaped = False
@@ -246,16 +246,24 @@ def _project_descriptors(call, *, version6_raw=False):
                 if end < 0:
                     raise TraceRejected("rich directory descriptor is incomplete")
                 end += 1
+            if descriptors is not None:
+                descriptors.append(("AT_FDCWD", call[index + len("AT_FDCWD<"):end - 1]))
             output.append("AT_FDCWD")
             index = end
             continue
         if version6_raw and V6_FD_START.match(call, index):
             number, end = _version6_fd_token(call, index)
+            if descriptors is not None:
+                closing = end - (len("(deleted)") if call[index:end].endswith(
+                    "(deleted)") else 0)
+                descriptors.append((number, call[index + len(number) + 1:closing - 1]))
             output.append(number)
             index = end
             continue
         match = FD_TOKEN.match(call, index) if not version6_raw else None
         if match:
+            if descriptors is not None:
+                descriptors.append((match[1], match[2]))
             output.append(match[1])
             index = match.end()
             continue
@@ -318,7 +326,7 @@ def _check_operand(value, table, protected):
         raise TraceRejected("protected descriptor operand differs")
 
 
-def _validate_calls(events, protected, strict_outputs=()):
+def _validate_calls(events, protected, strict_outputs=(), *, version6_raw=False):
     tables = {}
     written = set()
     output_owners = {}
@@ -405,7 +413,10 @@ def _validate_calls(events, protected, strict_outputs=()):
             target = re.match(r"dup[23]\([^,]+, ([0-9]+)(?:<([^<>\r\n]+)>)?", call)
             if target and table.get(target[1]) in protected:
                 raise TraceRejected("protected descriptor reassignment is incomplete")
-        for fd, path in FD_TOKEN.findall(call):
+        descriptors = []
+        _project_descriptors(call, version6_raw=version6_raw,
+                             descriptors=descriptors)
+        for fd, path in descriptors:
             prior = table.get(fd)
             if path in protected and prior is not None and prior != path:
                 raise TraceRejected("protected descriptor identity changed")
@@ -505,7 +516,8 @@ def checked_projection(raw, protected=(), *, strict_outputs=(), version6_raw=Fal
             raise TraceRejected("rich trace exposed the environment")
         normalized, aborted = normalize_rich_traces(traces)
         events = _events(normalized, tuple(protected))
-        _validate_calls(events, set(protected), set(strict_outputs))
+        _validate_calls(events, set(protected), set(strict_outputs),
+                        version6_raw=version6_raw)
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w") as legacy:
             for tid in sorted(normalized, key=int):
