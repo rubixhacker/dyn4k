@@ -41,7 +41,7 @@ def successful_execve(call):
         raise Rejected("worker executable or argument is not UTF-8") from error
 
 
-def worker_exec(call):
+def worker_exec(call, expected_executable):
     if not call.startswith("execve(") or not call.endswith(" = 0"):
         return None
     parsed = successful_execve(call)
@@ -49,16 +49,19 @@ def worker_exec(call):
         if "GradleWorkerMain" in call:
             raise Rejected("worker argv is truncated or malformed")
         return None
-    return parsed if len(parsed[1]) >= 3 and parsed[1][-2] == WORKER_MAIN else None
+    return parsed if (parsed[0] == expected_executable and len(parsed[1]) >= 3 and
+                      parsed[1][-2] == WORKER_MAIN) else None
 
 
-def select_worker_exec(traces):
+def select_worker_exec(traces, expected_executable):
+    if type(expected_executable) is not str or not expected_executable.startswith("/"):
+        raise Rejected("configured worker executable is malformed")
     candidates = []
     for tid, data in traces.items():
         for line in data.decode("utf-8").splitlines():
             if " execve(" not in line:
                 continue
-            parsed = worker_exec(line.split(" ", 1)[1])
+            parsed = worker_exec(line.split(" ", 1)[1], expected_executable)
             if parsed is not None:
                 candidates.append((tid, *parsed))
     if len(candidates) != 1:

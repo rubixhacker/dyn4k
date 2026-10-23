@@ -520,6 +520,50 @@ class OutputTest(unittest.TestCase):
 
 
 class StartupTest(unittest.TestCase):
+    def test_penultimate_shell_marker_does_not_replace_selected_jvm(self):
+        from numeric_producer import _startup
+        from numeric_producer_trace import select_worker_exec
+        trace = TransportTest().trace()["100"]
+        trace = trace.replace(
+            b'1.000000 execve("/jdk/bin/java", ["/jdk/bin/java", "@/work/args.txt", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0 /* 0 vars */) = 0',
+            b'0.950000 execve("/jdk/bin/sh", ["sh", "-c", "exec /jdk/bin/java @/work/args.txt $1 $2", "sh", "worker.org.gradle.process.internal.worker.GradleWorkerMain", "executor"], 0x0) = 0\n'
+            b'1.000000 execve("/jdk/bin/java", ["/jdk/bin/java", "@/work/args.txt", "worker.org.gradle.process.internal.worker.GradleWorkerMain", "executor"], 0x0 /* 0 vars */) = 0')
+        trace = trace.replace(
+            b'1.200000 openat',
+            b'1.140000 openat(AT_FDCWD, "/work/agent.jar", O_RDONLY) = 5</work/agent.jar>\n'
+            b'1.150000 fstat(5</work/agent.jar>, {st_mode=S_IFREG|0644, st_size=3, st_dev=makedev(0, 1), st_ino=44}) = 0\n'
+            b'1.160000 read(5</work/agent.jar>, "JAR", 3) = 3\n'
+            b'1.170000 close(5</work/agent.jar>) = 0\n'
+            b'1.200000 openat')
+        traces = {"99": b'0.900000 clone(flags=SIGCHLD) = 100\n2.100000 +++ exited with 0 +++\n',
+                  "100": trace}
+        selected_exec = select_worker_exec(traces, "/jdk/bin/java")
+        self.assertEqual(selected_exec[:2], ("100", "/jdk/bin/java"))
+        _, _, _, response_path, response, _ = _startup(
+            {"worker-classpath.txt": b"-cp\n/a\n"}, selected_exec)
+        identity = {"device_major": 0, "device_minor": 1, "inode": 44, "size": 3}
+        self.assertEqual(verify_stable_input(traces, "/work/agent.jar", identity, "100",
+                                             b"JAR", selected_exec[1:])["reads"], 1)
+        proof = verify_transport(traces, "/work/mirror.log", b"hello\n", selected_exec,
+                                 response_path, response)
+        self.assertEqual((proof["worker_pid"], proof["parent_pids"]), ("100", ["99"]))
+        for forwarded in (trace.replace(b'execve("/jdk/bin/sh"', b'execve("/opt/launcher"'),
+                          trace.replace(b'["sh", "-c"', b'["/jdk/bin/java", "-c"')):
+            with self.subTest(forwarded=forwarded.splitlines()[0]):
+                self.assertEqual(select_worker_exec({**traces, "100": forwarded},
+                                                    "/jdk/bin/java"), selected_exec)
+        wrong_jvm = trace.replace(b'1.000000 execve("/jdk/bin/java"',
+                                  b'1.000000 execve("/jdk/bin/other-java"')
+        with self.assertRaisesRegex(Rejected, "worker invocation"):
+            select_worker_exec({**traces, "100": wrong_jvm}, "/jdk/bin/java")
+        duplicate_jvm = trace.replace(
+            b'1.200000 openat',
+            b'1.180000 execve("/jdk/bin/java", ["/jdk/bin/java", "@/work/args.txt", '
+            b'"worker.org.gradle.process.internal.worker.GradleWorkerMain", "executor"], 0x0) = 0\n'
+            b'1.200000 openat')
+        with self.assertRaisesRegex(Rejected, "worker invocation"):
+            select_worker_exec({**traces, "100": duplicate_jvm}, "/jdk/bin/java")
+
     def test_forwarding_shell_and_selected_jvm_share_transport_identity(self):
         from numeric_producer import _startup
         from numeric_producer_trace import select_worker_exec
@@ -538,7 +582,7 @@ class StartupTest(unittest.TestCase):
         traces = {"99": b'0.900000 clone(flags=SIGCHLD) = 100\n2.100000 +++ exited with 0 +++\n',
                   "100": trace}
         raw = {"worker-classpath.txt": b"-cp\n/a\n"}
-        selected_exec = select_worker_exec(traces)
+        selected_exec = select_worker_exec(traces, "/jdk/bin/java")
         executable, argv, _, response_path, response, _ = _startup(raw, selected_exec)
         self.assertEqual(executable, "/jdk/bin/java")
         self.assertEqual(selected_exec[0], "100")
@@ -594,11 +638,12 @@ class StartupTest(unittest.TestCase):
             '1.100000 execve("/jdk/bin/java", ' + json.dumps(argv) + ', 0x0) = 0',
         ]
         traces = {"100": ("\n".join(rows) + "\n").encode()}
-        self.assertEqual(_startup(raw, select_worker_exec(traces))[:3],
+        self.assertEqual(_startup(raw, select_worker_exec(traces, "/jdk/bin/java"))[:3],
                          ("/jdk/bin/java", argv, "/bootstrap.jar"))
         with self.assertRaisesRegex(Rejected, "worker invocation"):
             select_worker_exec({"100": ("\n".join(rows + [
-                rows[1].replace('1.100000', '1.200000')]) + "\n").encode()})
+                rows[1].replace('1.100000', '1.200000')]) + "\n").encode()},
+                "/jdk/bin/java")
 
     def test_public_replay_requires_reviewed_loader_relationship(self):
         from numeric_producer import verify_witness_loaders

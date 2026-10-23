@@ -33,6 +33,7 @@ WRAPPER = "tools/numerical/portable/src/jvmTest/kotlin/portable/NumericProbeMatr
 WRAPPER_SHA256 = "6e9d5a3436f2d10f0a40606a21b8cafafb548f8911e993725b2fda97f12a260a"
 OBSERVER = "tools/numerical/portable/class_witness/NumericClassWitness.java"
 OBSERVER_SHA256 = "493d57d0635c6c5b519b6009250df0d82d0d97e0b065aa80160fe053b20d8983"
+WITNESS_JDK = Path("/tmp/dyn4k-tools/jdk21")
 KEYS = {"schema", "candidate_commit", "source_sha256", "fixture_source_sha256",
         "trace_sha256", "primary_receipt_sha256", "geometry_case_sha256", "artifact_sha256",
         "runtime", "selected_test", "probe", "files", "proof"}
@@ -490,7 +491,7 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
         require(entry is not None, "class witness committed source is absent")
         java_source = entry.read()
     compiler = Path(selected_exec[1]).parents[1]
-    require(compiler.resolve() == Path("/tmp/dyn4k-tools/jdk21").resolve(),
+    require(compiler.resolve() == WITNESS_JDK.resolve(),
             "class witness compiler runtime differs")
     rebuilt = build_agent(java_source, compiler, scratch / "witness-rebuilt.jar",
                           scratch / "witness-compile")
@@ -607,11 +608,15 @@ def _proof(raw, receipt, cases, artifacts, scratch):
                 identity["size"] == len(raw[raw_name]),
                 "class witness captured file identity is malformed")
     traces = {name.split(".")[-1]: data for name, data in raw.items() if name.startswith("process/")}
-    selected_exec = select_worker_exec(traces)
-    executable, argv, startup, response_path, response, tokens = _startup(raw, selected_exec)
     runtime = receipt["runtime"]
-    require(executable == runtime.get("executable") and Path(executable).is_file() and
-            digest(executable) == runtime.get("executable_sha256"), "worker runtime executable differs")
+    expected_executable = runtime.get("executable")
+    require(type(expected_executable) is str and
+            expected_executable == str(WITNESS_JDK / "bin/java") and
+            Path(expected_executable).is_file() and
+            digest(expected_executable) == runtime.get("executable_sha256"),
+            "worker runtime executable differs")
+    selected_exec = select_worker_exec(traces, expected_executable)
+    executable, argv, startup, response_path, response, tokens = _startup(raw, selected_exec)
     proof = verify_transport(traces, metadata["mirror"], raw["mirror.log"], selected_exec,
                              response_path, response, mirror_identity=mirror_identity)
     require(proof["worker_pid"] == selected_exec[0], "selected worker transport identity differs")
@@ -798,8 +803,12 @@ def capture(output, scratch):
     (output / "source.tar").write_bytes(source)
     agent = output / "class-witness-agent.jar"
     witness = output / "class-witness.log"
+    configured_jdk = Path(env["JAVA_HOME"])
+    expected_executable = str(configured_jdk / "bin/java")
+    require(configured_jdk == WITNESS_JDK and Path(expected_executable).is_file(),
+            "configured worker executable is unavailable")
     build_agent((PORTABLE / "class_witness/NumericClassWitness.java").read_bytes(),
-                Path(os.environ["JAVA_HOME"]), agent, scratch / "witness-compile")
+                configured_jdk, agent, scratch / "witness-compile")
     agent_identity = captured_file_identity(agent)
     agent_sha = digest(agent)
     mirror = output / "mirror.log"
@@ -833,7 +842,8 @@ def capture(output, scratch):
                 for trace in (output / "process").glob("trace.*"):
                     require(trace.stat().st_size <= MAX_TRACE_MEMBER, "capture trace member exceeds budget")
                     for line in trace.read_text(errors="strict").splitlines():
-                        if " execve(" in line and (parsed := worker_exec(line.split(" ", 1)[1])):
+                        if " execve(" in line and (parsed := worker_exec(
+                                line.split(" ", 1)[1], expected_executable)):
                             matches = [arg[1:] for arg in parsed[1] if arg.startswith("@")]
                             if matches and Path(matches[0]).is_file():
                                 require(len(matches) == 1, "multiple worker response files")
@@ -856,7 +866,7 @@ def capture(output, scratch):
     after = archive_classes(class_root)
     require(after == before, "compiled payload changed during selected invocation")
     traces = {path.name.split(".")[-1]: path.read_bytes() for path in (output / "process").glob("trace.*")}
-    worker, executable, selected_argv = select_worker_exec(traces)
+    worker, executable, selected_argv = select_worker_exec(traces, expected_executable)
     argv = list(selected_argv)
     if not any(value.startswith("@") for value in argv):
         (output / "direct-classpath.json").write_bytes(encoded(argv))
