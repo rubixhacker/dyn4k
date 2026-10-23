@@ -1,6 +1,7 @@
 import hashlib
 import json
 import math
+import os
 import re
 import xml.etree.ElementTree as ET
 from copy import deepcopy
@@ -836,12 +837,17 @@ def verify_candidate_identity(receipt, publication, commit, source_sha256,
 def verify_numeric_probe(lane, commit, source_sha256, trace_sha256, artifacts,
                          runtime_proof):
     lane = Path(lane)
+    _numeric_sidecar_schema(lane)
     path = lane / "numeric-probe-receipt.json"
     if not path.exists():
         return False
-    if not path.is_file():
-        raise Rejected("numeric probe receipt is not a file")
-    receipt = json.loads(path.read_text())
+    if not path.is_file() or path.is_symlink() or path.stat().st_size > 1024 * 1024:
+        raise Rejected("numeric probe receipt is not a bounded regular file")
+    from numeric_producer import decode, verify as verify_bound_numeric_producer
+    receipt = decode(path.read_bytes())
+    if isinstance(receipt, dict) and receipt.get("schema") == "portable-binary64-probe-receipt/2":
+        return verify_bound_numeric_producer(lane, commit, source_sha256, trace_sha256,
+                                             artifacts, runtime_proof)
     required = {"schema", "candidate_commit", "source_sha256", "trace_sha256",
                 "artifact_sha256", "runtime", "method", "xml_sha256",
                 "gradle_log_sha256", "probe"}
@@ -915,6 +921,64 @@ def verify_numeric_probe(lane, commit, source_sha256, trace_sha256, artifacts,
     return True
 
 
+def _numeric_sidecar_schema(lane):
+    lane = Path(lane)
+    receipt_path = lane / "numeric-probe-receipt.json"
+    raw_path = lane / "numeric-probe"
+    receipt_present = receipt_path.exists() or receipt_path.is_symlink()
+    raw_present = raw_path.exists() or raw_path.is_symlink()
+    if not receipt_present:
+        if raw_present:
+            raise Rejected("numeric probe directory has no receipt")
+        return None
+    if (not receipt_path.is_file() or receipt_path.is_symlink() or
+            receipt_path.stat().st_size > 1024 * 1024):
+        raise Rejected("numeric probe receipt is not a bounded regular file")
+    from numeric_producer import MAX_MEMBERS, decode
+    receipt = decode(receipt_path.read_bytes())
+    schema = receipt.get("schema") if isinstance(receipt, dict) else None
+    if schema == "portable-binary64-probe-receipt/1":
+        if raw_present:
+            raise Rejected("numeric probe schema 1 has raw sidecar data")
+    elif schema == "portable-binary64-probe-receipt/2":
+        if lane.name != "jvm" or not raw_path.is_dir() or raw_path.is_symlink():
+            raise Rejected("numeric probe schema 2 directory differs")
+        files = receipt.get("files")
+        if (not isinstance(files, dict) or len(files) > MAX_MEMBERS or
+                any(type(name) is not str for name in files)):
+            raise Rejected("numeric probe raw sidecar data is invalid")
+        actual_files, actual_dirs = set(), set()
+        pending = [raw_path]
+        members = 0
+        while pending:
+            with os.scandir(pending.pop()) as entries:
+                for entry in entries:
+                    members += 1
+                    if members > MAX_MEMBERS + 1:
+                        raise Rejected("numeric probe raw sidecar member budget exceeded")
+                    if entry.is_symlink():
+                        raise Rejected("numeric probe raw sidecar data is invalid")
+                    path = Path(entry.path)
+                    name = path.relative_to(raw_path).as_posix()
+                    if entry.is_dir(follow_symlinks=False):
+                        if name != "process":
+                            raise Rejected("numeric probe raw sidecar directory differs")
+                        actual_dirs.add(name)
+                        pending.append(path)
+                    elif entry.is_file(follow_symlinks=False):
+                        if len(actual_files) >= MAX_MEMBERS:
+                            raise Rejected("numeric probe raw sidecar member budget exceeded")
+                        actual_files.add(name)
+                    else:
+                        raise Rejected("numeric probe raw sidecar data is invalid")
+        expected_dirs = {"process"} if any(name.startswith("process/") for name in files) else set()
+        if actual_files != set(files) or actual_dirs != expected_dirs:
+            raise Rejected("numeric probe raw sidecar data differs from receipt")
+    else:
+        raise Rejected("numeric probe receipt schema differs")
+    return schema
+
+
 def verify_candidate_inventory(lane, expected_ids, hosts, commit=None, source_sha256=None):
     from run import OTHER_LANES, other_lane_status
 
@@ -929,8 +993,8 @@ def verify_candidate_inventory(lane, expected_ids, hosts, commit=None, source_sh
             {path.name for path in cases.iterdir()} != expected_files or
             any(path.is_symlink() or not path.is_file() for path in cases.iterdir())):
         raise Rejected("candidate case file set differs")
-    probe = lane / "numeric-probe-receipt.json"
-    expected_receipts = {"receipt.json"} | ({probe.name} if probe.is_file() else set())
+    probe_schema = _numeric_sidecar_schema(lane)
+    expected_receipts = {"receipt.json"} | ({"numeric-probe-receipt.json"} if probe_schema else set())
     if ({path.name for path in lane.glob("*receipt*.json")} != expected_receipts or
             any(path.is_symlink() or not path.is_file()
                 for path in lane.glob("*receipt*.json"))):
@@ -941,11 +1005,6 @@ def verify_candidate_inventory(lane, expected_ids, hosts, commit=None, source_sh
     for path in root.iterdir():
         if path.name not in declared | allowed_root_files or path.is_symlink():
             raise Rejected("candidate receipt has an undeclared producer")
-    for path in root.rglob("*receipt*.json"):
-        if path.parent.parent != root or path.parent.name not in declared:
-            raise Rejected("candidate receipt has an undeclared producer")
-        if path.name not in {"receipt.json", "numeric-probe-receipt.json"}:
-            raise Rejected("candidate receipt set differs")
     absent_fields = {"host", "status", "reason", "candidate_commit", "source_sha256",
                      "expected_cases", "executed_cases", "skipped", "qualification"}
     for name in declared:
@@ -957,6 +1016,8 @@ def verify_candidate_inventory(lane, expected_ids, hosts, commit=None, source_sh
         receipt_path = sibling / "receipt.json"
         if name == lane.name:
             continue
+        if name in hosts:
+            _numeric_sidecar_schema(sibling)
         if (not isinstance(commit, str) or not commit or
                 not isinstance(source_sha256, str) or not source_sha256):
             raise Rejected("candidate inventory identity is required")
@@ -996,6 +1057,11 @@ def verify_candidate_inventory(lane, expected_ids, hosts, commit=None, source_sh
               any(path.is_symlink() or not path.is_file()
                   for path in (sibling / "cases").iterdir())):
             raise Rejected("candidate captured sibling receipt differs")
+    for path in root.rglob("*receipt*.json"):
+        if path.parent.parent != root or path.parent.name not in declared:
+            raise Rejected("candidate receipt has an undeclared producer")
+        if path.name not in {"receipt.json", "numeric-probe-receipt.json"}:
+            raise Rejected("candidate receipt set differs")
 
 
 def verify_arithmetic_captures(root, lane, commit, source_sha256, artifact_sha256):
@@ -1153,8 +1219,12 @@ def compare_host(baseline, lane, frozen_ids, baseline_attestation=None,
                             for row in results) else
                           "UNPASSED"),
                "qualification": "UNPASSED",
-               "numeric_probe": ("UNPASSED_UNBOUND_PRODUCER" if probe_archive_consistent else
+               "numeric_probe": (probe_archive_consistent["status"]
+                                 if isinstance(probe_archive_consistent, dict) else
+                                 "UNPASSED_UNBOUND_PRODUCER" if probe_archive_consistent else
                                  "UNPASSED_NOT_EXECUTED"),
+               "numeric_probe_reason": (probe_archive_consistent.get("reason")
+                                        if isinstance(probe_archive_consistent, dict) else None),
                "operation_binding": ("VERIFIED_ARITHMETIC_BINDING" if
                                      arithmetic_verified else "UNPASSED_NOT_EXECUTED"),
                "baseline_jar_sha256": manifest["baseline_jar_sha256"],
