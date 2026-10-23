@@ -149,6 +149,8 @@ PROSPECTIVE_V6_SOURCE_REVISION = "0d5799e1c84f76c504b53f3eaf7468bca20a60eb"
 FAILED_PRIVATE_LAUNCH_SOURCE_REVISION = "e451ccf010c8f1c11a428d63806795f455086af0"
 PRIVATE_LAUNCH_SOURCE_REVISION = "42df45088321a592323ebb02ba9c1a1d6fb655e0"
 BASELINE_COMPAT_SOURCE_REVISION = "b133e6e886dc17bff8ad8ccc3654d6538da18da8"
+OUTPUT_PROVENANCE_SOURCE_REVISION = "7fa5f1756ec8f5472bfc2e288b8b8b32aab648e5"
+FAILED_OUTPUT_WRAPPER_SOURCE_REVISION = "317c8e05fc5937b63c151f34e8df4e015b32c863"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -167,11 +169,14 @@ APPROVED_PROSPECTIVE_BASELINE_COMPAT_CHECKERS = {
     **APPROVED_PROSPECTIVE_PRIVATE_LAUNCH_CHECKERS,
     "run.py": "2f53b8baed1907370b16b0ce48dbe039c396445f27c74c5f843e7ca06650c01b",
 }
+APPROVED_PROSPECTIVE_OUTPUT_PROVENANCE_CHECKERS = {
+    **APPROVED_PROSPECTIVE_BASELINE_COMPAT_CHECKERS,
+}
 APPROVED_PROSPECTIVE_EXECUTABLE_SHARED = {
     path: APPROVED_POLICY[path] for path in
     ("tools/numerical/compare.py", "tools/numerical/physical.py")
 }
-PINNED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_BASELINE_COMPAT_CHECKERS)
+PINNED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_OUTPUT_PROVENANCE_CHECKERS)
 APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS = {
     **APPROVED_PROSPECTIVE_CHECKERS,
     "prospective_compare.py": "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f",
@@ -399,6 +404,23 @@ BASELINE_COMPAT_CAPTURE_DEPENDENCIES = {
     "tools/numerical/portable/actual_capture_receipt.py":
         "e9e64ced059c60fb4b02b7d3b5d5ac51514946ff4687a4f0fe87705a480c193a",
 }
+OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES = {
+    **BASELINE_COMPAT_CAPTURE_DEPENDENCIES,
+    "tools/numerical/portable/actual_arithmetic.py":
+        "4d2c4aa88bc85b96f7abfa196d73be08a50312408412da8ceb36c0bb8c7a0f6f",
+    "tools/numerical/portable/actual_capture_receipt.py":
+        "5a6f4587cfc4d5430893d3d3e3dafb6b350d1d97dc1aefab582a0c0484b76cbd",
+    "tools/numerical/portable/actual_output_v6.py":
+        "3a79676fd5a5f35340947e904808d97e97a6d7204eea013408e156e6f8ed2fe7",
+    "tools/numerical/portable/actual_trace.py":
+        "5b38a9081b9b57158eba519dc625f416f647fc5389dd00d3d24f69ef1a5a2210",
+    "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
+        "bcb2ac53bd29418708d493b4f098d9a49469787c6d19ca7e2c01fa631083f60c",
+    "tools/numerical/portable/capture_actual.py":
+        "c92b50ca2eb2502e1098a2ef6a532f6bccc4978ca345431a59df514a19b3fb55",
+    "tools/numerical/portable/src/jvmTest/kotlin/portable/FocusedBooleanArithmeticSourceTest.kt":
+        "b8eb3a06b6b0c8738767810c84d6778f361a264d12d3b6b10ed3d67c82833591",
+}
 P2_V6_DEPENDENCIES = {
     **P2_EXECUTABLE_LOCAL_DEPENDENCIES,
     "tools/numerical/portable/build.gradle.kts":
@@ -440,6 +462,17 @@ P2_BASELINE_COMPAT_DEPENDENCIES = {
     "tools/numerical/portable/actual_capture_receipt.py":
         "e9e64ced059c60fb4b02b7d3b5d5ac51514946ff4687a4f0fe87705a480c193a",
 }
+P2_OUTPUT_PROVENANCE_DEPENDENCIES = {
+    **P2_BASELINE_COMPAT_DEPENDENCIES,
+    **{path: OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES[path] for path in (
+        "tools/numerical/portable/actual_arithmetic.py",
+        "tools/numerical/portable/actual_capture_receipt.py",
+        "tools/numerical/portable/actual_output_v6.py",
+        "tools/numerical/portable/actual_trace.py",
+        "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py",
+        "tools/numerical/portable/capture_actual.py",
+        "tools/numerical/portable/src/jvmTest/kotlin/portable/FocusedBooleanArithmeticSourceTest.kt")},
+}
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_JVM8_PRODUCERS = {
     **P2_ROTATION_PREMISE_PRODUCERS,
@@ -460,7 +493,16 @@ APPROVED_P2_BASELINE_COMPAT_PRODUCERS = {
     **APPROVED_P2_PRIVATE_LAUNCH_PRODUCERS,
     "run.py": "2f53b8baed1907370b16b0ce48dbe039c396445f27c74c5f843e7ca06650c01b",
 }
-PINNED_P2_CURRENT_LOCAL_PRODUCERS = dict(APPROVED_P2_BASELINE_COMPAT_PRODUCERS)
+APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS = {
+    **APPROVED_P2_BASELINE_COMPAT_PRODUCERS,
+    "actual_arithmetic.py":
+        "4d2c4aa88bc85b96f7abfa196d73be08a50312408412da8ceb36c0bb8c7a0f6f",
+    "capture_actual.py":
+        "c92b50ca2eb2502e1098a2ef6a532f6bccc4978ca345431a59df514a19b3fb55",
+    "actual_output_v6.py":
+        "3a79676fd5a5f35340947e904808d97e97a6d7204eea013408e156e6f8ed2fe7",
+}
+PINNED_P2_CURRENT_LOCAL_PRODUCERS = dict(APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS)
 APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS = {
     **APPROVED_P2_PRODUCERS,
     "baseline_capture.py": "b7bb228bde030d7fd6949ae3e7ca743a92060b436797835c6e4f7e12d779ad6c",
@@ -920,10 +962,15 @@ def _prospective_checker_binding(repository, candidate_sha):
         return checked.returncode == 0
 
     executable_window = descends_from(PROSPECTIVE_EXECUTABLE_CHECKER_REVISION)
+    output_provenance_window = descends_from(OUTPUT_PROVENANCE_SOURCE_REVISION)
     baseline_compat_window = descends_from(BASELINE_COMPAT_SOURCE_REVISION)
     private_launch_window = descends_from(PRIVATE_LAUNCH_SOURCE_REVISION)
     v6_window = descends_from(PROSPECTIVE_V6_SOURCE_REVISION)
-    if baseline_compat_window:
+    if output_provenance_window:
+        approved = APPROVED_PROSPECTIVE_OUTPUT_PROVENANCE_CHECKERS
+    elif descends_from(FAILED_OUTPUT_WRAPPER_SOURCE_REVISION):
+        raise ValueError("prospective policy/checker blob differs: incomplete output source")
+    elif baseline_compat_window:
         approved = APPROVED_PROSPECTIVE_BASELINE_COMPAT_CHECKERS
     elif private_launch_window:
         approved = APPROVED_PROSPECTIVE_PRIVATE_LAUNCH_CHECKERS
@@ -981,7 +1028,9 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
         if hashlib.sha256(committed).hexdigest() != expected:
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
-    executable_dependencies = (BASELINE_COMPAT_CAPTURE_DEPENDENCIES
+    executable_dependencies = (OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES
+                               if output_provenance_window else
+                               BASELINE_COMPAT_CAPTURE_DEPENDENCIES
                                if baseline_compat_window else
                                PRIVATE_LAUNCH_CAPTURE_DEPENDENCIES
                                if private_launch_window else
@@ -989,7 +1038,7 @@ def _prospective_checker_binding(repository, candidate_sha):
                                PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES
                                if executable_window else {})
     local_dependencies = (APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
-                          BASELINE_COMPAT_CAPTURE_DEPENDENCIES)
+                          OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES)
     for relative, expected in local_dependencies.items():
         local = Path(__file__).resolve().parents[2] / relative
         try:
@@ -1089,6 +1138,7 @@ def _p2_producer_binding(repository, candidate_sha):
 
     if not descends_from(PROSPECTIVE_CHECKER_REVISION):
         raise ValueError("candidate predates reviewed P2 raw producer revision")
+    output_provenance_window = descends_from(OUTPUT_PROVENANCE_SOURCE_REVISION)
     baseline_compat_window = descends_from(BASELINE_COMPAT_SOURCE_REVISION)
     private_launch_window = descends_from(PRIVATE_LAUNCH_SOURCE_REVISION)
     v6_window = descends_from(PROSPECTIVE_V6_SOURCE_REVISION)
@@ -1098,7 +1148,11 @@ def _p2_producer_binding(repository, candidate_sha):
     rotation_premise = descends_from(P2_ROTATION_PREMISE_SOURCE_REVISION)
     boolean_jdi_final = descends_from(P2_BOOLEAN_JDI_FINAL_SOURCE_REVISION)
     boolean_jdi = descends_from(P2_BOOLEAN_JDI_SOURCE_REVISION)
-    if baseline_compat_window:
+    if output_provenance_window:
+        approved = APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS
+    elif descends_from(FAILED_OUTPUT_WRAPPER_SOURCE_REVISION):
+        raise ValueError("reviewed P2 raw producer blob differs: incomplete output source")
+    elif baseline_compat_window:
         approved = APPROVED_P2_BASELINE_COMPAT_PRODUCERS
     elif private_launch_window:
         approved = APPROVED_P2_PRIVATE_LAUNCH_PRODUCERS
@@ -1161,14 +1215,19 @@ def _p2_producer_binding(repository, candidate_sha):
     for name, local_approved in PINNED_P2_CURRENT_LOCAL_PRODUCERS.items():
         relative = f"{source_dir}/{name}"
         local = Path(__file__).resolve().parents[2] / relative
+        if hashlib.sha256(local.read_bytes()).hexdigest() != local_approved:
+            raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
+    for name, digest in approved.items():
+        relative = f"{source_dir}/{name}"
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "-C", str(repository), "show",
              f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
-        if (hashlib.sha256(local.read_bytes()).hexdigest() != local_approved
-                or hashlib.sha256(committed).hexdigest() != approved[name]):
+        if hashlib.sha256(committed).hexdigest() != digest:
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     if jdk21_jdi:
-        dependencies = (P2_BASELINE_COMPAT_DEPENDENCIES
+        dependencies = (P2_OUTPUT_PROVENANCE_DEPENDENCIES
+                        if output_provenance_window else
+                        P2_BASELINE_COMPAT_DEPENDENCIES
                         if baseline_compat_window else
                         P2_PRIVATE_LAUNCH_DEPENDENCIES
                         if private_launch_window else
@@ -1178,27 +1237,27 @@ def _p2_producer_binding(repository, candidate_sha):
                         else P2_JDK21_JDI_DEPENDENCIES)
         _source_binding(repository, candidate_sha, dependencies,
                         "JDK 21 JDI producer",
-                        local_approved=P2_BASELINE_COMPAT_DEPENDENCIES)
+                        local_approved=P2_OUTPUT_PROVENANCE_DEPENDENCIES)
     elif corrected_jdi:
         _source_binding(repository, candidate_sha, P2_CORRECTED_JDI_DEPENDENCIES,
                         "corrected JDI producer",
-                        local_approved=P2_BASELINE_COMPAT_DEPENDENCIES)
+                        local_approved=P2_OUTPUT_PROVENANCE_DEPENDENCIES)
     elif bounded_jdi:
         _source_binding(repository, candidate_sha, P2_BOUNDED_JDI_DEPENDENCIES,
                         "bounded JDI producer",
-                        local_approved=P2_BASELINE_COMPAT_DEPENDENCIES)
+                        local_approved=P2_OUTPUT_PROVENANCE_DEPENDENCIES)
     elif rotation_premise:
         _source_binding(repository, candidate_sha, P2_ROTATION_PREMISE_DEPENDENCIES,
                         "rotation premise producer",
-                        local_approved=P2_BASELINE_COMPAT_DEPENDENCIES)
+                        local_approved=P2_OUTPUT_PROVENANCE_DEPENDENCIES)
     elif boolean_jdi_final:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_FINAL_DEPENDENCIES,
                         "Boolean JDI final producer",
-                        local_approved=P2_BASELINE_COMPAT_DEPENDENCIES)
+                        local_approved=P2_OUTPUT_PROVENANCE_DEPENDENCIES)
     elif boolean_jdi:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_DEPENDENCIES,
                         "Boolean JDI producer",
-                        local_approved=P2_BASELINE_COMPAT_DEPENDENCIES)
+                        local_approved=P2_OUTPUT_PROVENANCE_DEPENDENCIES)
     if not v6_window:
         for relative in (P2_BASELINE_COMPAT_DEPENDENCIES.keys() -
                          P2_EXECUTABLE_LOCAL_DEPENDENCIES.keys()):
@@ -1207,7 +1266,7 @@ def _p2_producer_binding(repository, candidate_sha):
                 actual = hashlib.sha256(local.read_bytes()).hexdigest()
             except OSError as error:
                 raise ValueError(f"reviewed P2 raw producer blob differs: {relative}") from error
-            if actual != P2_BASELINE_COMPAT_DEPENDENCIES[relative]:
+            if actual != P2_OUTPUT_PROVENANCE_DEPENDENCIES[relative]:
                 raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     return dict(approved)
 
@@ -1646,7 +1705,7 @@ PORTABLE_REPLAY_MODULES = (
     "numeric_class_witness", "pulley_jdi_v2", "pulley_jdi_v1",
     "pulley_jdi_inputs_v2", "run", "frozen_weld_pulley", "exact_consistency",
     "physical", "capture_actual", "actual_arithmetic", "actual_capture_receipt",
-    "actual_trace", "rotation_oracle",
+    "actual_trace", "actual_output_v6", "rotation_oracle",
     "boolean_rotation_jdi", "boolean_rotation_jdi.jdi_bridge",
     "boolean_rotation_jdi.source_guard", "boolean_rotation_jdi.witness",
     "boolean_rotation_jdi.loaded_code")
