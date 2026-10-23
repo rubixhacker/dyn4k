@@ -147,7 +147,7 @@ APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS = {
 }
 PROSPECTIVE_V6_SOURCE_REVISION = "0d5799e1c84f76c504b53f3eaf7468bca20a60eb"
 FAILED_PRIVATE_LAUNCH_SOURCE_REVISION = "e451ccf010c8f1c11a428d63806795f455086af0"
-PRIVATE_LAUNCH_SOURCE_REVISION = "41d04ac5af90b8cbc0033d5d8f3d69c022b6bb7e"
+PRIVATE_LAUNCH_SOURCE_REVISION = "2bf8c3e10bcacc77354714541aa71bceb102bf41"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -159,6 +159,7 @@ APPROVED_PROSPECTIVE_PRIVATE_LAUNCH_CHECKERS = {
     **APPROVED_PROSPECTIVE_V6_CHECKERS,
     "numeric_producer.py": "9477b9936afbc97be4c485ce123ceb49f5abd8653c328262528214a3a6fb65f8",
     "numeric_producer_trace.py": "dd2f58083654079745000b1673e7c0dc4c214a772e8f81117c8699ff968e03fe",
+    "numeric_class_witness.py": "cde04945bacbbd77fcc3f37296f815e8d0fca4492950e9c7dcae3aef18888328",
 }
 APPROVED_PROSPECTIVE_EXECUTABLE_SHARED = {
     path: APPROVED_POLICY[path] for path in
@@ -371,11 +372,15 @@ PROSPECTIVE_V6_CAPTURE_DEPENDENCIES = {
 PRIVATE_LAUNCH_CAPTURE_DEPENDENCIES = {
     **PROSPECTIVE_V6_CAPTURE_DEPENDENCIES,
     "tools/numerical/portable/capture_actual.py":
-        "b0c9b2ba5ab46368d4f9552744839b78330ac28629376e9163d80bcacef58c5d",
+        "9aa8b6b28d5d94700f408fad20555a7f7c6c084999178d3e8c632f7625e37a30",
     "tools/numerical/portable/actual_capture_receipt.py":
-        "6028f838fc4b9719775d6bdb2aa78fe478e85e9b4561a06f802d9b68bb0e28bc",
+        "f124c1c638b35d1e70e6bd6c95fae30a80af84ebecccd6eefcd92d3347c41388",
+    "tools/numerical/portable/actual_trace.py":
+        "ffbeb99676677cb1b619160ef8f11b6858291580322de16097c862f930f83709",
     "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
-        "81ffcebc824cd3192ed7a3cde646596a4f35cf89be3f747de053e8a223d66450",
+        "22d5f7d1fd5ac8c3f828d68799ce4a24ab698ad275b805e61c90ec9b8c62ad62",
+    "tools/numerical/portable/numeric_class_witness.py":
+        "cde04945bacbbd77fcc3f37296f815e8d0fca4492950e9c7dcae3aef18888328",
 }
 P2_V6_DEPENDENCIES = {
     **P2_EXECUTABLE_LOCAL_DEPENDENCIES,
@@ -399,9 +404,13 @@ P2_PRIVATE_LAUNCH_DEPENDENCIES = {
     "tools/numerical/portable/numeric_producer_trace.py":
         "dd2f58083654079745000b1673e7c0dc4c214a772e8f81117c8699ff968e03fe",
     "tools/numerical/portable/actual_capture_receipt.py":
-        "6028f838fc4b9719775d6bdb2aa78fe478e85e9b4561a06f802d9b68bb0e28bc",
+        "f124c1c638b35d1e70e6bd6c95fae30a80af84ebecccd6eefcd92d3347c41388",
+    "tools/numerical/portable/actual_trace.py":
+        "ffbeb99676677cb1b619160ef8f11b6858291580322de16097c862f930f83709",
     "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
-        "81ffcebc824cd3192ed7a3cde646596a4f35cf89be3f747de053e8a223d66450",
+        "22d5f7d1fd5ac8c3f828d68799ce4a24ab698ad275b805e61c90ec9b8c62ad62",
+    "tools/numerical/portable/numeric_class_witness.py":
+        "cde04945bacbbd77fcc3f37296f815e8d0fca4492950e9c7dcae3aef18888328",
 }
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_JVM8_PRODUCERS = {
@@ -415,7 +424,7 @@ APPROVED_P2_V6_PRODUCERS = {
 }
 APPROVED_P2_PRIVATE_LAUNCH_PRODUCERS = {
     **APPROVED_P2_V6_PRODUCERS,
-    "capture_actual.py": "b0c9b2ba5ab46368d4f9552744839b78330ac28629376e9163d80bcacef58c5d",
+    "capture_actual.py": "9aa8b6b28d5d94700f408fad20555a7f7c6c084999178d3e8c632f7625e37a30",
 }
 PINNED_P2_CURRENT_LOCAL_PRODUCERS = dict(APPROVED_P2_PRIVATE_LAUNCH_PRODUCERS)
 APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS = {
