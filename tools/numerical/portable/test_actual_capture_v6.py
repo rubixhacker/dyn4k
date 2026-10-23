@@ -247,7 +247,10 @@ class FocusedReplayTest(unittest.TestCase):
                 ("child", 'clone(flags=CLONE_VM|CLONE_FILES) = 90'),
                 ("alias", 'dup(7</usr/lib/loader>) = 8</usr/lib/loader>'),
                 ("control_alias", 'fcntl(7</usr/lib/loader>, F_DUPFD, 0) = '
-                 '8</usr/lib/loader>')):
+                 '8</usr/lib/loader>'),
+                ("control_transfer", 'sendmsg(1<pipe:[8]>, '
+                 '{msg_control=[{cmsg_type=SCM_RIGHTS, '
+                 'cmsg_data=[7</usr/lib/loader>]}]}, 0) = 1')):
             with self.subTest(prefix=label):
                 with self.assertRaisesRegex(Rejected,
                                             "observer protected launch action"):
