@@ -727,9 +727,12 @@ class IndependentGateSeamTests(unittest.TestCase):
 
         def observe(package, path, *args, **kwargs):
             original_extractall(package, path, *args, **kwargs)
-            exported.append({name: hashlib.sha256(
+            checked = {name: hashlib.sha256(
                 (Path(path) / "tools/numerical/portable" / name).read_bytes()).hexdigest()
-                for name in closure})
+                for name in closure}
+            checked.update({name: hashlib.sha256((Path(path) / name).read_bytes()).hexdigest()
+                            for name in independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED})
+            exported.append(checked)
 
         with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {
                 "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf",
@@ -739,7 +742,8 @@ class IndependentGateSeamTests(unittest.TestCase):
                 independent_gates.verify_prospective_case_subgates(
                     Path(temporary), receipt, ROOT, candidate, {"dyn4k-core": "a" * 64},
                     independent_gates.verified_numerical_source_sha256(ROOT, candidate))
-        self.assertEqual([closure], exported)
+        self.assertEqual([closure | independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED],
+                         exported)
 
     def test_prospective_export_rejects_altered_approved_bytes(self):
         candidate = subprocess.check_output(["git", "rev-parse", "HEAD"],
@@ -754,7 +758,8 @@ class IndependentGateSeamTests(unittest.TestCase):
         for relative in (*(
                 f"tools/numerical/portable/{name}" for name in
                 independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS),
-                "tools/numerical/compare.py", "tools/numerical/fixtures.json"):
+                "tools/numerical/compare.py", "tools/numerical/physical.py",
+                "tools/numerical/fixtures.json"):
             with self.subTest(exported=relative):
                 def alter(package, path, *args, **kwargs):
                     original_extractall(package, path, *args, **kwargs)
@@ -777,10 +782,18 @@ class IndependentGateSeamTests(unittest.TestCase):
                                           cwd=ROOT, text=True).strip()
         closure = independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS
         self.assertEqual({"numeric_producer.py", "numeric_producer_trace.py",
-                          "numeric_class_witness.py",
+                          "numeric_class_witness.py", "pulley_jdi_v2.py",
+                          "pulley_jdi_v1.py", "pulley_jdi_inputs_v2.py", "run.py",
+                          "frozen_weld_pulley.py", "exact_consistency.py", "physical.py",
                           "class_witness/NumericClassWitness.java"},
                          set(closure) - set(independent_gates.APPROVED_PROSPECTIVE_INVENTORY_FIX_CHECKERS))
         self.assertIn("prospective_compare.py", closure)
+        self.assertEqual({
+            "tools/numerical/compare.py": independent_gates.APPROVED_POLICY[
+                "tools/numerical/compare.py"],
+            "tools/numerical/physical.py": independent_gates.APPROVED_POLICY[
+                "tools/numerical/physical.py"]},
+            independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED)
         for name, digest in closure.items():
             relative = f"tools/numerical/portable/{name}"
             committed = subprocess.check_output(
@@ -792,6 +805,8 @@ class IndependentGateSeamTests(unittest.TestCase):
                 bound = independent_gates._prospective_checker_binding(ROOT, candidate)
                 for name, digest in closure.items():
                     self.assertEqual(digest, bound[f"tools/numerical/portable/{name}"])
+                for path, digest in independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED.items():
+                    self.assertEqual(digest, bound[path])
         build = "tools/numerical/portable/build.gradle.kts"
         self.assertEqual("fac77dd6282f67dd8593885a73f880d0bab6156eda93391a28cdbafb800fbdc3",
                          independent_gates.P2_EXECUTABLE_LOCAL_DEPENDENCIES[build])
@@ -812,6 +827,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                 self.assertEqual(expected, {
                     name: bound[f"tools/numerical/portable/{name}"] for name in expected})
                 self.assertNotIn("tools/numerical/portable/numeric_producer.py", bound)
+                self.assertNotIn("tools/numerical/portable/pulley_jdi_v2.py", bound)
 
     def test_executable_checker_rejects_local_and_candidate_helper_drift(self):
         revision = "fbaee1b16de2ff0633e2981e69cf59044b61c745"
@@ -856,10 +872,36 @@ class IndependentGateSeamTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
                     independent_gates._prospective_checker_binding(ROOT, revision)
 
+    def test_executable_shared_imports_reject_local_and_candidate_drift(self):
+        revision = "fbaee1b16de2ff0633e2981e69cf59044b61c745"
+        original_read = Path.read_bytes
+        original_show = subprocess.check_output
+        for relative in independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED:
+            local = ROOT / relative
+            with self.subTest(path=relative, surface="local"), mock.patch.object(
+                    Path, "read_bytes", lambda path, local=local: b"substituted"
+                    if path == local else original_read(path)):
+                with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                    independent_gates._prospective_checker_binding(ROOT, revision)
+
+            def altered(command, *args, **kwargs):
+                if command[-1] == f"{revision}:{relative}":
+                    return b"substituted"
+                return original_show(command, *args, **kwargs)
+
+            with self.subTest(path=relative, surface="candidate"), mock.patch.object(
+                    subprocess, "check_output", altered):
+                with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                    independent_gates._prospective_checker_binding(ROOT, revision)
+
     def test_exported_checker_ignores_stale_numeric_helpers_and_restores_cache_on_failure(self):
         revision = "fbaee1b16de2ff0633e2981e69cf59044b61c745"
-        names = ("numeric_producer", "numeric_producer_trace", "numeric_class_witness")
+        names = ("numeric_producer", "numeric_producer_trace", "numeric_class_witness",
+                 "pulley_jdi_v2", "pulley_jdi_v1", "pulley_jdi_inputs_v2", "run",
+                 "frozen_weld_pulley", "exact_consistency", "physical", "compare")
         stale = {name: types.ModuleType(name) for name in names}
+        stale["pulley_jdi_v2"].Reader = lambda raw: self.fail("cached Reader was used")
+        stale["compare"].compare_value = lambda *args: self.fail("cached compare was used")
         receipt = {"prospective_catalog_sha256": independent_gates.PROSPECTIVE_POLICY_SHA256,
                    "prospective_cases": [
                        {"id": case, "reference": "missing.jsonl", "candidate": "missing.jsonl",
@@ -867,16 +909,26 @@ class IndependentGateSeamTests(unittest.TestCase):
                        for case in independent_gates.approved_prospective_cases(str(ROOT))]}
         original_import = builtins.__import__
         loaded = {}
+        inspected = False
 
         def inspect_import(name, *args, **kwargs):
+            nonlocal inspected
             module = original_import(name, *args, **kwargs)
-            if name == "prospective_compare":
+            if name == "prospective_compare" and not inspected:
+                inspected = True
+                producer = original_import("numeric_producer")
+                with self.assertRaisesRegex(ValueError, "class file is truncated"):
+                    producer.verify_call_edge(b"")
                 for helper in names:
                     imported = original_import(helper)
                     source = Path(imported.__file__)
                     loaded[helper] = (source, hashlib.sha256(source.read_bytes()).hexdigest())
+                self.assertIs(sys.modules["compare"],
+                              sys.modules["reference_diagnostic"].approved)
+                self.assertIsNot(stale["compare"], sys.modules["compare"])
             return module
 
+        prior_path = list(sys.path)
         with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(sys.modules, stale), \
                 mock.patch.object(builtins, "__import__", inspect_import):
             with self.assertRaisesRegex(ValueError, "raw archive file is missing"):
@@ -886,28 +938,42 @@ class IndependentGateSeamTests(unittest.TestCase):
                     independent_gates.verified_numerical_source_sha256(ROOT, revision))
             self.assertEqual(set(names), set(loaded))
             for name in names:
-                self.assertTrue(loaded[name][0].parents[3].name.startswith(
-                    "dyn4k-prospective-checker-"), f"{name}: {loaded[name][0]}")
-                self.assertEqual(
-                    independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS[f"{name}.py"],
-                    loaded[name][1])
+                self.assertIn("dyn4k-prospective-checker-", str(loaded[name][0]))
+                expected = (independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED[
+                    "tools/numerical/compare.py"] if name == "compare" else
+                    independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS[f"{name}.py"])
+                self.assertEqual(expected, loaded[name][1], name)
                 self.assertIs(stale[name], sys.modules[name])
+            self.assertEqual(prior_path, sys.path)
 
     def test_p2_host_ignores_stale_numeric_helpers_and_restores_cache_on_success(self):
         revision = "fbaee1b16de2ff0633e2981e69cf59044b61c745"
-        names = ("numeric_producer", "numeric_producer_trace", "numeric_class_witness")
+        names = ("numeric_producer", "numeric_producer_trace", "numeric_class_witness",
+                 "pulley_jdi_v2", "pulley_jdi_v1", "pulley_jdi_inputs_v2", "run",
+                 "frozen_weld_pulley", "exact_consistency", "physical", "compare")
         stale = {name: types.ModuleType(name) for name in names}
+        stale["pulley_jdi_v2"].Reader = lambda raw: self.fail("cached Reader was used")
+        stale["compare"].compare_value = lambda *args: self.fail("cached compare was used")
         source = "a" * 64
         artifact = "b" * 64
         original_import = builtins.__import__
         loaded = {}
+        inspected = False
 
         def inspect_import(name, *args, **kwargs):
+            nonlocal inspected
             module = original_import(name, *args, **kwargs)
-            if name == "prospective_compare":
+            if name == "prospective_compare" and not inspected:
+                inspected = True
+                producer = original_import("numeric_producer")
+                with self.assertRaisesRegex(ValueError, "class file is truncated"):
+                    producer.verify_call_edge(b"")
                 for helper in names:
                     imported = original_import(helper)
                     loaded[helper] = Path(imported.__file__)
+                self.assertIs(sys.modules["compare"],
+                              sys.modules["reference_diagnostic"].approved)
+                self.assertIsNot(stale["compare"], sys.modules["compare"])
                 module.compare_host = lambda *unused, **options: {
                     "candidate_source_sha256": source,
                     "candidate_artifact_sha256": {"target": artifact},
@@ -928,6 +994,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                        "method_executions": 15, "dependency_sha256": artifact,
                        "method_process_sha256": "d" * 64}
             (root / "candidate/jvm/receipt.json").write_text(json.dumps({"runtime": runtime}))
+            prior_path = list(sys.path)
             with mock.patch.dict(sys.modules, stale), mock.patch.object(
                     builtins, "__import__", inspect_import):
                 summary, case_order, case_methods, identity = independent_gates._verify_p2_host(
@@ -939,9 +1006,21 @@ class IndependentGateSeamTests(unittest.TestCase):
                 self.assertEqual(independent_gates._p2_runtime_identity(runtime), identity)
                 self.assertEqual(set(names), set(loaded))
                 for name in names:
-                    self.assertEqual(ROOT / "tools/numerical/portable" / f"{name}.py",
-                                     loaded[name])
+                    relative = (f"tools/numerical/{name}.py" if name == "compare" else
+                                f"tools/numerical/portable/{name}.py")
+                    self.assertEqual(ROOT / relative, loaded[name])
                     self.assertIs(stale[name], sys.modules[name])
+                self.assertEqual(prior_path, sys.path)
+                with mock.patch.object(independent_gates.shutil, "copytree",
+                                       side_effect=ValueError("forced replay rejection")):
+                    with self.assertRaisesRegex(ValueError, "forced replay rejection"):
+                        independent_gates._verify_p2_host(
+                            root, {"baseline": "baseline", "candidate": "candidate",
+                                   "arithmetic": "arithmetic"}, sidecar, ROOT, revision,
+                            source, artifact)
+                for name in names:
+                    self.assertIs(stale[name], sys.modules[name])
+                self.assertEqual(prior_path, sys.path)
 
     def test_prospective_checker_pins_historical_and_assembled_source(self):
         current = subprocess.check_output(["git", "rev-parse", "HEAD"],

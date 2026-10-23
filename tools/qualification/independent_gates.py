@@ -116,7 +116,18 @@ APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS = {
     "numeric_producer.py": "3c05fc393199b8857e9b1d0eef671dcccf7f5dd349ce220d2bcc0fce79fa15e3",
     "numeric_producer_trace.py": "709624e776157e9fd01ba8f71390439cd00ee65f7bc0c752014d9e7aa20bb968",
     "numeric_class_witness.py": "8d54d52552a998e7b14668e1c16d169526b5208ef0201c50671af1204cd8b826",
+    "pulley_jdi_v2.py": "15832b08bc598be3b23e0c55e876340111dc09eb0af73f1f2d401d146da490d9",
+    "pulley_jdi_v1.py": "dc2bc3b8de54549e71c4f5bcf848f185d0444c179c44c10efff36ff8d1d23f53",
+    "pulley_jdi_inputs_v2.py": "eb9f5ac5a1a39d127534dc511b6bb9e60a1fe5f8f2dc913f1d00d9d392b8f4c3",
+    "run.py": "7a52d41dcb96238402beee7cfc381ccb87b8ffd96ef247d602d92037bd073051",
+    "frozen_weld_pulley.py": "6782061d4dd08f6871a9016d2e33aacf45d8f4f0ee6873c396607521a68e7af0",
+    "exact_consistency.py": "4421e15f071bb03a67a2436e59753df597fcec2b3f5f9e13e2890ec12deb3a81",
+    "physical.py": "fe7842e7712c456fb23e8d663694323bebaa7c09f708cd249c422c28ec25e9f0",
     "class_witness/NumericClassWitness.java": "493d57d0635c6c5b519b6009250df0d82d0d97e0b065aa80160fe053b20d8983",
+}
+APPROVED_PROSPECTIVE_EXECUTABLE_SHARED = {
+    path: APPROVED_POLICY[path] for path in
+    ("tools/numerical/compare.py", "tools/numerical/physical.py")
 }
 APPROVED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS)
 APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS = {
@@ -759,7 +770,8 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError("prospective checker revision ancestry is unavailable")
         return checked.returncode == 0
 
-    if descends_from(PROSPECTIVE_EXECUTABLE_CHECKER_REVISION):
+    executable_window = descends_from(PROSPECTIVE_EXECUTABLE_CHECKER_REVISION)
+    if executable_window:
         approved = APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS
     elif descends_from(PROSPECTIVE_INVENTORY_FIX_CHECKER_REVISION):
         approved = APPROVED_PROSPECTIVE_INVENTORY_FIX_CHECKERS
@@ -803,6 +815,23 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
         if hashlib.sha256(committed).hexdigest() != expected:
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
+    for relative, expected in APPROVED_PROSPECTIVE_EXECUTABLE_SHARED.items():
+        local = Path(__file__).resolve().parents[2] / relative
+        try:
+            local_sha256 = hashlib.sha256(local.read_bytes()).hexdigest()
+        except OSError as error:
+            raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
+        if local_sha256 != expected:
+            raise ValueError(f"prospective policy/checker blob differs: {relative}")
+        if executable_window:
+            try:
+                committed = subprocess.check_output(
+                    ["git", "--no-replace-objects", "-C", str(repository), "show",
+                     f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
+            except subprocess.CalledProcessError as error:
+                raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
+            if hashlib.sha256(committed).hexdigest() != expected:
+                raise ValueError(f"prospective policy/checker blob differs: {relative}")
     catalog = f"{source_dir}/prospective_policy_catalog.json"
     committed = subprocess.check_output(
         ["git", "--no-replace-objects", "-C", str(repository), "show",
@@ -812,8 +841,9 @@ def _prospective_checker_binding(repository, candidate_sha):
             or hashlib.sha256((Path(__file__).resolve().parents[2] / catalog).read_bytes()).hexdigest()
             != PROSPECTIVE_POLICY_SHA256):
         raise ValueError(f"prospective policy/checker blob differs: {catalog}")
-    return {f"{source_dir}/{name}": value for name, value in approved.items()} | {
-        catalog: catalog_sha256}
+    return ({f"{source_dir}/{name}": value for name, value in approved.items()} |
+            {catalog: catalog_sha256} |
+            (APPROVED_PROSPECTIVE_EXECUTABLE_SHARED if executable_window else {}))
 
 
 def _missing_numerical_subgates(repository):
@@ -1404,6 +1434,19 @@ def _p2_summary(summary, expected, methods, case_methods):
             "reason": "reviewed P2 raw arithmetic and adopted case policy replayed"}
 
 
+PORTABLE_REPLAY_MODULES = (
+    "prospective_compare", "cases", "orthogonality", "reference_diagnostic",
+    "receipt", "compare", "numeric_producer", "numeric_producer_trace",
+    "numeric_class_witness", "pulley_jdi_v2", "pulley_jdi_v1",
+    "pulley_jdi_inputs_v2", "run", "frozen_weld_pulley", "exact_consistency",
+    "physical")
+P2_LOCAL_REPLAY_MODULES = (
+    "actual_arithmetic", "baseline_capture", "rotation_oracle",
+    "boolean_rotation_jdi", "boolean_rotation_jdi.jdi_bridge",
+    "boolean_rotation_jdi.source_guard", "boolean_rotation_jdi.witness",
+    "boolean_rotation_jdi.loaded_code")
+
+
 def _verify_p2_host(root, bridge, sidecar, repository, candidate_sha,
                     source_sha256, artifact_sha256):
     _prospective_checker_binding(repository, candidate_sha)
@@ -1415,10 +1458,8 @@ def _verify_p2_host(root, bridge, sidecar, repository, candidate_sha,
         raise IncompleteEvidence("prospective JVM candidate lane is missing")
     portable = Path(__file__).resolve().parents[1] / "numerical/portable"
     previous = sys.dont_write_bytecode
-    modules = ("prospective_compare", "actual_arithmetic", "baseline_capture", "run",
-               "cases", "orthogonality", "reference_diagnostic", "receipt",
-               "rotation_oracle", "numeric_producer", "numeric_producer_trace",
-               "numeric_class_witness")
+    previous_path = list(sys.path)
+    modules = PORTABLE_REPLAY_MODULES + P2_LOCAL_REPLAY_MODULES
     prior = {name: sys.modules.pop(name, None) for name in modules}
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(portable))
@@ -1439,7 +1480,7 @@ def _verify_p2_host(root, bridge, sidecar, repository, candidate_sha,
                                    arithmetic_captures=copied / "arithmetic")
             verified_runtime = _json(copied / "candidate/jvm/receipt.json").get("runtime")
     finally:
-        sys.path.pop(0)
+        sys.path[:] = previous_path
         sys.dont_write_bytecode = previous
         for name in modules:
             sys.modules.pop(name, None)
@@ -1533,7 +1574,8 @@ def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
     if receipt.get("prospective_catalog_sha256") != catalog_sha256:
         raise ValueError("adopted prospective catalog identity differs")
     approved_export = _prospective_checker_binding(repository, candidate_sha)
-    for relative in ("tools/numerical/compare.py", "tools/numerical/fixtures.json"):
+    for relative in ("tools/numerical/compare.py", "tools/numerical/physical.py",
+                     "tools/numerical/fixtures.json"):
         committed = subprocess.check_output(
             ["git", "--no-replace-objects", "-C", str(repository), "show",
              f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
@@ -1542,7 +1584,8 @@ def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
     archive = subprocess.check_output(
         ["git", "-c", "core.autocrlf=false", "--no-replace-objects",
          "-C", str(repository), "archive", candidate_sha,
-         portable, "tools/numerical/compare.py", "tools/numerical/fixtures.json"],
+         portable, "tools/numerical/compare.py", "tools/numerical/physical.py",
+         "tools/numerical/fixtures.json"],
         stderr=subprocess.PIPE)
     with tempfile.TemporaryDirectory(prefix="dyn4k-prospective-checker-") as temporary:
         with tarfile.open(fileobj=io.BytesIO(archive)) as package:
@@ -1553,11 +1596,10 @@ def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
                     or hashlib.sha256(exported.read_bytes()).hexdigest() != expected_sha):
                 raise ValueError(f"prospective exported checker differs: {relative}")
         package_path = str(Path(temporary) / portable)
-        names = ("prospective_compare", "cases", "orthogonality", "reference_diagnostic",
-                 "receipt", "compare", "numeric_producer", "numeric_producer_trace",
-                 "numeric_class_witness")
+        names = PORTABLE_REPLAY_MODULES
         prior = {name: sys.modules.get(name) for name in names}
         previous_bytecode = sys.dont_write_bytecode
+        previous_path = list(sys.path)
         for name in names:
             sys.modules.pop(name, None)
         sys.dont_write_bytecode = True
@@ -1612,10 +1654,7 @@ def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
                                "target arithmetic audits remain unqualified or incomplete"),
                     "cases": cases}
         finally:
-            sys.path.pop(0)
-            source_parent = str(Path(temporary) / "tools/numerical")
-            if source_parent in sys.path:
-                sys.path.remove(source_parent)
+            sys.path[:] = previous_path
             sys.dont_write_bytecode = previous_bytecode
             for name in names:
                 sys.modules.pop(name, None)
