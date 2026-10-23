@@ -146,7 +146,8 @@ APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS = {
     "numeric_producer.py": "2e5f80022e4457955e1f806d5ba7270eec9041726914fd245033e106b06ab3e5",
 }
 PROSPECTIVE_V6_SOURCE_REVISION = "0d5799e1c84f76c504b53f3eaf7468bca20a60eb"
-PRIVATE_LAUNCH_SOURCE_REVISION = "e451ccf010c8f1c11a428d63806795f455086af0"
+FAILED_PRIVATE_LAUNCH_SOURCE_REVISION = "e451ccf010c8f1c11a428d63806795f455086af0"
+PRIVATE_LAUNCH_SOURCE_REVISION = "41d04ac5af90b8cbc0033d5d8f3d69c022b6bb7e"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -154,11 +155,16 @@ APPROVED_PROSPECTIVE_V6_CHECKERS = {
     "numeric_class_witness.py": "6a08567d0562c520e9fa4f7446f658e50cd0a6403879151e23aca08163ac7a43",
     "class_witness/NumericClassWitness.java": "6341deddfb6e764a95c9700cfdc552111923ba7141c8896166a0bc3e45b3667f",
 }
+APPROVED_PROSPECTIVE_PRIVATE_LAUNCH_CHECKERS = {
+    **APPROVED_PROSPECTIVE_V6_CHECKERS,
+    "numeric_producer.py": "9477b9936afbc97be4c485ce123ceb49f5abd8653c328262528214a3a6fb65f8",
+    "numeric_producer_trace.py": "dd2f58083654079745000b1673e7c0dc4c214a772e8f81117c8699ff968e03fe",
+}
 APPROVED_PROSPECTIVE_EXECUTABLE_SHARED = {
     path: APPROVED_POLICY[path] for path in
     ("tools/numerical/compare.py", "tools/numerical/physical.py")
 }
-PINNED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_V6_CHECKERS)
+PINNED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_PRIVATE_LAUNCH_CHECKERS)
 APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS = {
     **APPROVED_PROSPECTIVE_CHECKERS,
     "prospective_compare.py": "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f",
@@ -369,7 +375,7 @@ PRIVATE_LAUNCH_CAPTURE_DEPENDENCIES = {
     "tools/numerical/portable/actual_capture_receipt.py":
         "6028f838fc4b9719775d6bdb2aa78fe478e85e9b4561a06f802d9b68bb0e28bc",
     "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
-        "93f48323feec9f4690a92e20fceb4ff1d10b932844fdec3d858db912503a3813",
+        "81ffcebc824cd3192ed7a3cde646596a4f35cf89be3f747de053e8a223d66450",
 }
 P2_V6_DEPENDENCIES = {
     **P2_EXECUTABLE_LOCAL_DEPENDENCIES,
@@ -388,10 +394,14 @@ P2_V6_DEPENDENCIES = {
 }
 P2_PRIVATE_LAUNCH_DEPENDENCIES = {
     **P2_V6_DEPENDENCIES,
+    "tools/numerical/portable/numeric_producer.py":
+        "9477b9936afbc97be4c485ce123ceb49f5abd8653c328262528214a3a6fb65f8",
+    "tools/numerical/portable/numeric_producer_trace.py":
+        "dd2f58083654079745000b1673e7c0dc4c214a772e8f81117c8699ff968e03fe",
     "tools/numerical/portable/actual_capture_receipt.py":
         "6028f838fc4b9719775d6bdb2aa78fe478e85e9b4561a06f802d9b68bb0e28bc",
     "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
-        "93f48323feec9f4690a92e20fceb4ff1d10b932844fdec3d858db912503a3813",
+        "81ffcebc824cd3192ed7a3cde646596a4f35cf89be3f747de053e8a223d66450",
 }
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_JVM8_PRODUCERS = {
@@ -869,7 +879,11 @@ def _prospective_checker_binding(repository, candidate_sha):
     executable_window = descends_from(PROSPECTIVE_EXECUTABLE_CHECKER_REVISION)
     private_launch_window = descends_from(PRIVATE_LAUNCH_SOURCE_REVISION)
     v6_window = descends_from(PROSPECTIVE_V6_SOURCE_REVISION)
-    if v6_window:
+    if private_launch_window:
+        approved = APPROVED_PROSPECTIVE_PRIVATE_LAUNCH_CHECKERS
+    elif descends_from(FAILED_PRIVATE_LAUNCH_SOURCE_REVISION):
+        raise ValueError("prospective policy/checker blob differs: unapproved private launch revision")
+    elif v6_window:
         approved = APPROVED_PROSPECTIVE_V6_CHECKERS
     elif descends_from(PROSPECTIVE_JVM8_AGENT_SOURCE_REVISION):
         approved = APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS
@@ -1037,6 +1051,8 @@ def _p2_producer_binding(repository, candidate_sha):
     boolean_jdi = descends_from(P2_BOOLEAN_JDI_SOURCE_REVISION)
     if private_launch_window:
         approved = APPROVED_P2_PRIVATE_LAUNCH_PRODUCERS
+    elif descends_from(FAILED_PRIVATE_LAUNCH_SOURCE_REVISION):
+        raise ValueError("reviewed P2 raw producer blob differs: unapproved private launch revision")
     elif v6_window:
         approved = APPROVED_P2_V6_PRODUCERS
     elif descends_from(PROSPECTIVE_JVM8_SOURCE_REVISION):
