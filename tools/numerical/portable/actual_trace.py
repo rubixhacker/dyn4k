@@ -199,6 +199,7 @@ def _check_operand(value, table, protected):
 def _validate_calls(events, protected, strict_outputs=()):
     tables = {}
     written = set()
+    output_owners = {}
     first_fd = {"read", "pread64", "readv", "preadv", "write", "writev",
                 "pwrite64", "pwritev", "lseek", "fstat", "fcntl", "close",
                 "dup", "dup2", "dup3", "ftruncate", "mmap", "sendfile",
@@ -226,6 +227,12 @@ def _validate_calls(events, protected, strict_outputs=()):
                 raise TraceRejected("protected descriptor use lost its destination")
             if decorated in protected and known != decorated:
                 raise TraceRejected("protected descriptor creation is unavailable")
+            if known in strict_outputs and output_owners.get(known) != tid:
+                raise TraceRejected("protected output crossed a trace thread")
+            if known in strict_outputs and name in (
+                    "writev", "pwrite64", "pwritev") and \
+                    re.search(r'\) = [1-9][0-9]*$', call):
+                raise TraceRejected("protected output write form is unbound")
             if name == "ftruncate" and known in strict_outputs and call.endswith(" = 0"):
                 if (not re.fullmatch(r'ftruncate\(' + fd + r'<' +
                                      re.escape(known) + r'>, 0\) = 0', call) or
@@ -268,6 +275,10 @@ def _validate_calls(events, protected, strict_outputs=()):
             if (table.get(old_fd, old_path) != old_path or old_path != new_path or
                     old_path in protected and table.get(old_fd) != old_path):
                 raise TraceRejected("duplicated descriptor path differs")
+            prior_target = table.get(new_fd)
+            if (prior_target in protected and prior_target != old_path or
+                    old_path in strict_outputs or prior_target in strict_outputs):
+                raise TraceRejected("protected descriptor reassignment is unbound")
             table[new_fd] = old_path
             continue
         if name in ("dup2", "dup3"):
@@ -291,6 +302,10 @@ def _validate_calls(events, protected, strict_outputs=()):
                 if table.get(opened[1]) in protected:
                     raise TraceRejected("protected descriptor was reassigned by open")
                 table[opened[1]] = opened[2]
+                if opened[2] in strict_outputs:
+                    if opened[2] in output_owners:
+                        raise TraceRejected("protected output was opened again")
+                    output_owners[opened[2]] = tid
         elif name == "close":
             closing = re.match(r"close\(([0-9]+)(?:<[^<>\r\n]+>)?\) = 0$", call)
             if closing:
@@ -300,6 +315,8 @@ def _validate_calls(events, protected, strict_outputs=()):
             if closed:
                 for fd in list(table):
                     if int(closed[1]) <= int(fd) <= int(closed[2]):
+                        if table[fd] in strict_outputs:
+                            raise TraceRejected("protected output close range is unbound")
                         table.pop(fd)
             elif any(path in protected for path in table.values()):
                 raise TraceRejected("protected close range is ambiguous")

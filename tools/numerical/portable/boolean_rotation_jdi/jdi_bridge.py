@@ -322,7 +322,7 @@ def _helper_descendants(helpers, root):
         raise EvidenceRejected("JDI helper trace has an unrelated process")
 
 
-def _worker_thread_ids(workers, root):
+def _worker_thread_ids(workers, root, *, shared=False):
     parents = {}
     for parent, trace in workers.items():
         for line in trace.splitlines():
@@ -338,7 +338,7 @@ def _worker_thread_ids(workers, root):
             names = set(flags.group(1).split("|")) if flags else set()
             same_process = {"CLONE_THREAD", "CLONE_VM", "CLONE_SIGHAND",
                             "CLONE_FILES"} <= names
-            parents[identity] = (parent, same_process)
+            parents[identity] = (parent, same_process, "CLONE_FILES" in names)
     if set(parents) != set(workers) - {root}:
         raise EvidenceRejected("JDI worker trace has an unrelated descendant")
     threads = {root}
@@ -346,14 +346,14 @@ def _worker_thread_ids(workers, root):
     seen = {root}
     while pending:
         parent = pending.pop()
-        for child, (owner, same_process) in parents.items():
+        for child, (owner, same_process, shares_files) in parents.items():
             if owner != parent:
                 continue
             if child in seen:
                 raise EvidenceRejected("JDI worker clone chain is cyclic")
             seen.add(child)
             pending.append(child)
-            if same_process and parent in threads:
+            if (shares_files if shared else same_process) and parent in threads:
                 threads.add(child)
     if seen != set(workers):
         raise EvidenceRejected("JDI worker clone chain is disconnected")
@@ -512,8 +512,10 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
     if worker_pid not in workers or helper_pid not in helpers:
         raise EvidenceRejected("JDI version 6 selected process trace differs")
     worker_threads = _worker_thread_ids(workers, worker_pid)
+    worker_owners = _worker_thread_ids(workers, worker_pid, shared=True)
     _helper_descendants(helpers, helper_pid)
     helper_threads = _worker_thread_ids(helpers, helper_pid)
+    helper_owners = _worker_thread_ids(helpers, helper_pid, shared=True)
     worker_exec = [(tid, successful_execve(call)) for _, tid, _, call in worker_events
                    if call.startswith(("execve(", "execveat(")) and call.endswith(" = 0")]
     helper_exec = [(tid, successful_execve(call)) for _, tid, _, call in helper_events
@@ -594,32 +596,42 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
             raise EvidenceRejected("JDI version 6 socket provider differs")
         return found[0][0]
 
-    def continuous(events, threads, fd, start, end):
+    def continuous(events, threads, fd, start, end, created_by=None):
+        skipped_provider = False
         for stamp, tid, _, call in events:
-            if int(tid) not in threads or not start < stamp < end:
+            if int(tid) not in threads or not start <= stamp <= end:
+                continue
+            if (created_by and not skipped_provider and stamp == start and
+                    re.match(created_by + r'\(', call) and
+                    re.search(r'\) = ' + fd + r'<', call)):
+                skipped_provider = True
                 continue
             closed_range = re.fullmatch(
                 r'close_range\(([0-9]+), ([0-9]+), ([^)]+)\) = 0', call)
             if closed_range and int(closed_range[1]) <= int(fd) <= int(closed_range[2]):
                 raise EvidenceRejected("JDI version 6 socket was closed by range")
-            changed = ((re.match(r'(?:close|shutdown)\(' + fd + r'(?:<|[,])', call) or
-                        re.match(r'close_range\(', call) and closed_range is None) and
-                       call.endswith(" = 0") or
-                       re.match(r'dup[23]\([^,]+, ' + fd + r'(?:<|[,])', call) and
-                       re.search(r'\) = ' + fd + r'(?:<|$)', call) or
-                       re.match(r'socket\(', call) and
-                       re.search(r'\) = ' + fd + r'<TCP', call))
+            changed = (
+                (re.match(r'(?:close|shutdown)\(' + fd + r'(?:<|[,])', call) or
+                 re.match(r'close_range\(', call) and closed_range is None) and
+                call.endswith(" = 0") or
+                re.match(r'(?:dup|dup2|dup3|fcntl|open|openat|openat2|creat|socket|'
+                         r'accept|accept4)\(', call) and
+                re.search(r'\) = ' + fd + r'(?:<|$)', call) or
+                re.match(r'(?:unshare|setns|execve|execveat)\(', call) and
+                call.endswith(" = 0"))
             if changed:
                 raise EvidenceRejected("JDI version 6 socket descriptor changed")
+        if created_by and not skipped_provider:
+            raise EvidenceRejected("JDI version 6 socket provider is missing")
 
     worker_socket_at = source(worker_events, worker_threads, listener_fd,
                               bound_token, bound_at)
     helper_socket_at = source(helper_events, helper_threads, helper_fd,
                               connects[0][2][1], connected_at)
-    continuous(worker_events, worker_threads, listener_fd,
-               worker_socket_at, connected_at)
-    continuous(helper_events, helper_threads, helper_fd,
-               helper_socket_at, connected_at)
+    continuous(worker_events, worker_owners, listener_fd,
+               worker_socket_at, accepted_at, created_by="socket")
+    continuous(helper_events, helper_owners, helper_fd,
+               helper_socket_at, connected_at, created_by="socket")
     family = "TCPv6" if "AF_INET6" in connect_call else "TCP"
     local = "[::ffff:127.0.0.1]" if family == "TCPv6" else "127.0.0.1"
     helper_token = f"{family}:[{local}:{peer_port}->{local}:{port}]"
@@ -657,30 +669,33 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
             helper_io["write"][1] != str(helper_thread) or
             helper_io["read"][1] != str(helper_thread)):
         raise EvidenceRejected("JDI version 6 accepted handshake differs")
-    continuous(worker_events, worker_threads, accepted_fd,
-               accepted_at, worker_io["sendto"][0])
-    continuous(helper_events, helper_threads, helper_fd,
-               connected_at, helper_io["read"][0])
-    def traffic(events, fd, token, after, send, receive):
+    def traffic(events, threads, fd, token, after, send, receive):
         counts = {"send": 0, "receive": 0}
-        for stamp, _, _, call in events:
-            if stamp <= after or "JDWP-Handshake" in call:
+        last = after
+        for stamp, tid, _, call in events:
+            if int(tid) not in threads or stamp <= after or "JDWP-Handshake" in call:
                 continue
             for direction, names in (("send", send), ("receive", receive)):
                 if (re.match(r'(?:' + "|".join(names) + r')\(' + fd + r'<' +
                              re.escape(token) + r'>,', call) and
                         re.search(r'\) = [1-9][0-9]*$', call)):
                     counts[direction] += 1
-        return counts
+                    last = max(last, stamp)
+        return counts, last
 
-    worker_packets = traffic(worker_events, accepted_fd, accepted_token,
+    worker_packets, worker_last = traffic(worker_events, worker_threads,
+                             accepted_fd, accepted_token,
                              worker_io["sendto"][0], ("sendto", "sendmsg", "write"),
                              ("recvfrom", "recvmsg", "read"))
-    helper_packets = traffic(helper_events, helper_fd, helper_token,
+    helper_packets, helper_last = traffic(helper_events, helper_threads,
+                             helper_fd, helper_token,
                              helper_io["read"][0], ("write", "sendto", "sendmsg"),
                              ("read", "recvfrom", "recvmsg"))
     if (not all(worker_packets.values()) or not all(helper_packets.values())):
         raise EvidenceRejected("JDI version 6 protocol exchange is missing")
+    continuous(worker_events, worker_owners, accepted_fd, accepted_at,
+               worker_last, created_by="accept(?:4)?")
+    continuous(helper_events, helper_owners, helper_fd, connected_at, helper_last)
     return {"status": "PROVED_JDI_RAW_EXCHANGE", "qualification": "UNPASSED",
             "worker_tgid": worker_pid, "worker_thread": worker_thread,
             "listener_fd": int(listener_fd), "accepted_fd": int(accepted_fd),

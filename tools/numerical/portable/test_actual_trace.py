@@ -142,6 +142,66 @@ class ActualTraceTest(unittest.TestCase):
                     checked_projection(archived({"trace.41": prefix + bad + suffix}),
                                        {"/home/input"})
 
+    def test_strict_output_rejects_valid_descriptor_redirection(self):
+        target = "/home/output"
+        prefix = (b'1.000001 openat(AT_FDCWD, "/home/output", O_WRONLY|O_CREAT|O_TRUNC) '
+                  b'= 7</home/output>\n'
+                  b'1.000002 openat(AT_FDCWD, "/home/other", O_WRONLY|O_CREAT|O_TRUNC) '
+                  b'= 8</home/other>\n')
+        suffix = (b'1.000004 write(7</home/other>, "abc", 3) = 3\n'
+                  b'1.000005 close(7</home/other>) = 0\n'
+                  b'1.000006 close(8</home/other>) = 0\n'
+                  b'1.000007 +++ exited with 0 +++\n')
+        transitions = (
+            b'1.000003 dup2(8</home/other>, 7</home/output>) = 7</home/other>\n',
+            b'1.000003 dup3(8</home/other>, 7</home/output>, O_CLOEXEC) = 7</home/other>\n',
+            b'1.000003 fcntl(8</home/other>, F_DUPFD, 7) = 7</home/other>\n',
+        )
+        for transition in transitions:
+            with self.subTest(transition=transition), self.assertRaises(TraceRejected):
+                checked_projection(archived({"trace.41": prefix + transition + suffix}),
+                                   {target}, strict_outputs={target})
+
+    def test_strict_output_rejects_unmodelled_alias_and_close_range(self):
+        prefix = (b'1.000001 openat(AT_FDCWD, "/home/output", O_WRONLY|O_CREAT) '
+                  b'= 7</home/output>\n')
+        for transition in (
+            b'1.000002 dup(7</home/output>) = 8</home/output>\n',
+            b'1.000002 close_range(7, 7, 0) = 0\n',
+        ):
+            with self.subTest(transition=transition), self.assertRaises(TraceRejected):
+                checked_projection(archived({"trace.41": prefix + transition +
+                    b'1.000003 +++ exited with 0 +++\n'}),
+                    {"/home/output"}, strict_outputs={"/home/output"})
+
+    def test_strict_output_rejects_shared_table_writer_in_other_thread(self):
+        parent = (b'1.000001 openat(AT_FDCWD, "/home/output", O_WRONLY|O_CREAT) '
+                  b'= 7</home/output>\n'
+                  b'1.000002 clone3({flags=CLONE_VM|CLONE_FILES|CLONE_THREAD, '
+                  b'exit_signal=0}, 88) = 42\n'
+                  b'1.000004 write(7</home/output>, "abc", 3) = 3\n'
+                  b'1.000005 close(7</home/output>) = 0\n'
+                  b'1.000006 +++ exited with 0 +++\n')
+        child = (b'1.000003 write(7</home/output>, "extra", 5) = 5\n'
+                 b'1.000007 +++ exited with 0 +++\n')
+        with self.assertRaises(TraceRejected):
+            checked_projection(archived({"trace.41": parent, "trace.42": child}),
+                               {"/home/output"}, strict_outputs={"/home/output"})
+
+    def test_strict_output_rejects_uncredited_write_forms(self):
+        prefix = (b'1.000001 openat(AT_FDCWD, "/home/output", O_WRONLY|O_CREAT) '
+                  b'= 7</home/output>\n')
+        suffix = (b'1.000003 close(7</home/output>) = 0\n'
+                  b'1.000004 +++ exited with 0 +++\n')
+        for operation in (
+            b'1.000002 pwrite64(7</home/output>, "abc", 3, 0) = 3\n',
+            b'1.000002 pwritev(7</home/output>, [{iov_base="abc", iov_len=3}], 1, 0) = 3\n',
+            b'1.000002 writev(7</home/output>, [{iov_base="abc", iov_len=3}], 1) = 3\n',
+        ):
+            with self.subTest(operation=operation), self.assertRaises(TraceRejected):
+                checked_projection(archived({"trace.41": prefix + operation + suffix}),
+                                   {"/home/output"}, strict_outputs={"/home/output"})
+
 
 if __name__ == "__main__":
     unittest.main()

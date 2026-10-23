@@ -115,12 +115,42 @@ class JdiBridgeTest(unittest.TestCase):
                 (worker.replace(b'JDWP-Handshake', b'JDWP-Xandshake'), helper),
                 (worker, helper.replace(b'1.0000072 write', b'1.0000072 nowrite')),
                 (worker, helper.replace(b'1.000011 write', b'1.000011 nowrite')),
-                (worker, helper.replace(b'41000', b'41002'))):
+                (worker, helper.replace(b'41000', b'41002')),
+                (worker.replace(b'1.000012 recvfrom',
+                                b'1.0000115 close(10<TCP:[127.0.0.1:40001->127.0.0.1:41000]>) = 0\n'
+                                b'1.000012 recvfrom'), helper),
+                (worker.replace(b'1.000012 recvfrom',
+                                b'1.0000115 close_range(10, 10, 0) = 0\n'
+                                b'1.000012 recvfrom'), helper),
+                (worker, helper.replace(b'1.000011 write',
+                    b'1.0000105 close(7<TCP:[127.0.0.1:41000->127.0.0.1:40001]>) = 0\n'
+                    b'1.000011 write')),
+                (worker, helper.replace(b'1.000011 write',
+                    b'1.0000105 dup2(8</home/other>, 7<TCP:[127.0.0.1:41000->127.0.0.1:40001]>) = 7</home/other>\n'
+                    b'1.000011 write')),
+                (worker.replace(b'1.000012 recvfrom',
+                    b'1.0000115 fcntl(8</home/other>, F_DUPFD, 10) = 10</home/other>\n'
+                    b'1.000012 recvfrom'), helper),
+                (worker.replace(b'1.000012 recvfrom',
+                    b'1.0000115 openat(AT_FDCWD, "/home/other", O_RDONLY) = 10</home/other>\n'
+                    b'1.000012 recvfrom'), helper)):
             with self.subTest(worker=changed_worker, helper=changed_helper):
                 with self.assertRaises(EvidenceRejected):
                     verify_jdi_transport_v6(archive({"trace.123": changed_worker}),
                                              archive({"trace.456": changed_helper}),
                                              40001, 123, 456, HELPER_ARGS)
+
+        shared = worker.replace(
+            b'1.000012 recvfrom',
+            b'1.0000105 clone3({flags=CLONE_VM|CLONE_FILES, exit_signal=0}, 88) = 124\n'
+            b'1.000012 recvfrom')
+        child = (b'1.000011 close(10<TCP:[127.0.0.1:40001->127.0.0.1:41000]>) = 0\n'
+                 b'1.000015 +++ exited with 0 +++\n')
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport_v6(archive({"trace.123": shared,
+                                             "trace.124": child}),
+                                    archive({"trace.456": helper}),
+                                    40001, 123, 456, HELPER_ARGS)
 
     def test_loader_bridge_joins_jvm_ids_and_observer_label_separately(self):
         raw = (b"transform\t41\nobserved\t41\nagent\t7\n"
