@@ -764,7 +764,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                         "capture_receipt": "missing.json", "arithmetic_audit": "missing-audit.json"}
                        for case in independent_gates.approved_prospective_cases(str(ROOT))]}
         exported = []
-        closure = independent_gates.APPROVED_PROSPECTIVE_OUTPUT_PROVENANCE_CHECKERS
+        closure = independent_gates.APPROVED_PROSPECTIVE_OBSERVER_OPERANDS_CHECKERS
         original_extractall = tarfile.TarFile.extractall
 
         def observe(package, path, *args, **kwargs):
@@ -775,7 +775,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             checked.update({name: hashlib.sha256((Path(path) / name).read_bytes()).hexdigest()
                             for name in independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED})
             checked.update({name: hashlib.sha256((Path(path) / name).read_bytes()).hexdigest()
-                            for name in independent_gates.OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES})
+                            for name in independent_gates.OBSERVER_OPERANDS_CAPTURE_DEPENDENCIES})
             exported.append(checked)
 
         with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {
@@ -787,7 +787,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     Path(temporary), receipt, ROOT, candidate, {"dyn4k-core": "a" * 64},
                     independent_gates.verified_numerical_source_sha256(ROOT, candidate))
         self.assertEqual([closure | independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
-                          independent_gates.OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES],
+                          independent_gates.OBSERVER_OPERANDS_CAPTURE_DEPENDENCIES],
                          exported)
 
     def test_prospective_export_rejects_altered_approved_bytes(self):
@@ -898,10 +898,10 @@ class IndependentGateSeamTests(unittest.TestCase):
                 self.assertEqual(expected, hashlib.sha256(committed).hexdigest())
                 bound = independent_gates._prospective_checker_binding(ROOT, candidate)
                 self.assertEqual(expected, bound[relative])
-                dependencies = (independent_gates.OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES
+                dependencies = (independent_gates.OBSERVER_OPERANDS_CAPTURE_DEPENDENCIES
                                 if candidate == current else
                                 independent_gates.PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES)
-                closure = (independent_gates.APPROVED_PROSPECTIVE_OUTPUT_PROVENANCE_CHECKERS
+                closure = (independent_gates.APPROVED_PROSPECTIVE_OBSERVER_OPERANDS_CHECKERS
                            if candidate == current else
                            independent_gates.PROSPECTIVE_REPLAY_SCRATCH_CHECKERS
                            if candidate == revision else
@@ -911,7 +911,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     set(independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED) |
                     set(dependencies) | {independent_gates.PROSPECTIVE_POLICY_PATH},
                     set(bound))
-                self.assertEqual((independent_gates.APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS
+                self.assertEqual((independent_gates.APPROVED_P2_OBSERVER_OPERANDS_PRODUCERS
                                   if candidate == current
                                   else independent_gates.APPROVED_P2_LOCAL_PRODUCERS),
                                  independent_gates._p2_producer_binding(ROOT, candidate))
@@ -1276,13 +1276,13 @@ class IndependentGateSeamTests(unittest.TestCase):
                     independent_gates._p2_producer_binding(ROOT, current)
 
     def test_output_provenance_window_binds_complete_source_and_rejects_partial_wrapper(self):
-        revision = independent_gates.SHARED_WRITER_SOURCE_REVISION
+        revision = independent_gates.OBSERVER_OPERANDS_SOURCE_REVISION
         checker = independent_gates._prospective_checker_binding(ROOT, revision)
         producer = independent_gates._p2_producer_binding(ROOT, revision)
         self.assertEqual(producer,
-                         independent_gates.APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS)
+                         independent_gates.APPROVED_P2_OBSERVER_OPERANDS_PRODUCERS)
         self.assertIn("actual_output_v6", independent_gates.PORTABLE_REPLAY_MODULES)
-        for relative, digest in independent_gates.OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES.items():
+        for relative, digest in independent_gates.OBSERVER_OPERANDS_CAPTURE_DEPENDENCIES.items():
             with self.subTest(path=relative):
                 committed = subprocess.check_output(
                     ["git", "--no-replace-objects", "show", f"{revision}:{relative}"],
@@ -1290,16 +1290,25 @@ class IndependentGateSeamTests(unittest.TestCase):
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
                 self.assertEqual(digest, hashlib.sha256((ROOT / relative).read_bytes()).hexdigest())
                 self.assertEqual(digest, checker[relative])
-        for relative, digest in independent_gates.P2_OUTPUT_PROVENANCE_DEPENDENCIES.items():
+        for relative, digest in independent_gates.P2_OBSERVER_OPERANDS_DEPENDENCIES.items():
             with self.subTest(producer_dependency=relative):
                 committed = subprocess.check_output(
                     ["git", "--no-replace-objects", "show", f"{revision}:{relative}"],
                     cwd=ROOT)
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
+        old_output = "tools/numerical/portable/actual_output_v6.py"
+        old_committed = subprocess.check_output(
+            ["git", "--no-replace-objects", "show",
+             f"{independent_gates.SHARED_WRITER_SOURCE_REVISION}:{old_output}"],
+            cwd=ROOT)
+        self.assertEqual(independent_gates.OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES[
+            old_output], hashlib.sha256(old_committed).hexdigest())
         for incomplete in (independent_gates.FAILED_OUTPUT_WRAPPER_SOURCE_REVISION,
                            independent_gates.OUTPUT_PROVENANCE_SOURCE_REVISION,
                            "ccd7188bd78a5e2667219d9338bc323d25fac839",
-                           independent_gates.OUTPUT_REVIEW_REMEDY_SOURCE_REVISION):
+                           independent_gates.OUTPUT_REVIEW_REMEDY_SOURCE_REVISION,
+                           independent_gates.SHARED_WRITER_SOURCE_REVISION,
+                           "e10a67d2051e0437236ca7c85d9e8f7bd43177b3"):
             with self.subTest(incomplete=incomplete):
                 with self.assertRaisesRegex(ValueError, "incomplete output source"):
                     independent_gates._prospective_checker_binding(ROOT, incomplete)
@@ -1506,7 +1515,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         revision = independent_gates.PROSPECTIVE_REPLAY_SCRATCH_REVISION
         current_capture_python = {
             path: digest for path, digest in
-            independent_gates.OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES.items()
+            independent_gates.OBSERVER_OPERANDS_CAPTURE_DEPENDENCIES.items()
             if path.endswith(".py")}
         names = ("numeric_producer", "numeric_producer_trace", "numeric_class_witness",
                  "pulley_jdi_v2", "pulley_jdi_v1", "pulley_jdi_inputs_v2", "run",
@@ -2336,7 +2345,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(assembly, independent_gates.P2_DIRECT_WASM_22EFD_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_DIRECT_WASM_22EFD_PRODUCERS)
         self.assertEqual(expected, bound)
-        self.assertEqual(independent_gates.APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS,
+        self.assertEqual(independent_gates.APPROVED_P2_OBSERVER_OPERANDS_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, candidate_head))
         self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
@@ -3080,7 +3089,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
         for revision in (current, "HEAD", old, bounded):
             with self.subTest(revision=revision):
-                self.assertEqual((independent_gates.APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS
+                self.assertEqual((independent_gates.APPROVED_P2_OBSERVER_OPERANDS_PRODUCERS
                                   if revision == "HEAD"
                                   else independent_gates.P2_ROTATION_PREMISE_PRODUCERS),
                                  independent_gates._p2_producer_binding(ROOT, revision))
@@ -3155,7 +3164,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                          independent_gates.P2_JDK21_JDI_DEPENDENCIES[helper])
         for revision in (current, "HEAD", previous, old, bounded):
             with self.subTest(revision=revision):
-                self.assertEqual((independent_gates.APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS
+                self.assertEqual((independent_gates.APPROVED_P2_OBSERVER_OPERANDS_PRODUCERS
                                   if revision == "HEAD"
                                   else independent_gates.P2_ROTATION_PREMISE_PRODUCERS),
                                  independent_gates._p2_producer_binding(ROOT, revision))
