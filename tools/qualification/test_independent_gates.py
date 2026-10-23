@@ -1506,8 +1506,8 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(current, independent_gates.P2_ARITHMETIC_ASSEMBLY_REVISION)
         self.assertEqual(expected, independent_gates.APPROVED_P2_ARITHMETIC_PRODUCERS)
         for name, revision in (
-                ("actual_arithmetic.py", "b5b0611192e8fa667047eec81fc54825571a0c40"),
-                ("rotation_oracle.py", "f35a64eae6e8d7927712e2b6551cc2d9db6c8e77")):
+                ("actual_arithmetic.py", "d981bdd2e6d915554f8fae1ea9b2c2a41cfcc7b0"),
+                ("rotation_oracle.py", "a7d544677f0cd727bc356bacc7eac3dd555cfe80")):
             path = f"tools/numerical/portable/{name}"
             reviewed = subprocess.check_output(
                 ["git", "--no-replace-objects", "show", f"{revision}:{path}"], cwd=ROOT)
@@ -1897,12 +1897,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         for revision in ("b1939e1290721a34c8d0901dc6e6981ac9f8d26d",
                          "54505a49c8cbecb416b44e43a6f491b2f4033224",
                          "edd9d5f2e82154b5bfc3df7ba51b66c8dab542c9",
-                         "d5683a7474e2379f5aa4d5c29dc49b1b109aa98f",
-                         "1d64b344623192b1e8ada06c24d01117a6f6779e",
-                         "2aa68a2ab0ac3864cd593085211dc9733d93c1a5",
-                         "53a4b8e36c24efc2c2d3b481f6f42a02553bd359",
-                         "9ac147b864fe5d33e5d3756963e0b043fc848a57",
-                         "b3def0da2a443e90984e67aede5c45cbea8d7282"):
+                         "d5683a7474e2379f5aa4d5c29dc49b1b109aa98f"):
             with self.subTest(partial=revision), self.assertRaisesRegex(
                     ValueError, "reviewed P2 raw producer blob differs"):
                 independent_gates._p2_producer_binding(ROOT, revision)
@@ -1992,6 +1987,47 @@ class IndependentGateSeamTests(unittest.TestCase):
                     Path, "read_bytes", missing_dependency_local):
                 with self.assertRaises(FileNotFoundError):
                     independent_gates._p2_producer_binding(ROOT, current)
+
+    def test_p2_boolean_jdi_source_binding_rejects_owned_git_history_mutations(self):
+        current = independent_gates.P2_BOOLEAN_JDI_FINAL_SOURCE_REVISION
+        relative = "tools/numerical/portable/actual_arithmetic.py"
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+
+            def git(*arguments):
+                return subprocess.check_output(
+                    ["git", "-C", str(repository), *arguments], stderr=subprocess.PIPE,
+                    text=True).strip()
+
+            git("init", "--quiet")
+            git("fetch", "--quiet", "--no-tags", f"file://{ROOT}", "HEAD")
+            git("checkout", "--quiet", "--detach", current)
+            self.assertEqual(
+                "2c3b33719c03ff2e57ac1eb6739bb248a554ed4efbf4b1e5fa59244e411b54d2",
+                hashlib.sha256((repository / relative).read_bytes()).hexdigest())
+            self.assertEqual(independent_gates.P2_BOOLEAN_JDI_FINAL_PRODUCERS,
+                             independent_gates._p2_producer_binding(repository, current))
+
+            with (repository / relative).open("ab") as source:
+                source.write(b"\n# fixture mutation\n")
+            git("add", relative)
+            git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "alter producer")
+            altered = git("rev-parse", "HEAD")
+            with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
+                independent_gates._p2_producer_binding(repository, altered)
+
+            git("checkout", "--quiet", "--orphan", "copied", current)
+            git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "copy source tree")
+            copied = git("rev-parse", "HEAD")
+            self.assertEqual(
+                "2c3b33719c03ff2e57ac1eb6739bb248a554ed4efbf4b1e5fa59244e411b54d2",
+                hashlib.sha256((repository / relative).read_bytes()).hexdigest())
+            with self.assertRaisesRegex(ValueError, "candidate predates reviewed P2 raw producer revision"):
+                independent_gates._p2_producer_binding(repository, copied)
+            with self.assertRaisesRegex(ValueError, "revision ancestry is unavailable"):
+                independent_gates._p2_producer_binding(repository, "0" * 40)
 
     def test_p2_bounded_jdi_window_binds_helper_and_replays_historical_source(self):
         helper = "tools/numerical/portable/boolean_rotation_jdi/RotationJdiProbe.java"
