@@ -128,7 +128,7 @@ def _buffer(call, vector=False):
 
 
 def verify_stable_input(traces, path, expected_identity, worker, jar, selected_exec,
-                        *, allow_external_readers=False):
+                        *, allow_external_readers=False, require_full_read=False):
     events = _events(traces, (path,))
     groups = {}
     descriptors = {}
@@ -137,6 +137,7 @@ def verify_stable_input(traces, path, expected_identity, worker, jar, selected_e
     worker_finished = False
     selected_count = 0
     opened = []
+    covered = set()
     for _, tid, _, call in events:
         groups.setdefault(tid, tid)
         descriptors.setdefault(tid, {})
@@ -302,6 +303,8 @@ def verify_stable_input(traces, path, expected_identity, worker, jar, selected_e
                 if position is None or position < 0 or jar[position:position + count] != value:
                     raise Rejected("agent input returned bytes or offset differ")
                 item["reads"] += 1
+                if require_full_read:
+                    covered.update(range(position, position + count))
                 if not operation.startswith("pread"):
                     item["position"] += count
         mapped = re.match(MAPPED_FD, call)
@@ -345,6 +348,8 @@ def verify_stable_input(traces, path, expected_identity, worker, jar, selected_e
     read_only_maps = sum(item["maps"] for item in opened)
     if not read_buffers:
         raise Unbound("agent input read and stable identity unavailable")
+    if require_full_read and covered != set(range(len(jar))):
+        raise Unbound("agent input full read coverage is unavailable")
     return {"reads": read_buffers, "read_buffers": read_buffers,
             "read_only_maps": read_only_maps, "identity": expected_identity,
             "identity_mode": "descriptor" if all(item["verified"] for item in opened
@@ -353,7 +358,7 @@ def verify_stable_input(traces, path, expected_identity, worker, jar, selected_e
 
 def verify_transport(traces, destination, mirror, selected_exec, response_path=None, response=None, *,
                      exclusive=True, ordered=True, mirror_identity=None,
-                     shared_writers=False):
+                     shared_writers=False, allow_initial_log_seek=False):
     events = _events(traces, (destination, response_path))
     if (not isinstance(selected_exec, tuple) or len(selected_exec) != 3 or
             not isinstance(selected_exec[0], str) or
@@ -437,7 +442,8 @@ def verify_transport(traces, destination, mirror, selected_exec, response_path=N
         seek_descriptor = re.match(r'lseek\(([0-9]+)(?:<([^>]+)>)?,', call)
         if seek_descriptor and (seek_descriptor[2] == destination or
                 tables[tid].get(seek_descriptor[1], {}).get("path") == destination):
-            initial_log_seek = (not exclusive and not ordered and not outputs and
+            initial_log_seek = (not exclusive and (not ordered or allow_initial_log_seek) and
+                not outputs and
                 tables[tid].get(seek_descriptor[1], {}).get("path") == destination and
                 re.fullmatch(r'lseek\(' + FD + r', 0, SEEK_END\) = 0', call) is not None)
             if not initial_log_seek:
@@ -490,7 +496,8 @@ def verify_transport(traces, destination, mirror, selected_exec, response_path=N
             raise Unbound("protected descriptor close range is unsupported")
         if response_path and response_path in call and call.startswith(("unlink(", "unlinkat(")) and exits.get(worker) == 0:
             continue
-        initial_log_truncate = (not exclusive and not ordered and not outputs and
+        initial_log_truncate = (not exclusive and (not ordered or allow_initial_log_seek) and
+            not outputs and
             (match := re.fullmatch(r'ftruncate\(' + FD + r', 0\) = 0', call)) is not None and
             match[2] == destination and
             tables[tid].get(match[1], {}).get("path") == destination)

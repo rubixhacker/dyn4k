@@ -1,6 +1,7 @@
 import argparse
 from contextlib import contextmanager
 import hashlib
+import io
 import json
 import os
 import re
@@ -269,7 +270,8 @@ def archive_file_names(method, worker_log, worker_argument_log=None, version6=Fa
                       "jdi-helper-traces.zip", "jdi-transport.json"))
         if version6:
             names.update(("class-witness-agent.jar", "class-witness.log", "mirror.log",
-                          "all-process-traces.zip", "capture-metadata.json"))
+                          "all-process-traces.zip", "capture-metadata.json",
+                          "jdi-helper-arguments.log"))
     return names
 
 
@@ -430,8 +432,10 @@ def _run_capture(method, output, reference_case, commit, temporary,
     argument_pattern = temporary / "worker-arguments-%p.log"
     jdi_port = None
     jdi_classes = None
+    helper_class_before = None
     jdi_output = None
     jdi_trace_prefix = None
+    helper_argument_path = None
     version6 = method == _FOCUSED_BOOLEAN_METHOD
     agent = None
     agent_before = None
@@ -444,10 +448,14 @@ def _run_capture(method, output, reference_case, commit, temporary,
         jdi_port = reserve_boolean_jdi_port()
         jdi_output = temporary / "jdi-output"
         jdi_trace_prefix = temporary / "jdi-helper-trace"
+        helper_argument_path = temporary / "jdi-helper-arguments.log"
         jdi_classes, helper_zip = jdi_bridge.compile_helper(
             (PORTABLE / "boolean_rotation_jdi/RotationJdiProbe.java").read_bytes(),
             temporary)
         (output / "jdi-helper-classes.zip").write_bytes(helper_zip)
+        with zipfile.ZipFile(io.BytesIO(helper_zip)) as compiled_helper:
+            helper_class_before = {name: captured_file_identity(jdi_classes / name)
+                                   for name in compiled_helper.namelist()}
         agent = output / "class-witness-agent.jar"
         witness_path = output / "class-witness.log"
         mirror_path = output / "mirror.log"
@@ -526,9 +534,14 @@ def _run_capture(method, output, reference_case, commit, temporary,
                                           "attach", str(jdi_output), "127.0.0.1",
                                           str(jdi_port), "org.dyn4j.geometry.Transform",
                                           "1800", "600"]
+                        helper_environment = environment.copy()
+                        helper_environment["JAVA_TOOL_OPTIONS"] = (
+                            "-Djava.io.tmpdir=" + str(private_tmpdir) +
+                            " -Xlog:arguments=info:file=" + str(helper_argument_path) +
+                            ":pid,level,tags:filecount=0")
                         with (temporary / "jdi-helper.log").open("xb") as helper_log:
                             helper = subprocess.Popen(helper_command, cwd=PORTABLE,
-                                                      env=environment, stdout=helper_log,
+                                                      env=helper_environment, stdout=helper_log,
                                                       stderr=subprocess.STDOUT,
                                                       start_new_session=True)
                             if active is not None:
@@ -557,6 +570,15 @@ def _run_capture(method, output, reference_case, commit, temporary,
             raise CaptureRejected("JDI controller did not finish") from error
         if helper.returncode or not jdi_output.is_dir():
             raise CaptureRejected("JDI controller failed")
+        if not helper_argument_path.is_file() or helper_argument_path.is_symlink():
+            raise CaptureRejected("JDI helper effective startup record is missing")
+        with zipfile.ZipFile(io.BytesIO(helper_zip)) as compiled_helper:
+            for name in compiled_helper.namelist():
+                path = jdi_classes / name
+                if (path.is_symlink() or
+                        captured_file_identity(path) != helper_class_before[name] or
+                        path.read_bytes() != compiled_helper.read(name)):
+                    raise CaptureRejected("executed JDI helper provider changed")
         if active is not None:
             stop_capture_process(helper)
             active.remove(helper)
@@ -639,6 +661,9 @@ def _run_capture(method, output, reference_case, commit, temporary,
                 check_budget()
         if len(helper_pids) != 1:
             raise CaptureRejected("JDI helper process is ambiguous")
+        check_budget(helper_argument_path.stat().st_size)
+        shutil.copyfile(helper_argument_path, output / "jdi-helper-arguments.log")
+        check_budget()
         with zipfile.ZipFile(output / "jdi-evidence.zip", "x") as archive:
             for path in sorted(path for path in jdi_output.rglob("*") if path.is_file()):
                 if not path.is_file() or path.is_symlink():
@@ -714,6 +739,7 @@ def _run_capture(method, output, reference_case, commit, temporary,
             "jdi_helper_classes": "jdi-helper-classes.zip",
             "jdi_evidence": "jdi-evidence.zip",
             "jdi_helper_traces": "jdi-helper-traces.zip",
+            "jdi_helper_arguments": "jdi-helper-arguments.log",
             "jdi_transport": "jdi-transport.json"}.items()})
         response = re.search(r"@(/[^\s]+gradle-worker-classpath[^\s]+txt)",
                              files["gradle_log"].decode("utf-8"))
@@ -747,6 +773,12 @@ def _run_capture(method, output, reference_case, commit, temporary,
                     "artifact_after_identity": identity(STAGED_JAR),
                     "runtime_identity": runtime_before,
                     "runtime_after_identity": identity(JDK21 / "bin/java"),
+                    "helper_class_before": helper_class_before,
+                    "helper_class_after": {
+                        name: identity(jdi_classes / name)
+                        for name in helper_class_before},
+                    "helper_argument_path": str(helper_argument_path),
+                    "helper_argument_identity": identity(helper_argument_path),
                     "witness_identity": identity(witness_path),
                     "mirror_identity": identity(mirror_path),
                     "argument_identity": identity(raw_argument_log),

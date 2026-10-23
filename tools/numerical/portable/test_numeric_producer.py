@@ -161,6 +161,19 @@ class TransportTest(unittest.TestCase):
             b'1.200000 +++ exited with 0 +++\n')}
         identity = {"device_major": 0, "device_minor": 1, "inode": 44, "size": 3}
         self.assertEqual(verify_stable_input(trace, path, identity, "100", b"JAR", WORKER_EXEC)["reads"], 1)
+        self.assertEqual(verify_stable_input(
+            trace, path, identity, "100", b"JAR", WORKER_EXEC,
+            require_full_read=True)["reads"], 1)
+        with self.assertRaises(Rejected):
+            verify_stable_input(
+                {"100": trace["100"].replace(b'"JAR", 3) = 3', b'"BAD", 3) = 3')},
+                path, identity, "100", b"JAR", WORKER_EXEC,
+                require_full_read=True)
+        with self.assertRaises(Unbound):
+            verify_stable_input(
+                {"100": trace["100"].replace(b'"JAR", 3) = 3', b'"JA", 2) = 2')},
+                path, identity, "100", b"JAR", WORKER_EXEC,
+                require_full_read=True)
         path_stat = trace["100"].replace(
             b'1.110000 fstat(4</private/agent.jar>, {st_mode=S_IFREG|0644, st_size=3, st_dev=makedev(0, 1), st_ino=44}) = 0\n',
             b'').replace(

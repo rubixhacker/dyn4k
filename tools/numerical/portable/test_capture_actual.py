@@ -120,6 +120,11 @@ class CaptureSourceGuardTest(unittest.TestCase):
         names = capture_actual.archive_file_names(method, class_log, argument_log)
         self.assertTrue({"jdi-helper-classes.zip", "jdi-evidence.zip",
                          "jdi-helper-traces.zip", "jdi-transport.json"} <= names)
+        v6 = capture_actual.archive_file_names(method, class_log, argument_log,
+                                               version6=True)
+        self.assertEqual(v6 - names, {"class-witness-agent.jar", "class-witness.log",
+                                      "mirror.log", "all-process-traces.zip",
+                                      "capture-metadata.json", "jdi-helper-arguments.log"})
         archive_names = {"worker-write-traces.zip", "jdi-helper-classes.zip",
                          "jdi-evidence.zip", "jdi-helper-traces.zip"}
         for name in names - archive_names:

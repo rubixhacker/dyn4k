@@ -138,6 +138,11 @@ class ClassWitnessTest(unittest.TestCase):
             helper, helper_zip = jdi_bridge.compile_helper(
                 (Path(__file__).parent / "boolean_rotation_jdi/RotationJdiProbe.java").read_bytes(),
                 root / "helper-build")
+            with zipfile.ZipFile(io.BytesIO(helper_zip)) as compiled_helper:
+                helper_members = {name: compiled_helper.read(name)
+                                  for name in compiled_helper.namelist()}
+            helper_before = {name: captured_file_identity(helper / name)
+                             for name in helper_members}
             with socket.socket() as reserved:
                 reserved.bind(("127.0.0.1", 0))
                 port = reserved.getsockname()[1]
@@ -153,12 +158,21 @@ class ClassWitnessTest(unittest.TestCase):
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
             try:
                 output = root / "jdi-output"
+                helper_arguments = root / "jdi-helper-arguments.log"
+                helper_environment = environment.copy()
+                helper_environment["JAVA_TOOL_OPTIONS"] = (
+                    "-Djava.io.tmpdir=" + str(root) +
+                    " -Xlog:arguments=info:file=" + str(helper_arguments) +
+                    ":pid,level,tags:filecount=0")
+                helper_command = [str(JDK / "bin/java"), "--add-modules", "jdk.jdi",
+                                  "-Djava.io.tmpdir=" + str(root),
+                                  "-cp", str(helper), "RotationJdiProbe", "attach-loader",
+                                  str(output), "127.0.0.1", str(port),
+                                  "org.dyn4j.geometry.Transform", "0"]
                 observed = subprocess.run([tracer, *rich_trace_arguments(),
                     "-o", str(root / "helper-trace"),
-                    str(JDK / "bin/java"), "--add-modules", "jdk.jdi", "-cp", str(helper),
-                    "RotationJdiProbe", "attach-loader", str(output), "127.0.0.1",
-                    str(port), "org.dyn4j.geometry.Transform", "0"],
-                    capture_output=True, timeout=60, env=environment)
+                    *helper_command], capture_output=True, timeout=60,
+                    env=helper_environment)
                 stdout, stderr = target.communicate(timeout=60)
             finally:
                 if target.poll() is None:
@@ -198,8 +212,14 @@ class ClassWitnessTest(unittest.TestCase):
                             trace_file.read_bytes())
                 retained_traces[prefix] = archived.getvalue()
                 protected = ({str(agent), str(witness_path)} if prefix == "worker-trace"
-                             else {str(path) for path in output.rglob("*") if path.is_file()})
-                projected = checked_projection(archived.getvalue(), protected)
+                             else ({str(path) for path in output.rglob("*") if path.is_file()} |
+                                   {str(helper / name) for name in helper_members} |
+                                   {str(helper_arguments)}))
+                projected = checked_projection(
+                    archived.getvalue(), protected,
+                    strict_outputs=({str(path) for path in output.rglob("*")
+                                     if path.is_file()} if prefix == "helper-trace"
+                                    else ()))
                 self.assertGreater(projected["raw_bytes"], 0)
                 with zipfile.ZipFile(io.BytesIO(projected["legacy_zip"])) as legacy:
                     self.assertTrue(any(expected_call in legacy.read(name)
@@ -230,6 +250,65 @@ class ClassWitnessTest(unittest.TestCase):
                         shared_writers=True)
                     self.assertEqual(output_proof["mirror_destination"],
                                      str(witness_path))
+            with zipfile.ZipFile(io.BytesIO(retained_traces["helper-trace"])) as raw_zip:
+                helper_raw = {name[6:]: raw_zip.read(name)
+                              for name in raw_zip.namelist()}
+            helper_traces, _ = normalize_rich_traces(helper_raw)
+            helper_executions = [(tid, successful_execve(line.split(" ", 1)[1]))
+                                 for tid, data in helper_traces.items()
+                                 for line in data.decode().splitlines()
+                                 if " execve(" in line and "RotationJdiProbe" in line]
+            self.assertEqual(len(helper_executions), 1)
+            helper_pid = int(helper_executions[0][0])
+            self.assertEqual(helper_executions[0][1],
+                             (helper_command[0], tuple(helper_command)))
+            self.assertEqual(jdi_bridge.verify_jdi_transport_v6(
+                retained_traces["worker-trace"], retained_traces["helper-trace"],
+                port, int(worker[0]), helper_pid, helper_command,
+                focused=False)["status"], "PROVED_JDI_RAW_EXCHANGE")
+            for name, data in helper_members.items():
+                self.assertEqual(captured_file_identity(helper / name),
+                                 helper_before[name])
+                self.assertEqual((helper / name).read_bytes(), data)
+                path = str(helper / name)
+                if any(path in line for trace in helper_traces.values()
+                       for line in trace.decode().splitlines()):
+                    proof = verify_stable_input(
+                        helper_traces, path, helper_before[name], str(helper_pid),
+                        data, (helper_command[0], tuple(helper_command)),
+                        require_full_read=True)
+                    self.assertGreater(proof["reads"], 0)
+                    if name == "RotationJdiProbe.class":
+                        with self.assertRaises(Rejected):
+                            verify_stable_input(
+                                helper_traces, path, helper_before[name], str(helper_pid),
+                                bytes([data[0] ^ 1]) + data[1:],
+                                (helper_command[0], tuple(helper_command)),
+                                require_full_read=True)
+            with zipfile.ZipFile(io.BytesIO(retained_traces["helper-trace"])) as raw_zip:
+                helper_projected = checked_projection(
+                    retained_traces["helper-trace"],
+                    {str(path) for path in output.rglob("*") if path.is_file()} |
+                    {str(helper / name) for name in helper_members} |
+                    {str(helper_arguments)},
+                    strict_outputs={str(path) for path in output.rglob("*")
+                                    if path.is_file()})
+            helper_log = verify_transport(
+                helper_traces, str(helper_arguments), helper_arguments.read_bytes(),
+                (str(helper_pid), helper_command[0], tuple(helper_command)),
+                exclusive=False, shared_writers=True, allow_initial_log_seek=True)
+            self.assertEqual(helper_log["mirror_destination"], str(helper_arguments))
+            from actual_capture_receipt import verify_helper_startup
+            self.assertEqual(verify_helper_startup(
+                helper_arguments.read_bytes(), helper_pid, helper_command,
+                str(helper_arguments))["helper_pid"], helper_pid)
+            jdi_zip = io.BytesIO()
+            with zipfile.ZipFile(jdi_zip, "w") as archive:
+                for path in sorted(path for path in output.rglob("*") if path.is_file()):
+                    archive.writestr(path.relative_to(output).as_posix(), path.read_bytes())
+            self.assertEqual(jdi_bridge.verify_jdi_file_writes(
+                helper_projected["legacy_zip"], jdi_zip.getvalue(),
+                output)["status"], "MATCHED_JDI_FILE_WRITES_UNPASSED_LOADER")
             self.assertEqual(captured_file_identity(agent), agent_before)
             self.assertEqual(captured_file_identity(JDK / "bin/java"), runtime_before)
             evidence_path = os.environ.get("DYN4K_FOCUSED_PILOT_EVIDENCE")
@@ -242,6 +321,7 @@ class ClassWitnessTest(unittest.TestCase):
                     "helper-classes.zip": helper_zip,
                     "worker-traces.zip": retained_traces["worker-trace"],
                     "helper-traces.zip": retained_traces["helper-trace"],
+                    "jdi-helper-arguments.log": helper_arguments.read_bytes(),
                 }
                 jdi_zip = io.BytesIO()
                 with zipfile.ZipFile(jdi_zip, "w") as archive:

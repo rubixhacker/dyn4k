@@ -8,13 +8,104 @@ from unittest.mock import patch
 import zipfile
 
 from actual_capture_receipt import (FILE_NAMES, FocusedRejected,
-                                    _expected_classes, _xml_mirror,
+                                    _expected_classes, _helper_members, _xml_mirror,
+                                    verify_boolean_startup, verify_helper_startup,
                                     load_version6_archive, verify_existing)
+from actual_trace import checked_projection, TraceRejected
+from boolean_rotation_jdi.jdi_bridge import verify_jdi_file_writes
 from prospective_compare import verify_arithmetic_captures
 from receipt import Rejected
 
 
 class FocusedReplayTest(unittest.TestCase):
+    def test_helper_output_destination_is_checked_before_byte_accounting(self):
+        def packed(entries):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as archive:
+                for name, value in entries.items():
+                    archive.writestr(name, value)
+            return output.getvalue()
+
+        root = str(Path.home() / "focused-jdi-output")
+        file_path = root + "/complete.txt"
+        files = {"jdi_helper_classes": packed({"RotationJdiProbe.class": b"class"}),
+                 "jdi_evidence": packed({"complete.txt": b"abc"})}
+        transport = {"helper_classes_path": str(Path.home() / "helper-classes"),
+                     "output_path": root}
+        classes, outputs = _helper_members(files, transport)
+        protected = set(classes) | set(outputs)
+        good = (f'1.000001 openat(AT_FDCWD, "{file_path}", '
+                f'O_WRONLY|O_CREAT|O_TRUNC, 0666) = 7<{file_path}>\n'
+                f'1.000002 write(7<{file_path}>, "abc", 3) = 3\n'
+                f'1.000003 close(7<{file_path}>) = 0\n'
+                '1.000004 +++ exited with 0 +++\n').encode()
+        projected = checked_projection(packed({"trace.41": good}), protected,
+                                       strict_outputs=set(outputs))
+        self.assertEqual(verify_jdi_file_writes(
+            projected["legacy_zip"], files["jdi_evidence"], root)["files"], 1)
+        redirected = good.replace(
+            f'1.000002 write(7<{file_path}>, "abc", 3) = 3'.encode(),
+            (f'1.000002 dup2(8</home/other>, 7<{file_path}>) = 7</home/other>\n'
+             '1.0000021 write(7</home/other>, "abc", 3) = 3').encode())
+        with self.assertRaises(TraceRejected):
+            checked_projection(packed({"trace.41": redirected}), protected,
+                               strict_outputs=set(outputs))
+        replaced = good.replace(
+            b'1.000004 +++ exited with 0 +++\n',
+            f'1.0000031 rename("{file_path}", "{root}/other.txt") = 0\n'
+            '1.000004 +++ exited with 0 +++\n'.encode())
+        with self.assertRaises(TraceRejected):
+            checked_projection(packed({"trace.41": replaced}), protected,
+                               strict_outputs=set(outputs))
+
+    def test_worker_and_helper_effective_agent_inventory(self):
+        home = str(Path.home())
+        metadata = {"agent_path": home + "/agent.jar",
+                    "witness_path": home + "/witness.log",
+                    "mirror_path": home + "/mirror.log"}
+        agent = "-javaagent:" + metadata["agent_path"] + "=boolean:" + metadata["witness_path"]
+        jdwp = ("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,"
+                 "address=127.0.0.1:40001")
+        flags = agent + " " + jdwp + " -XX:+DisableAttachMechanism -Xshare:off " + \
+            "-Dportable.booleanMirror=" + metadata["mirror_path"]
+        prefix = "[41][info][arguments] "
+        def worker_log(options):
+            return ("\n".join(prefix + row for row in (
+                "VM Arguments:", "jvm_args: " + options,
+                "java_command: worker.org.gradle.process.internal.worker.GradleWorkerMain 1",
+                "java_class_path (initial): /home/classes",
+                "Launcher Type: SUN_STANDARD")) + "\n").encode()
+        selected = ("41", "/tmp/dyn4k-tools/jdk21/bin/java",
+                    ("java", agent, jdwp, "GradleWorkerMain"))
+        verify_boolean_startup(worker_log(flags), selected, metadata, 40001)
+        for option in ("-javaagent:/home/other.jar", "-agentlib:other=1"):
+            with self.subTest(option=option), self.assertRaises(FocusedRejected):
+                verify_boolean_startup(worker_log(flags + " " + option), selected,
+                                       metadata, 40001)
+            forged = (selected[0], selected[1], selected[2][:-1] +
+                      (option, selected[2][-1]))
+            with self.subTest(option=option), self.assertRaises(FocusedRejected):
+                verify_boolean_startup(worker_log(flags), forged, metadata, 40001)
+        helper_path = home + "/helper-arguments.log"
+        helper_argv = ["/tmp/dyn4k-tools/jdk21/bin/java", "--add-modules", "jdk.jdi",
+                       "-Djava.io.tmpdir=" + home, "-cp", home + "/helper-classes",
+                       "RotationJdiProbe", "attach", home + "/output", "127.0.0.1",
+                       "40001", "org.dyn4j.geometry.Transform", "1800", "600"]
+        helper_prefix = "[42][info][arguments] "
+        helper_flags = helper_argv[3] + " -Xlog:arguments=info:file=" + \
+            helper_path + ":pid,level,tags:filecount=0"
+        def helper_log(options):
+            return ("\n".join(helper_prefix + row for row in (
+                "VM Arguments:", "jvm_args: " + options,
+                "java_command: " + " ".join(helper_argv[6:]),
+                "java_class_path (initial): " + helper_argv[5],
+                "Launcher Type: SUN_STANDARD")) + "\n").encode()
+        verify_helper_startup(helper_log(helper_flags), 42, helper_argv, helper_path)
+        for option in ("-javaagent:/home/other.jar", "-agentlib:other=1"):
+            with self.subTest(option=option), self.assertRaises(FocusedRejected):
+                verify_helper_startup(helper_log(helper_flags + " " + option), 42,
+                                      helper_argv, helper_path)
+
     def test_full_mirror_requires_order_and_final_newline(self):
         xml = (b'<testsuite><system-out>first\nsecond\n'
                b'</system-out></testsuite>')

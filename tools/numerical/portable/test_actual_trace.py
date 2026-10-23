@@ -56,6 +56,92 @@ class ActualTraceTest(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(TraceRejected):
                 checked_projection(archived({"trace.41": bad}))
 
+    def test_protected_descriptor_requires_continuous_decoration(self):
+        prefix = (b'1.000001 openat(AT_FDCWD, "/home/output", O_WRONLY|O_CREAT) '
+                  b'= 7</home/output>\n')
+        good = (prefix + b'1.000002 write(7</home/output>, "abc", 3) = 3\n'
+                b'1.000003 close(7</home/output>) = 0\n'
+                b'1.000004 +++ exited with 0 +++\n')
+        self.assertEqual(checked_projection(archived({"trace.41": good}),
+                                            {"/home/output"})["threads"], 1)
+        for changed in (
+                good.replace(b'write(7</home/output>', b'write(7'),
+                good.replace(b'close(7</home/output>', b'close(7'),
+                good.replace(b'write(7</home/output>', b'write(7</home/other>'),
+                good.replace(b'= 7</home/output>', b'= 7</home/other>', 1),
+                good.replace(b'write(7</home/output>, "abc", 3) = 3',
+                             b'dup2(8</home/other>, 7</home/output>) = 7</home/other>\n'
+                             b'1.000002 write(7</home/other>, "abc", 3) = 3')):
+            with self.subTest(changed=changed), self.assertRaises(TraceRejected):
+                checked_projection(archived({"trace.41": changed}), {"/home/output"})
+
+    def test_aborted_accept_keeps_raw_timestamp_and_terminal_order(self):
+        good = (b'1.000001 accept(5,  <unfinished ...>\n'
+                b'1.000002 +++ exited with 0 +++\n')
+        self.assertEqual(checked_projection(archived({"trace.41": good}))[
+                         "aborted_calls"], 1)
+        for bad in (
+                good.replace(b'1.000001 accept', b'2.000001 accept'),
+                good + b'1.000003 write(5, "x", 1) = 1\n',
+                good.replace(b'1.000002 +++ exited', b'1.000000 +++ exited')):
+            with self.subTest(bad=bad), self.assertRaises(TraceRejected):
+                checked_projection(archived({"trace.41": bad}))
+
+    def test_shared_and_duplicated_protected_descriptor_lifecycle(self):
+        parent = (
+            b'1.000001 openat(AT_FDCWD, "/home/output", O_WRONLY|O_CREAT) '
+            b'= 7</home/output>\n'
+            b'1.000002 dup(7</home/output>) = 8</home/output>\n'
+            b'1.000003 clone3({flags=CLONE_VM|CLONE_FILES|CLONE_THREAD, '
+            b'exit_signal=0}, 88) = 42\n'
+            b'1.000008 +++ exited with 0 +++\n')
+        child = (
+            b'1.000004 write(8</home/output>, "ok", 2) = 2\n'
+            b'1.000005 close_range(7, 8, 0) = 0\n'
+            b'1.000006 openat(AT_FDCWD, "/home/other", O_WRONLY) = 7</home/other>\n'
+            b'1.000007 write(7</home/other>, "x", 1) = 1\n'
+            b'1.000009 +++ exited with 0 +++\n')
+        self.assertEqual(checked_projection(archived({"trace.41": parent,
+                                                     "trace.42": child}),
+                                            {"/home/output"})["threads"], 2)
+        for changed in (
+                child.replace(b'write(8</home/output>', b'write(8'),
+                child.replace(b'write(8</home/output>', b'write(8</home/other>'),
+                child.replace(b'close_range(7, 8, 0)', b'close_range(7, 8, CLOSE_RANGE_UNSHARE)'),
+                child.replace(b'close_range(7, 8, 0) = 0',
+                              b'dup2(7</home/output>, 8) = 8</home/output>')):
+            with self.subTest(changed=changed), self.assertRaises(TraceRejected):
+                checked_projection(archived({"trace.41": parent,
+                                             "trace.42": changed}), {"/home/output"})
+        unbound_alias = (
+            b'1.000001 dup(7</home/output>) = 8</home/output>\n'
+            b'1.000002 write(8</home/output>, "x", 1) = 1\n'
+            b'1.000003 +++ exited with 0 +++\n')
+        with self.assertRaises(TraceRejected):
+            checked_projection(archived({"trace.41": unbound_alias}), {"/home/output"})
+
+    def test_transfer_operands_cannot_hide_protected_input(self):
+        prefix = (b'1.000001 openat(AT_FDCWD, "/home/input", O_RDONLY) '
+                  b'= 7</home/input>\n')
+        suffix = (b'1.000004 close(7</home/input>) = 0\n'
+                  b'1.000005 +++ exited with 0 +++\n')
+        for good, bad in (
+                (b'1.000002 sendfile(9<TCP:[1]>, 7</home/input>, NULL, 3) = 3\n',
+                 b'1.000002 sendfile(9<TCP:[1]>, 7, NULL, 3) = 3\n'),
+                (b'1.000002 copy_file_range(7</home/input>, [0], '
+                 b'9</home/other>, [0], 3, 0) = 3\n',
+                 b'1.000002 copy_file_range(7, [0], '
+                 b'9</home/other>, [0], 3, 0) = 3\n'),
+                (b'1.000002 mmap(NULL, 3, PROT_READ, MAP_SHARED, '
+                 b'7</home/input>, 0) = 0x1000\n',
+                 b'1.000002 mmap(NULL, 3, PROT_READ, MAP_SHARED, 7, 0) = 0x1000\n')):
+            with self.subTest(good=good):
+                checked_projection(archived({"trace.41": prefix + good + suffix}),
+                                   {"/home/input"})
+                with self.assertRaises(TraceRejected):
+                    checked_projection(archived({"trace.41": prefix + bad + suffix}),
+                                       {"/home/input"})
+
 
 if __name__ == "__main__":
     unittest.main()

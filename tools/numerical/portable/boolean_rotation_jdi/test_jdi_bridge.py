@@ -11,7 +11,7 @@ from unittest.mock import patch
 import jdi_bridge
 from jdi_bridge import (EvidenceRejected, compile_helper, parse_call_sites, verify_body_map,
                         verify_jdi_archive, verify_jdi_file_writes, verify_loader_bridge,
-                        verify_jdi_transport)
+                        verify_jdi_transport, verify_jdi_transport_v6)
 from witness import read_probe_events
 
 
@@ -65,6 +65,63 @@ HELPER_SOCKET_TRACE = (
 
 
 class JdiBridgeTest(unittest.TestCase):
+    def test_version6_raw_transport_requires_live_accept_peer_and_exchange(self):
+        worker = (
+            b'1.000001 execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+            b'["java", "GradleWorkerMain"], 0x7f) = 0\n'
+            b'1.0000011 socket(AF_INET, SOCK_STREAM, IPPROTO_TCP) = 9<TCP:[90]>\n'
+            b'1.000002 bind(9<TCP:[90]>, {sa_family=AF_INET, '
+            b'sin_port=htons(40001), sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n'
+            b'1.000003 listen(9<TCP:[127.0.0.1:40001]>, 1) = 0\n'
+            b'1.000005 accept(9<TCP:[127.0.0.1:40001]>, '
+            b'{sa_family=AF_INET, sin_port=htons(41000), '
+            b'sin_addr=inet_addr("127.0.0.1")}, [128 => 16]) '
+            b'= 10<TCP:[127.0.0.1:40001->127.0.0.1:41000]>\n'
+            b'1.000008 recvfrom(10<TCP:[127.0.0.1:40001->127.0.0.1:41000]>, '
+            b'"JDWP-Handshake", 14, 0, NULL, NULL) = 14\n'
+            b'1.000009 sendto(10<TCP:[127.0.0.1:40001->127.0.0.1:41000]>, '
+            b'"JDWP-Handshake", 14, 0, NULL, 0) = 14\n'
+            b'1.000012 recvfrom(10<TCP:[127.0.0.1:40001->127.0.0.1:41000]>, '
+            b'"request", 7, 0, NULL, NULL) = 7\n'
+            b'1.000013 sendto(10<TCP:[127.0.0.1:40001->127.0.0.1:41000]>, '
+            b'"response", 8, 0, NULL, 0) = 8\n')
+        helper = (
+            b'1.000004 execve("/tmp/dyn4k-tools/jdk21/bin/java", ' +
+            str(HELPER_ARGS).replace("'", '"').encode() + b', 0x7f) = 0\n'
+            b'1.000006 socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 7<TCP:[91]>\n'
+            b'1.000007 connect(7<TCP:[91]>, {sa_family=AF_INET, '
+            b'sin_port=htons(40001), sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n'
+            b'1.0000071 getsockname(7<TCP:[127.0.0.1:41000->127.0.0.1:40001]>, '
+            b'{sa_family=AF_INET, sin_port=htons(41000), '
+            b'sin_addr=inet_addr("127.0.0.1")}, [128 => 16]) = 0\n'
+            b'1.0000072 write(7<TCP:[127.0.0.1:41000->127.0.0.1:40001]>, '
+            b'"JDWP-Handshake", 14) = 14\n'
+            b'1.000010 read(7<TCP:[127.0.0.1:41000->127.0.0.1:40001]>, '
+            b'"JDWP-Handshake", 14) = 14\n'
+            b'1.000011 write(7<TCP:[127.0.0.1:41000->127.0.0.1:40001]>, '
+            b'"request", 7) = 7\n'
+            b'1.000014 read(7<TCP:[127.0.0.1:41000->127.0.0.1:40001]>, '
+            b'"response", 8) = 8\n')
+        result = verify_jdi_transport_v6(archive({"trace.123": worker}),
+                                          archive({"trace.456": helper}),
+                                          40001, 123, 456, HELPER_ARGS)
+        self.assertEqual(result["status"], "PROVED_JDI_RAW_EXCHANGE")
+        for changed_worker, changed_helper in (
+                (worker.replace(b'1.000005 accept',
+                                b'1.0000031 close(9<TCP:[127.0.0.1:40001]>) = 0\n'
+                                b'1.000005 accept'), helper),
+                (worker.replace(b'accept(9', b'noaccept(9'), helper),
+                (worker.replace(b'41000', b'41001'), helper),
+                (worker.replace(b'JDWP-Handshake', b'JDWP-Xandshake'), helper),
+                (worker, helper.replace(b'1.0000072 write', b'1.0000072 nowrite')),
+                (worker, helper.replace(b'1.000011 write', b'1.000011 nowrite')),
+                (worker, helper.replace(b'41000', b'41002'))):
+            with self.subTest(worker=changed_worker, helper=changed_helper):
+                with self.assertRaises(EvidenceRejected):
+                    verify_jdi_transport_v6(archive({"trace.123": changed_worker}),
+                                             archive({"trace.456": changed_helper}),
+                                             40001, 123, 456, HELPER_ARGS)
+
     def test_loader_bridge_joins_jvm_ids_and_observer_label_separately(self):
         raw = (b"transform\t41\nobserved\t41\nagent\t7\n"
                b"label\tL2\nordinal\t17\nprovider_count\t1\n")

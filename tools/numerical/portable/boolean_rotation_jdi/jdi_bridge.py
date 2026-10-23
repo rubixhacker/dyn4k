@@ -7,6 +7,7 @@ import stat
 import subprocess
 import tempfile
 import zipfile
+from decimal import Decimal
 
 if __package__:
     from .loaded_code import verify_probe_code
@@ -463,6 +464,229 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
             "qualification": "UNPASSED", "worker_socket_writer": bound[0][0],
             "worker_socket_listener": bound[0][0], "worker_tgid": worker_pid,
             "helper_connector": connected[0][0], "port": port}
+
+
+def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
+                            helper_pid, expected_argv, *, focused=True):
+    from actual_trace import normalize_rich_traces
+    from numeric_producer_trace import _events, successful_execve
+
+    if (type(port) is not int or not 1 <= port <= 65535 or
+            type(worker_pid) is not int or worker_pid <= 0 or
+            type(helper_pid) is not int or helper_pid <= 0 or
+            type(expected_argv) is not list or len(expected_argv) < 9 or
+            any(type(value) is not str for value in expected_argv) or
+            (focused and (len(expected_argv) != 14 or
+            expected_argv != [str(JDK21 / "bin/java"), "--add-modules", "jdk.jdi",
+                              expected_argv[3], "-cp", expected_argv[5],
+                              "RotationJdiProbe", "attach", expected_argv[8],
+                              "127.0.0.1", str(port),
+                              "org.dyn4j.geometry.Transform", "1800", "600"])) or
+            (focused and not expected_argv[3].startswith("-Djava.io.tmpdir=")) or
+            (focused and any(not Path(value).is_absolute() or
+                not Path(value).resolve().is_relative_to(Path.home().resolve())
+                for value in (expected_argv[3].removeprefix("-Djava.io.tmpdir="),
+                              expected_argv[5], expected_argv[8]))) or
+            (not focused and (len(expected_argv) != 13 or
+             expected_argv[:4] != [str(JDK21 / "bin/java"), "--add-modules",
+                                  "jdk.jdi", expected_argv[3]] or
+             not expected_argv[3].startswith("-Djava.io.tmpdir=") or
+             expected_argv[4:7] != ["-cp", expected_argv[5],
+                                     "RotationJdiProbe"] or
+             expected_argv[7:10] != ["attach-loader", expected_argv[8],
+                                      "127.0.0.1"] or
+             expected_argv[10:] != [str(port), "org.dyn4j.geometry.Transform", "0"]))):
+        raise EvidenceRejected("JDI version 6 command identity differs")
+
+    def records(raw):
+        original = {str(pid): trace.encode() for pid, trace in _trace_members(raw).items()}
+        normalized, _ = normalize_rich_traces(original)
+        events = _events(normalized, ())
+        plain = {int(pid): "\n".join(line.split(" ", 1)[1]
+                for line in data.decode().splitlines()) + "\n"
+                 for pid, data in normalized.items()}
+        return events, plain
+
+    worker_events, workers = records(worker_archive)
+    helper_events, helpers = records(helper_archive)
+    if worker_pid not in workers or helper_pid not in helpers:
+        raise EvidenceRejected("JDI version 6 selected process trace differs")
+    worker_threads = _worker_thread_ids(workers, worker_pid)
+    _helper_descendants(helpers, helper_pid)
+    helper_threads = _worker_thread_ids(helpers, helper_pid)
+    worker_exec = [(tid, successful_execve(call)) for _, tid, _, call in worker_events
+                   if call.startswith(("execve(", "execveat(")) and call.endswith(" = 0")]
+    helper_exec = [(tid, successful_execve(call)) for _, tid, _, call in helper_events
+                   if call.startswith(("execve(", "execveat(")) and call.endswith(" = 0")]
+    if (len(worker_exec) != 1 or worker_exec[0][0] != str(worker_pid) or
+            worker_exec[0][1] is None or
+            ("GradleWorkerMain" if focused else "Main") not in
+            worker_exec[0][1][1] or
+            len(helper_exec) != 1 or helper_exec[0] != (
+                str(helper_pid), (str(JDK21 / "bin/java"), tuple(expected_argv)))):
+        raise EvidenceRejected("JDI version 6 selected Java execution differs")
+
+    bind = re.compile(r'bind\((\d+)<(TCP:\[[^]]+\])>, '
+                      r'\{sa_family=AF_INET, sin_port=htons\(' + str(port) +
+                      r'\), sin_addr=inet_addr\("127\.0\.0\.1"\)\}, 16\) = 0$')
+    listen = re.compile(r'listen\((\d+)<TCP:\[127\.0\.0\.1:' + str(port) +
+                        r'\]>, [1-9][0-9]*\) = 0$')
+    accept = re.compile(r'accept(?:4)?\((\d+)<TCP:\[127\.0\.0\.1:' + str(port) +
+                        r'\]>, \{sa_family=AF_INET, sin_port=htons\(([1-9][0-9]*)\), '
+                        r'sin_addr=inet_addr\("127\.0\.0\.1"\)\}, '
+                        r'\[[0-9]+ => 16\](?:, [^)]*)?\) = (\d+)<(TCP:\['
+                        r'127\.0\.0\.1:' + str(port) +
+                        r'->127\.0\.0\.1:\2\])>$')
+    connect_ipv4 = re.compile(
+        r'connect\((\d+)<(TCP:\[[^>]+\])>, \{sa_family=AF_INET, '
+        r'sin_port=htons\(' + str(port) +
+        r'\), sin_addr=inet_addr\("127\.0\.0\.1"\)\}, 16\) = 0$')
+    connect_ipv6 = re.compile(
+        r'connect\((\d+)<(TCPv6:\[[^>]+\])>, \{sa_family=AF_INET6, '
+        r'sin6_port=htons\(' + str(port) + r'\), sin6_flowinfo=htonl\(0\), '
+        r'inet_pton\(AF_INET6, "::ffff:127\.0\.0\.1", &sin6_addr\), '
+        r'sin6_scope_id=0\}, 28\) = 0$')
+    socket = re.compile(
+        r'socket\(AF_INET6?, SOCK_STREAM(?:\|SOCK_(?:CLOEXEC|NONBLOCK))*, '
+        r'IPPROTO_(?:TCP|IP)\) = (\d+)<(TCP(?:v6)?:\[[^>]+\])>$')
+    binds = [(stamp, int(tid), match[1], match[2]) for stamp, tid, _, call in worker_events
+             if int(tid) in worker_threads and (match := bind.fullmatch(call))]
+    listens = [(stamp, int(tid), match[1]) for stamp, tid, _, call in worker_events
+               if int(tid) in worker_threads and (match := listen.fullmatch(call))]
+    accepts = [(stamp, int(tid), match.groups()) for stamp, tid, _, call in worker_events
+               if int(tid) in worker_threads and (match := accept.fullmatch(call))]
+    connects = [(stamp, int(tid), match.groups(), call) for stamp, tid, _, call in helper_events
+                if int(tid) in helper_threads and
+                (match := connect_ipv4.fullmatch(call) or connect_ipv6.fullmatch(call))]
+    if any(call.startswith("connect(") and call.endswith(" = 0") and
+           connect_ipv4.fullmatch(call) is None and
+           connect_ipv6.fullmatch(call) is None
+           for _, tid, _, call in helper_events if int(tid) in helper_threads):
+        raise EvidenceRejected("JDI version 6 helper connected elsewhere")
+    if any(call.startswith("bind(") and call.endswith(" = 0") and
+           f"htons({port})" in call and bind.fullmatch(call) is None
+           for _, tid, _, call in worker_events if int(tid) in worker_threads):
+        raise EvidenceRejected("JDI version 6 worker bound another address")
+    if any(call.startswith(("accept(", "accept4(")) and
+           re.search(r"\) = [1-9][0-9]*<", call) and
+           f"127.0.0.1:{port}" in call and accept.fullmatch(call) is None
+           for _, tid, _, call in worker_events if int(tid) in worker_threads):
+        raise EvidenceRejected("JDI version 6 accepted socket format differs")
+    if len(connects) != 1 or len(accepts) != 1:
+        raise EvidenceRejected("JDI version 6 accepted connection differs")
+    connected_at, helper_thread, (helper_fd, _,), connect_call = connects[0]
+    accepted_at, worker_thread, (listener_fd, peer_port, accepted_fd,
+                                 accepted_token) = accepts[0]
+    matching = [(bound_at, listened_at, token) for bound_at, _, bound_fd, token in binds
+                for listened_at, _, listened_fd in listens
+                if bound_fd == listened_fd == listener_fd and
+                bound_at < listened_at < min(connected_at, accepted_at)]
+    if len(matching) != 1:
+        raise EvidenceRejected("JDI version 6 selected listener differs")
+    bound_at, listened_at, bound_token = matching[0]
+
+    def source(events, threads, fd, token, before):
+        found = [(stamp, int(tid)) for stamp, tid, _, call in events
+                 if int(tid) in threads and stamp < before and
+                 (match := socket.fullmatch(call)) and
+                 match.groups() == (fd, token)]
+        if len(found) != 1:
+            raise EvidenceRejected("JDI version 6 socket provider differs")
+        return found[0][0]
+
+    def continuous(events, threads, fd, start, end):
+        for stamp, tid, _, call in events:
+            if int(tid) not in threads or not start < stamp < end:
+                continue
+            closed_range = re.fullmatch(
+                r'close_range\(([0-9]+), ([0-9]+), ([^)]+)\) = 0', call)
+            if closed_range and int(closed_range[1]) <= int(fd) <= int(closed_range[2]):
+                raise EvidenceRejected("JDI version 6 socket was closed by range")
+            changed = ((re.match(r'(?:close|shutdown)\(' + fd + r'(?:<|[,])', call) or
+                        re.match(r'close_range\(', call) and closed_range is None) and
+                       call.endswith(" = 0") or
+                       re.match(r'dup[23]\([^,]+, ' + fd + r'(?:<|[,])', call) and
+                       re.search(r'\) = ' + fd + r'(?:<|$)', call) or
+                       re.match(r'socket\(', call) and
+                       re.search(r'\) = ' + fd + r'<TCP', call))
+            if changed:
+                raise EvidenceRejected("JDI version 6 socket descriptor changed")
+
+    worker_socket_at = source(worker_events, worker_threads, listener_fd,
+                              bound_token, bound_at)
+    helper_socket_at = source(helper_events, helper_threads, helper_fd,
+                              connects[0][2][1], connected_at)
+    continuous(worker_events, worker_threads, listener_fd,
+               worker_socket_at, connected_at)
+    continuous(helper_events, helper_threads, helper_fd,
+               helper_socket_at, connected_at)
+    family = "TCPv6" if "AF_INET6" in connect_call else "TCP"
+    local = "[::ffff:127.0.0.1]" if family == "TCPv6" else "127.0.0.1"
+    helper_token = f"{family}:[{local}:{peer_port}->{local}:{port}]"
+    helper_name = re.compile(r'getsockname\(' + helper_fd + r'<' +
+                             re.escape(helper_token) + r'>, '
+                             r'\{sa_family=AF_INET(?:6)?, .*?htons\(' +
+                             peer_port + r'\).*?\}, \[[^]]+\]\) = 0$')
+    names = [(stamp, tid) for stamp, tid, _, call in helper_events
+             if int(tid) in helper_threads and helper_name.fullmatch(call)]
+    if len(names) < 1 or any(stamp <= connected_at for stamp, _ in names):
+        raise EvidenceRejected("JDI version 6 helper peer differs")
+
+    def handshake(events, fd, token, names):
+        found = {}
+        for stamp, tid, _, call in events:
+            for name in names:
+                if re.fullmatch(name + r'\(' + fd + r'<' + re.escape(token) +
+                                r'>, "JDWP-Handshake", 14(?:, 0, NULL, '
+                                r'(?:NULL|0))?\) = 14', call):
+                    if name in found:
+                        raise EvidenceRejected("JDI version 6 handshake is ambiguous")
+                    found[name] = (stamp, tid)
+        return found
+
+    worker_io = handshake(worker_events, accepted_fd, accepted_token,
+                          ("recvfrom", "sendto"))
+    helper_io = handshake(helper_events, helper_fd, helper_token, ("write", "read"))
+    if (set(worker_io) != {"recvfrom", "sendto"} or
+            set(helper_io) != {"write", "read"} or
+            not connected_at < helper_io["write"][0] < worker_io["recvfrom"][0] <
+            worker_io["sendto"][0] < helper_io["read"][0] or
+            accepted_at >= worker_io["recvfrom"][0] or
+            worker_io["recvfrom"][1] != str(worker_thread) or
+            worker_io["sendto"][1] != str(worker_thread) or
+            helper_io["write"][1] != str(helper_thread) or
+            helper_io["read"][1] != str(helper_thread)):
+        raise EvidenceRejected("JDI version 6 accepted handshake differs")
+    continuous(worker_events, worker_threads, accepted_fd,
+               accepted_at, worker_io["sendto"][0])
+    continuous(helper_events, helper_threads, helper_fd,
+               connected_at, helper_io["read"][0])
+    def traffic(events, fd, token, after, send, receive):
+        counts = {"send": 0, "receive": 0}
+        for stamp, _, _, call in events:
+            if stamp <= after or "JDWP-Handshake" in call:
+                continue
+            for direction, names in (("send", send), ("receive", receive)):
+                if (re.match(r'(?:' + "|".join(names) + r')\(' + fd + r'<' +
+                             re.escape(token) + r'>,', call) and
+                        re.search(r'\) = [1-9][0-9]*$', call)):
+                    counts[direction] += 1
+        return counts
+
+    worker_packets = traffic(worker_events, accepted_fd, accepted_token,
+                             worker_io["sendto"][0], ("sendto", "sendmsg", "write"),
+                             ("recvfrom", "recvmsg", "read"))
+    helper_packets = traffic(helper_events, helper_fd, helper_token,
+                             helper_io["read"][0], ("write", "sendto", "sendmsg"),
+                             ("read", "recvfrom", "recvmsg"))
+    if (not all(worker_packets.values()) or not all(helper_packets.values())):
+        raise EvidenceRejected("JDI version 6 protocol exchange is missing")
+    return {"status": "PROVED_JDI_RAW_EXCHANGE", "qualification": "UNPASSED",
+            "worker_tgid": worker_pid, "worker_thread": worker_thread,
+            "listener_fd": int(listener_fd), "accepted_fd": int(accepted_fd),
+            "helper_tgid": helper_pid, "helper_thread": helper_thread,
+            "helper_fd": int(helper_fd), "peer_port": int(peer_port), "port": port,
+            "worker_packets": worker_packets, "helper_packets": helper_packets}
 
 
 def verify_jdi_file_writes(helper_archive, evidence_archive, output_path):

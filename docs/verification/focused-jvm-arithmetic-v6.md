@@ -6,6 +6,10 @@ The version 6 receipt covers one Boolean method and one case: captureRevoluteLim
 
 The capture retains raw timestamped worker and helper traces. The verifier checks protected operations before it projects syntax for the older process readers. It keeps the original bytes and hashes. The selected worker must read the response and rebuilt agent inputs, write the direct mirror, and produce the class-load, argument, and class witness files at their recorded destinations.
 
+Version 6 checks each protected descriptor use across threads, copies, reassignment, and closure. Its helper output scope includes every archived JDI file. The byte check reads the projected trace only after the raw destination check succeeds. The verifier also checks the raw accept, the live worker listener, the helper peer, and both sides of the JDWP handshake. The older socket and file status values remain unpassed records; they do not establish this version 6 transport proof.
+
+The capture records each rebuilt helper class file's identity before and after execution. Replay checks the selected helper process's complete reads of every class file it accessed. The main helper class must be read. The helper's effective startup log and the worker's effective startup log must contain only their permitted agent options. Both logs are tied to the selected process and their raw file writes.
+
 The class witness records each relevant definition, successful load, provider, and loader label. At the unique Transform class-prepare event, JDI reads the agent's retained loader object, label, and definition ordinal. The verifier compares JVM object IDs with JVM object IDs. It joins the local label and ordinal to the terminal witness record. It also compares the loaded Transform and agent helper code with their source-derived bytes.
 
 The direct mirror must equal the complete XML output in order, including its final newline. The existing caller, receiver, thread, order, bit, signed-zero, and arithmetic-oracle checks still apply. A passing focused receipt is method evidence with outer qualification UNPASSED. It does not change the fixed 32-ulp result or activate the conditional budget.
@@ -30,4 +34,4 @@ Replay first runs the existing whole-lane comparison with no arithmetic-capture 
 
 ## Current evidence boundary
 
-The source phase has a bounded JDK 21 toy loader and transport pilot. It has no version 6 capture of the 600-step case and no whole-lane replay. The parent and runtime child tickets remain open. Source review, exact-main CI, full capture, independent runtime audit, and retrospective are separate checks.
+The corrected source phase requires a new bounded JDK 21 toy loader and transport pilot at the clean correction commit. A toy run cannot establish the 600-step method result. There is no version 6 capture of that case or whole-lane replay yet. The parent and runtime child tickets remain open. Source review, exact-main CI, full capture, independent runtime audit, and retrospective are separate checks.

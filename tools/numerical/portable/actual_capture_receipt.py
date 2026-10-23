@@ -46,6 +46,7 @@ FILE_NAMES = {
     "jdi_helper_classes": "jdi-helper-classes.zip",
     "jdi_evidence": "jdi-evidence.zip",
     "jdi_helper_traces": "jdi-helper-traces.zip",
+    "jdi_helper_arguments": "jdi-helper-arguments.log",
     "jdi_transport": "jdi-transport.json",
     "agent": "class-witness-agent.jar", "class_witness": "class-witness.log",
     "mirror": "mirror.log", "all_process_traces": "all-process-traces.zip",
@@ -240,6 +241,111 @@ def _xml_mirror(files):
     return sha(files["mirror"])
 
 
+def _helper_members(files, transport):
+    classes = {}
+    outputs = {}
+    for field, target in (("jdi_helper_classes", classes),
+                          ("jdi_evidence", outputs)):
+        try:
+            with zipfile.ZipFile(io.BytesIO(files[field])) as archive:
+                names = archive.namelist()
+                require(names and len(names) == len(set(names)) and
+                        archive.testzip() is None and all(
+                            name and not name.startswith("/") and
+                            all(part not in ("", ".", "..") for part in name.split("/"))
+                            for name in names), "JDI file inventory differs")
+                target.update({name: archive.read(name) for name in names})
+        except (OSError, ValueError, zipfile.BadZipFile) as error:
+            if isinstance(error, FocusedRejected):
+                raise
+            raise FocusedRejected("JDI file archive differs") from error
+    require(all(re.fullmatch(r"RotationJdiProbe(?:\$[A-Za-z0-9_$]+)?\.class", name)
+                for name in classes), "JDI helper class inventory differs")
+    class_paths = {str(Path(transport["helper_classes_path"]) / name): data
+                   for name, data in classes.items()}
+    output_paths = {str(Path(transport["output_path"]) / name): data
+                    for name, data in outputs.items()}
+    return class_paths, output_paths
+
+
+def verify_boolean_startup(raw, selected, metadata, port):
+    prefix = f"[{selected[0]}][info][arguments] "
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeError as error:
+        raise FocusedRejected("selected worker startup encoding differs") from error
+    require(len(lines) == 5 and all(line.startswith(prefix) for line in lines),
+            "selected worker startup inventory differs")
+    rows = [line[len(prefix):] for line in lines]
+    require(rows[0] == "VM Arguments:" and rows[1].startswith("jvm_args: ") and
+            rows[2].startswith("java_command: " +
+                               "worker.org.gradle.process.internal.worker.GradleWorkerMain ") and
+            rows[4] == "Launcher Type: SUN_STANDARD",
+            "selected worker startup records differ")
+    flags = rows[1].removeprefix("jvm_args: ").split()
+    expected_agent = ("-javaagent:" + metadata["agent_path"] + "=boolean:" +
+                      metadata["witness_path"])
+    jdwp = ("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,"
+            f"address=127.0.0.1:{port}")
+    exact = {expected_agent, jdwp, "-XX:+DisableAttachMechanism", "-Xshare:off",
+             "-XX:-UsePerfData", "-Xmx512m", "-Dfile.encoding=UTF-8",
+             "-Duser.country", "-Duser.language=en", "-Duser.variant", "-ea",
+             "-Dportable.booleanMirror=" + metadata["mirror_path"]}
+    prefixes = ("-Djava.io.tmpdir=", "-Dorg.gradle.internal.worker.tmpdir=",
+                "-Xlog:arguments=info:file=", "-Xlog:class+load=info:file=")
+    require(len(flags) == len(set(flags)) and
+            all(flag in exact or flag.startswith(prefixes) for flag in flags) and
+            all(flags.count(flag) == 1 for flag in (
+                expected_agent, jdwp, "-XX:+DisableAttachMechanism", "-Xshare:off",
+                "-Dportable.booleanMirror=" + metadata["mirror_path"])) and
+            sum(flag.startswith("-javaagent") for flag in flags) == 1 and
+            sum(flag.startswith("-agentlib") for flag in flags) == 1 and
+            not any(flag.startswith(("-agentpath", "-Xrunjdwp", "-Xbootclasspath",
+                                     "--patch-module", "-Djava.system.class.loader=",
+                                     "-XX:SharedArchiveFile")) for flag in flags),
+            "selected worker startup agent inventory differs")
+    argv = selected[2]
+    require(argv.count(expected_agent) == 1 and argv.count(jdwp) == 1 and
+            sum(option.startswith("-javaagent") for option in argv) == 1 and
+            sum(option.startswith("-agentlib") for option in argv) == 1 and
+            not any(option.startswith(("-agentpath", "-Xrunjdwp"))
+                    for option in argv),
+            "traced worker startup agent inventory differs")
+    return {"worker_agent": expected_agent, "jdwp_option": jdwp,
+            "effective_option_count": len(flags)}
+
+
+def verify_helper_startup(raw, helper_pid, argv, argument_path):
+    prefix = f"[{helper_pid}][info][arguments] "
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeError as error:
+        raise FocusedRejected("JDI helper startup encoding differs") from error
+    require(len(lines) == 5 and all(line.startswith(prefix) for line in lines),
+            "JDI helper effective startup inventory differs")
+    rows = [line[len(prefix):] for line in lines]
+    logging = ("-Xlog:arguments=info:file=" + argument_path +
+               ":pid,level,tags:filecount=0")
+    temp_option = argv[3]
+    require(rows[0] == "VM Arguments:" and rows[1].startswith("jvm_args: ") and
+            rows[2] == "java_command: " + " ".join(argv[6:]) and
+            rows[3] == "java_class_path (initial): " + argv[5] and
+            rows[4] == "Launcher Type: SUN_STANDARD",
+            "JDI helper startup records differ")
+    flags = rows[1].removeprefix("jvm_args: ").split()
+    require(flags.count(logging) == 1 and flags.count(temp_option) in (1, 2) and
+            all(flag in (logging, temp_option, "--add-modules=jdk.jdi")
+                for flag in flags) and
+            not any(flag.startswith(("-javaagent", "-agentlib", "-agentpath",
+                                     "-Xrunjdwp", "-Xbootclasspath", "--patch-module",
+                                     "-Djava.system.class.loader=")) for flag in flags) and
+            not any(flag.startswith(("-javaagent", "-agentlib", "-agentpath",
+                                       "-Xrunjdwp")) for flag in argv),
+            "JDI helper startup agent inventory differs")
+    return {"helper_pid": helper_pid, "effective_option_count": len(flags),
+            "argument_path": argument_path}
+
+
 def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
            aborted):
     require(type(metadata) is dict and set(metadata) == {
@@ -250,6 +356,8 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
         "response_identity", "agent_after_identity",
         "artifact_identity", "artifact_after_identity",
         "runtime_identity", "runtime_after_identity",
+        "helper_class_before", "helper_class_after",
+        "helper_argument_path", "helper_argument_identity",
         "worker_pid", "exit_code"} and
         metadata["schema"] == "focused-arithmetic-capture/6" and
         metadata["trace_arguments"] == rich_trace_arguments() and
@@ -306,17 +414,6 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
     response_read = verify_stable_input(
         traces, response_path, metadata["response_identity"], selected[0],
         files["worker_classpath"], selected[1:], allow_external_readers=True)
-    worker_arguments = files["worker_arguments"].decode("utf-8")
-    required_agent = "-javaagent:" + metadata["agent_path"] + "=" + (
-        "boolean:" + metadata["witness_path"])
-    require(worker_arguments.count(required_agent) == 1 and
-            worker_arguments.count("-agentlib:jdwp=") == 1 and
-            worker_arguments.count("-Dportable.booleanMirror=" +
-                                   metadata["mirror_path"]) == 1 and
-            not any(token in worker_arguments for token in (
-                "-agentpath:", "-Xbootclasspath", "--patch-module",
-                "-Djava.system.class.loader=")),
-            "selected worker code provider or output options differ")
     mirror = verify_transport(
         traces, metadata["mirror_path"], files["mirror"], selected,
         response_path, files["worker_classpath"],
@@ -392,8 +489,51 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
             "-Djava.io.tmpdir=" + paths[2], "-cp", paths[0],
             "RotationJdiProbe", "attach", paths[1], "127.0.0.1",
             str(transport["port"]), "org.dyn4j.geometry.Transform", "1800", "600"]
-    jdi_transport = jdi_bridge.verify_jdi_transport(
-        worker["legacy_zip"], helper["legacy_zip"], transport["port"],
+    startup = verify_boolean_startup(files["worker_arguments"], selected, metadata,
+                                     transport["port"])
+    class_paths, _ = _helper_members(files, transport)
+    require(type(metadata["helper_class_before"]) is dict and
+            type(metadata["helper_class_after"]) is dict and
+            set(metadata["helper_class_before"]) ==
+            set(metadata["helper_class_after"]) ==
+            {Path(path).name for path in class_paths} and
+            metadata["helper_class_before"] == metadata["helper_class_after"],
+            "JDI helper class input identity changed")
+    helper_traces, _ = normalize_rich_traces(_trace_map(files["jdi_helper_traces"]))
+    require(metadata["helper_argument_path"] ==
+            str(Path(transport["temp_path"]) / "jdi-helper-arguments.log"),
+            "JDI helper startup log path differs")
+    require(type(metadata["helper_argument_identity"]) is dict and
+            set(metadata["helper_argument_identity"]) == {
+                "device_major", "device_minor", "inode", "size"} and
+            metadata["helper_argument_identity"]["size"] ==
+            len(files["jdi_helper_arguments"]),
+            "JDI helper startup log identity differs")
+    helper_argument = verify_transport(
+        helper_traces, metadata["helper_argument_path"],
+        files["jdi_helper_arguments"],
+        (str(transport["helper_pid"]), argv[0], tuple(argv)),
+        exclusive=False, shared_writers=True, allow_initial_log_seek=True)
+    helper_startup = verify_helper_startup(
+        files["jdi_helper_arguments"], transport["helper_pid"], argv,
+        metadata["helper_argument_path"])
+    helper_reads = {}
+    for path, data in class_paths.items():
+        identity = metadata["helper_class_before"][Path(path).name]
+        require(type(identity) is dict and set(identity) == {
+            "device_major", "device_minor", "inode", "size"} and
+            all(type(value) is int and value >= 0 for value in identity.values()) and
+            identity["size"] == len(data), "JDI helper class identity differs")
+        observed = any(path in line for trace in helper_traces.values()
+                       for line in trace.decode().splitlines())
+        if observed:
+            helper_reads[Path(path).name] = verify_stable_input(
+                helper_traces, path, identity, str(transport["helper_pid"]), data,
+                (argv[0], tuple(argv)), require_full_read=True)
+    require("RotationJdiProbe.class" in helper_reads,
+            "executed JDI helper main class input is missing")
+    jdi_transport = jdi_bridge.verify_jdi_transport_v6(
+        files["worker_write_traces"], files["jdi_helper_traces"], transport["port"],
         int(selected[0]), transport["helper_pid"], argv)
     jdi_files = jdi_bridge.verify_jdi_file_writes(
         helper["legacy_zip"], files["jdi_evidence"], paths[1])
@@ -427,6 +567,11 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
         "loader_bridge": observation["loader_bridge"],
         "jdi_transport": jdi_transport["status"],
         "jdi_files": jdi_files["status"],
+        "jdi_helper_input_reads": {name: value["reads"] for name, value in
+                                   helper_reads.items()},
+        "worker_startup": startup,
+        "helper_startup": helper_startup,
+        "helper_argument_destination": helper_argument["mirror_destination"],
         "source_sites": sites,
         "calls_checked": 1800,
         "worker_raw_sha256": worker["raw_sha256"],
@@ -452,20 +597,30 @@ def make_version6_receipt(files, commit, runtime_executable=_PINNED_JAVA):
         "agent_identity", "witness_identity", "mirror_identity",
         "argument_identity", "class_load_identity", "response_identity",
         "agent_after_identity", "artifact_identity", "artifact_after_identity",
-        "runtime_identity", "runtime_after_identity", "worker_pid", "exit_code"} and
+        "runtime_identity", "runtime_after_identity", "helper_class_before",
+        "helper_class_after", "helper_argument_path", "helper_argument_identity",
+        "worker_pid", "exit_code"} and
         all(type(metadata[key]) is str and metadata[key].startswith("/") for key in (
             "response_path", "agent_path", "witness_path", "mirror_path",
-            "class_load_path", "argument_path")),
+            "class_load_path", "argument_path", "helper_argument_path")),
         "focused capture metadata inventory differs")
+    transport = decoded(files["jdi_transport"])
+    require(type(transport) is dict and set(transport) == {
+        "schema", "port", "worker_pid", "helper_pid", "helper_classes_path",
+        "output_path", "temp_path", "live_socket_owner"},
+        "focused JDI transport declaration differs")
+    class_paths, output_paths = _helper_members(files, transport)
     protected = {metadata[key] for key in (
         "response_path", "agent_path", "witness_path", "mirror_path",
-        "class_load_path", "argument_path")}
+        "class_load_path", "argument_path", "helper_argument_path")} | \
+        set(class_paths) | set(output_paths)
     raw_traces = _trace_map(files["all_process_traces"])
     traces, aborted = normalize_rich_traces(raw_traces)
     events = _events(traces, protected)
     _validate_calls(events, protected)
     worker = checked_projection(files["worker_write_traces"], protected)
-    helper = checked_projection(files["jdi_helper_traces"], protected)
+    helper = checked_projection(files["jdi_helper_traces"], protected,
+                                strict_outputs=set(output_paths))
     legacy_files = _legacy_files(files, worker)
     legacy = make_capture_receipt(
         legacy_files, _FOCUSED_BOOLEAN_METHOD, commit,
