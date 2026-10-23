@@ -471,7 +471,7 @@ def _proof(raw, receipt, cases, artifacts, scratch):
     require(any("execve(" + json.dumps(command[0]) + ", " + json.dumps(command) + ", " in line and
                 line.endswith(" = 0") for line in traces[root].decode().splitlines()),
             "traced root invocation differs")
-    require(metadata["trace_arguments"] == ["-ff", "-ttt", "-yy", "-s", "131072", "-e",
+    require(metadata["trace_arguments"] == ["-ff", "-ttt", "-yy", "-v", "-s", "131072", "-e",
                                           "trace=" + SYSCALLS], "tracer invocation differs")
     verify_startup_log(raw["worker-arguments.log"], proof["worker_pid"], startup)
     for field, file in (("arguments_log", "worker-arguments.log"), ("class_load_log", "class-load.log")):
@@ -593,7 +593,7 @@ def capture(output, scratch):
     require(tracer is not None, "strace is unavailable")
     version = subprocess.run([tracer, "--version"], env=env, capture_output=True,
                              check=True, timeout=10).stdout.decode()
-    trace_arguments = ["-ff", "-ttt", "-yy", "-s", "131072", "-e", "trace=" + SYSCALLS]
+    trace_arguments = ["-ff", "-ttt", "-yy", "-v", "-s", "131072", "-e", "trace=" + SYSCALLS]
     invocation = [tracer, *trace_arguments, "-o", str(output / "process/trace"), *command]
     budget = CaptureBudget(output, scratch, (PORTABLE / "build",),
                            limit_bytes=MAX_CAPTURE_TOTAL, seconds=900)
