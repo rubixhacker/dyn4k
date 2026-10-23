@@ -2090,7 +2090,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         expected["run.py"] = run_sha256
         self.assertEqual(expected, independent_gates.APPROVED_P2_EDBC_PRODUCERS)
         local_expected = dict(expected)
-        local_expected["run.py"] = independent_gates.APPROVED_P2_JVM8_PRODUCERS["run.py"]
+        local_expected["run.py"] = independent_gates.APPROVED_P2_PRIVATE_LAUNCH_PRODUCERS["run.py"]
         self.assertEqual(local_expected["run.py"],
                          independent_gates.PINNED_P2_CURRENT_LOCAL_PRODUCERS["run.py"])
         self.assertEqual(local_expected["run.py"],
@@ -2151,7 +2151,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         expected["run.py"] = run_sha256
         self.assertEqual(expected, independent_gates.APPROVED_P2_NATIVE_02C_PRODUCERS)
         local_expected = dict(expected)
-        local_expected["run.py"] = independent_gates.APPROVED_P2_JVM8_PRODUCERS["run.py"]
+        local_expected["run.py"] = independent_gates.APPROVED_P2_PRIVATE_LAUNCH_PRODUCERS["run.py"]
         self.assertEqual(local_expected["run.py"],
                          independent_gates.PINNED_P2_CURRENT_LOCAL_PRODUCERS["run.py"])
         self.assertEqual(local_expected["run.py"],
@@ -2217,7 +2217,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                          independent_gates._p2_producer_binding(ROOT, candidate_head))
         self.assertEqual(independent_gates.P2_ROTATION_PREMISE_PRODUCERS,
                          independent_gates.APPROVED_P2_LOCAL_PRODUCERS)
-        self.assertEqual(independent_gates.APPROVED_P2_JVM8_PRODUCERS["run.py"],
+        self.assertEqual(independent_gates.APPROVED_P2_PRIVATE_LAUNCH_PRODUCERS["run.py"],
                          hashlib.sha256((ROOT / run_path).read_bytes()).hexdigest())
         self.assertEqual(run_git_blob, subprocess.check_output(
             ["git", "rev-parse", f"{assembly}:{run_path}"], cwd=ROOT, text=True).strip())
@@ -3181,7 +3181,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                    (f"{owner}^", class_load), (f"{assembled}^", class_load),
                    (owner, canonical), (assembled, canonical),
                    (independent_gates.P2_NATIVE_02C_ASSEMBLY_REVISION, canonical),
-                   (current, independent_gates.APPROVED_P2_V6_PRODUCERS[
+                   (current, independent_gates.APPROVED_P2_PRIVATE_LAUNCH_PRODUCERS[
                        "actual_arithmetic.py"]))
         for revision, expected in windows:
             with self.subTest(revision=revision):
