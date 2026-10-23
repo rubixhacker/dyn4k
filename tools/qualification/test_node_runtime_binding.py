@@ -21,6 +21,9 @@ class NodeRuntimeSelectionTest(unittest.TestCase):
                    str(payload), "--require", str(runner)]
         self.assertEqual(("core-jsNode", payload),
                          full_corpus.node_group_for_argv(ROOT, command))
+        observed_command = [command[0], "--experimental-wasm-modules", *command[1:]]
+        self.assertEqual(("core-jsNode", payload),
+                         full_corpus.node_group_for_argv(ROOT, observed_command))
         empty = command[:-1] + [str(runner).replace("nodejs-runner", "nodejs-empty-runner")]
         self.assertIsNone(full_corpus.node_group_for_argv(ROOT, empty))
         self.assertIsNone(full_corpus.node_group_for_argv(ROOT,
@@ -118,7 +121,8 @@ class LiveNodeObservationTest(unittest.TestCase):
                                            "dist/kotlin-test-nodejs-runner.js")
                     runner.parent.mkdir(parents=True, exist_ok=True)
                     runner.write_text("module.exports = {};\n")
-                    argv = [node, str(script), str(payload), "--require", str(runner)]
+                    argv = [node, "--experimental-wasm-modules", str(script),
+                            str(payload), "--require", str(runner)]
                 elif host == "wasmJsNode":
                     payload = repository / (f"build/wasm/packages/dyn4k-{module}-test/"
                                             "static/runUnitTests.mjs")
@@ -175,6 +179,9 @@ class LiveNodeObservationTest(unittest.TestCase):
                     repository, repository, changed, started_ns, finished_ns)
 
             self.assertEqual([], problems(binding))
+            self.assertEqual([], full_corpus.node_observation_problems(
+                Path(os.path.relpath(repository)), Path(os.path.relpath(repository)),
+                binding, started_ns, finished_ns))
             mutants = (
                 ("missing", lambda value: value["node_observations"].pop()),
                 ("duplicate", lambda value: value["node_observations"].append(

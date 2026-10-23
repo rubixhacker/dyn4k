@@ -55,6 +55,7 @@ def node_group_for_argv(repository, argv):
     if not isinstance(argv, list) or len(argv) < 2 or not all(
             isinstance(part, str) for part in argv):
         return None
+    argv = node_process_argv(argv)
     mocha = repository / "build/js/node_modules/mocha/bin/mocha.js"
     runner = repository / ("build/js/node_modules/kotlin-web-helpers/dist/"
                            "kotlin-test-nodejs-runner.js")
@@ -74,6 +75,12 @@ def node_group_for_argv(repository, argv):
             if argv[1:] == [str(candidate)]:
                 return (prefix + host, candidate)
     return None
+
+
+def node_process_argv(argv):
+    if len(argv) > 2 and argv[1] == "--experimental-wasm-modules":
+        return [argv[0], *argv[2:]]
+    return argv
 
 
 def node_task(group_id):
@@ -97,7 +104,8 @@ def observe_node_request(repository, request_file, gradle_pid, gradle_start_tick
         raise ValueError("Node request identity differs")
     observed_ns = time.time_ns()
     image = independent_linux_observer._image(pid)
-    if (image["argv"][1:] != request["argv"][1:] or
+    normalized_argv = node_process_argv(image["argv"])
+    if (normalized_argv[1:] != request["argv"][1:] or
             Path(image["argv"][0]).resolve() != Path(request["argv"][0]).resolve()):
         raise ValueError("live Node command differs from request")
     selection = node_group_for_argv(repository, image["argv"])
@@ -292,7 +300,7 @@ def node_observation_problems(repository, evidence_root, binding, started, finis
         return []
     if binding.get("schema") != 2:
         return ["unknown common corpus binding schema"]
-    repository, evidence_root = Path(repository), Path(evidence_root)
+    repository, evidence_root = Path(repository).resolve(), Path(evidence_root).resolve()
     observations = binding.get("node_observations")
     if not isinstance(observations, list):
         return ["actual Node process observations are absent"]
@@ -372,7 +380,7 @@ def node_observation_problems(repository, evidence_root, binding, started, finis
                             "execPath": row["requested_exec_path"],
                             "version": row["version"]}):
                 raise ValueError("Node startup request differs from live observation")
-            if (row["requested_argv"][1:] != row["argv"][1:] or
+            if (row["requested_argv"][1:] != node_process_argv(row["argv"])[1:] or
                     Path(row["requested_argv"][0]).resolve() !=
                     Path(row["argv"][0]).resolve() or
                     Path(row["requested_exec_path"]).resolve() !=
@@ -1058,11 +1066,11 @@ def verify_reports(repository, manifest, candidate_sha, binding, reports,
             matches = [row for row in observed_nodes if isinstance(row, dict)
                        and row.get("group_id") == group_id]
             groups[-1]["node_runtime"] = ({"status": "OBSERVED_UNSIGNED",
-                                            "version": matches[0]["version"],
-                                            "executable_path": matches[0]["executable_path"],
-                                            "executable_sha256": matches[0]["executable_sha256"],
-                                            "pid": matches[0]["pid"],
-                                            "start_ticks": matches[0]["start_ticks"]}
+                                            "version": matches[0].get("version"),
+                                            "executable_path": matches[0].get("executable_path"),
+                                            "executable_sha256": matches[0].get("executable_sha256"),
+                                            "pid": matches[0].get("pid"),
+                                            "start_ticks": matches[0].get("start_ticks")}
                                            if len(matches) == 1 else {"status": "UNPASSED"})
     problems.extend(node_observation_problems(repository, evidence_root, binding,
                                               started, finished))
