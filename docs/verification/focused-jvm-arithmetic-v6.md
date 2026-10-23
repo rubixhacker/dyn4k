@@ -52,6 +52,8 @@ python -B tools/numerical/portable/capture_actual.py --verify-existing ABSOLUTE_
 
 Replay first runs the existing whole-lane comparison with no arithmetic-capture override. It then recomputes the version 6 receipt from raw files and compares the focused case bytes with the validated lane case. A Boolean-only archive root remains insufficient for the 15-method arithmetic verifier.
 
+The external baseline attestation binds the exact bytes of `baseline_capture.py`, `run.py`, `cases.py`, and `receipt.py`. The published `80808b11` source changed `run.py` while adding focused Git environment selection. Its four-file digest differs from the retained attestation, so it cannot pass that source prerequisite. The corrected source restores the attested `run.py` bytes. The focused receipt instead uses the focused clean-source check and compares the full Git archive through the controlled child environment. This source compatibility check does not verify the baseline archive or qualify the focused method.
+
 ## Current evidence boundary
 
 The published `b475cb00` source ran the actual 600-step Gradle test once, but capture rejected its raw worker trace for environment exposure. The rejected row was not retained, so its exact syscall is unknown. A separate small traced Gradle unit showed the native launch helper reading the synthetic marker before Java started. That small unit is launch mechanism evidence only. A new clean-source capture, whole-lane replay, independent runtime audit, and retrospective remain separate checks. The parent and runtime child tickets remain open.
