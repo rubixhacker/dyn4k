@@ -100,16 +100,20 @@ def central_collection_needs(workflow):
     return _block_list_values(lines, needs[0] + 1, needs[1], 6)
 
 
-def workflow_events(workflow):
-    lines = workflow.splitlines()
-    on_block = _mapping_block(lines, "on:", 0)
-    return [line.strip() for line in lines[on_block[0] + 1:on_block[1]]
-            if line.startswith("  ") and line[2:3] not in ("", " ", "#")]
-
-
 def assert_manual_qualification_trigger(workflow):
-    if workflow_events(workflow) != ["workflow_dispatch:"]:
+    if list(workflow_contract.workflow_event_blocks(workflow)) != ["workflow_dispatch"]:
         raise AssertionError("full qualification must require manual dispatch")
+
+
+def central_collection_steps(workflow):
+    job = workflow_contract.workflow_jobs(workflow)["central-qualification-collection"]
+    steps = job.split("    steps:\n", 1)[1]
+    matches = list(re.finditer(r"(?m)^      - (?:name|uses): .+$", steps))
+    if not matches:
+        raise AssertionError("central collection has no runnable steps")
+    return [steps[match.start():matches[index + 1].start()
+                  if index + 1 < len(matches) else len(steps)]
+            for index, match in enumerate(matches)]
 
 
 class CollectionTests(unittest.TestCase):
@@ -292,11 +296,117 @@ class CollectionTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
         assert_manual_qualification_trigger(workflow)
         self.assertEqual(EXPECTED_CENTRAL_NEEDS, central_collection_needs(workflow))
-        for command in ("actions/download-artifact@v4", "collection.py --verify",
-                        "independent_gates.py", "qualify.py record",
+        steps = central_collection_steps(workflow)
+
+        def named_step(name):
+            matches = [(index, step) for index, step in enumerate(steps)
+                       if step.startswith(f"      - name: {name}\n")]
+            self.assertEqual(1, len(matches), name)
+            return matches[0]
+
+        download_index, download = named_step("Download every retained producer artifact")
+        collect_index, collect = named_step("Collect and independently enumerate 112 lanes")
+        upload_index, upload = named_step("Upload central raw collection and failed routes")
+        self.assertEqual(0, download_index)
+        self.assertLess(download_index, collect_index)
+        self.assertEqual(collect_index + 1, upload_index)
+        self.assertIn("        id: raw_download\n", download)
+        self.assertIn("        if: always()\n", download)
+        self.assertIn("        continue-on-error: true\n", download)
+        self.assertIn("        uses: actions/download-artifact@v4\n", download)
+        self.assertIn("          pattern: '*'\n", download)
+        self.assertIn("          path: ${{ runner.temp }}/producer-artifacts\n", download)
+        self.assertIn("          merge-multiple: false\n", download)
+        self.assertIn("        if: always()\n", collect)
+        self.assertIn("        run: |\n", collect)
+        self.assertIn(
+            '          python3 tools/qualification/collection.py --verify \\\n'
+            '            --repository "$GITHUB_WORKSPACE" \\\n'
+            '            --candidate-sha "$GITHUB_SHA" \\\n'
+            '            --artifacts-dir "$RUNNER_TEMP/producer-artifacts" \\\n'
+            '            --output "$RUNNER_TEMP/central-collection" \\\n'
+            '            > "$RUNNER_TEMP/central-logs/transport.stdout" \\\n'
+            '            2> "$RUNNER_TEMP/central-logs/transport.stderr"\n',
+            collect)
+        self.assertIn("          transport_exit=$?\n", collect)
+        self.assertIn('test "$transport_exit" -eq 0', collect)
+        self.assertIn("        if: always()\n", upload)
+        self.assertIn("        uses: actions/upload-artifact@v4\n", upload)
+        self.assertIn("          name: qualification-central-${{ github.sha }}\n", upload)
+        for path in ("central-collection/", "central-logs/", "producer-artifacts/"):
+            self.assertIn("            ${{ runner.temp }}/" + path + "\n", upload)
+        self.assertIn("          if-no-files-found: error\n", upload)
+        for command in ("independent_gates.py", "qualify.py record",
                         "duplicate_provider.py", "qualification-central-${{ github.sha }}"):
             self.assertIn(command, workflow)
-        self.assertIn("if: always()", workflow)
+
+    def test_central_collection_rejects_inactive_or_misplaced_steps(self):
+        workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
+        central = workflow_contract.workflow_jobs(workflow)["central-qualification-collection"]
+        other = workflow_contract.workflow_jobs(workflow)["hosted-mac"]
+        steps = central_collection_steps(workflow)
+        required = (
+            ("download", "Download every retained producer artifact",
+             "        uses: actions/download-artifact@v4\n"),
+            ("verify", "Collect and independently enumerate 112 lanes",
+             "          python3 tools/qualification/collection.py --verify \\\n"),
+            ("upload", "Upload central raw collection and failed routes",
+             "        uses: actions/upload-artifact@v4\n"),
+        )
+        for name, step_name, line in required:
+            self.assertIn(line, central)
+            block = next(step for step in steps
+                         if step.startswith(f"      - name: {step_name}\n"))
+            if name == "verify":
+                start = block.index(line)
+                end = block.index("          transport_exit=$?\n", start)
+                command = block[start:end]
+                replacements = (
+                    ("commented", block.replace(command,
+                        "          # python3 tools/qualification/collection.py --verify\n", 1)),
+                    ("no-op", block.replace(command,
+                        "          echo skipped # python3 tools/qualification/collection.py --verify\n", 1)),
+                )
+            else:
+                retained_name = ("        # qualification-central-${{ github.sha }}\n"
+                                 if name == "upload" else "")
+                prefix = (f"      - name: {step_name}\n"
+                          + ("        id: raw_download\n" if name == "download" else "")
+                          + "        if: always()\n")
+                replacements = (
+                    ("commented", prefix + "        # " + line.strip() + "\n"
+                     + "        run: echo skipped\n" + retained_name),
+                    ("no-op", prefix + "        run: echo skipped # "
+                     + line.strip() + "\n" + retained_name),
+                )
+            for variant, replacement in replacements:
+                with self.subTest(step=name, variant=variant):
+                    altered = workflow.replace(central, central.replace(block, replacement, 1), 1)
+                    with mock.patch.object(Path, "read_text", return_value=altered):
+                        with self.assertRaises(AssertionError):
+                            self.test_workflow_runs_after_producers_and_retains_raw_results()
+            with self.subTest(step=name, variant="misplaced"):
+                altered = workflow.replace(central, central.replace(block, "", 1), 1)
+                altered = altered.replace(other, other.replace(
+                    "    steps:\n", "    steps:\n" + block, 1), 1)
+                with mock.patch.object(Path, "read_text", return_value=altered):
+                    with self.assertRaises(AssertionError):
+                        self.test_workflow_runs_after_producers_and_retains_raw_results()
+
+        download, collect, upload = (next(step for step in steps
+                                          if step.startswith(f"      - name: {name}\n"))
+                                     for name in ("Download every retained producer artifact",
+                                                  "Collect and independently enumerate 112 lanes",
+                                                  "Upload central raw collection and failed routes"))
+        for name, moved, anchor in (("download-after-collect", download, collect),
+                                    ("upload-before-collect", upload, collect)):
+            with self.subTest(order=name):
+                reordered = central.replace(moved, "", 1).replace(
+                    anchor, (anchor + moved if moved == download else moved + anchor), 1)
+                altered = workflow.replace(central, reordered, 1)
+                with mock.patch.object(Path, "read_text", return_value=altered):
+                    with self.assertRaises(AssertionError):
+                        self.test_workflow_runs_after_producers_and_retains_raw_results()
 
     def test_full_qualification_rejects_automatic_triggers(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
@@ -308,7 +418,8 @@ class CollectionTests(unittest.TestCase):
 
     def test_cheap_source_checks_run_on_push_and_pull_request(self):
         workflow = (ROOT / ".github/workflows/qualification-source-checks.yml").read_text()
-        self.assertEqual(["push:", "pull_request:"], workflow_events(workflow))
+        self.assertEqual(["push", "pull_request"],
+                         list(workflow_contract.workflow_event_blocks(workflow)))
         workflow_contract.QualificationWorkflowContractTest().assert_source_checks_job_contract(
             workflow)
 
