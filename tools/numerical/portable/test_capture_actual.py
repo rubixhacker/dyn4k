@@ -170,6 +170,49 @@ class CaptureSourceGuardTest(unittest.TestCase):
                 capture_actual.run_capture(method, self.root / "capture",
                                            self.root / "reference.jsonl")
 
+    def test_clean_source_requires_explicit_boolean_focus(self):
+        with self.assertRaises(TypeError):
+            capture_actual.clean_source()
+        with self.assertRaises(CaptureRejected):
+            capture_actual.clean_source(focused=None)
+
+    def test_focused_initial_and_final_source_checks_select_git_environment(self):
+        expected = capture_actual.git("--no-replace-objects", "rev-parse", "HEAD",
+                                      focused=True).decode().strip()
+        real_run = subprocess.run
+        observed = []
+
+        def run(command, *args, **kwargs):
+            if command[0] == "git":
+                observed.append(dict(kwargs["env"]))
+            return real_run(command, *args, **kwargs)
+
+        synthetic = {"FAKE_CREDENTIAL": "synthetic-test-value",
+                     "JAVA_TOOL_OPTIONS": "-Dfake.option=synthetic-test-value",
+                     "HTTPS_PROXY": "http://synthetic.invalid"}
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory, \
+                patch.dict(os.environ, synthetic), \
+                patch.object(capture_actual.subprocess, "run", side_effect=run):
+            output = Path(directory) / "focused"
+            with patch.object(capture_actual, "_run_capture", return_value="bounded"):
+                self.assertEqual(capture_actual.run_capture(
+                    "captureRevoluteLimitsFalse", output,
+                    self.root / "reference.jsonl"), "bounded")
+            capture_actual._require_source_unchanged(expected, focused=True)
+            with self.assertRaisesRegex(CaptureRejected, "source changed"):
+                capture_actual._require_source_unchanged("0" * 40, focused=True)
+            self.assertEqual(len(observed), 9)
+            for child in observed:
+                self.assertEqual(child["TMPDIR"], os.environ["TMPDIR"])
+                self.assertNotIn("FAKE_CREDENTIAL", child)
+                self.assertNotIn("JAVA_TOOL_OPTIONS", child)
+                self.assertNotIn("HTTPS_PROXY", child)
+            observed.clear()
+            self.assertEqual(capture_actual.clean_source(focused=False), expected)
+            self.assertEqual(len(observed), 3)
+            self.assertTrue(all("FAKE_CREDENTIAL" in child and
+                                "JAVA_TOOL_OPTIONS" in child for child in observed))
+
     def test_boolean_execveat_trace_command_and_process_lines(self):
         method = "captureRevoluteLimitsFalse"
         self.assertEqual(
@@ -438,7 +481,7 @@ class CaptureSourceGuardTest(unittest.TestCase):
         subprocess.run(("git", "add", "."), cwd=self.root, check=True)
         self.assertEqual(capture_actual.git("status", "--porcelain"), b"")
         with self.assertRaisesRegex(CaptureRejected, "target source is not clean"):
-            capture_actual.clean_source()
+            capture_actual.clean_source(focused=False)
 
     def test_only_exact_generated_roots_are_exempt(self):
         for relative in ("build/cache/generated.bin", ".gradle/cache/state.bin",
@@ -448,11 +491,11 @@ class CaptureSourceGuardTest(unittest.TestCase):
             path = self.root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"generated")
-        self.assertEqual(capture_actual.clean_source(),
+        self.assertEqual(capture_actual.clean_source(focused=False),
                          capture_actual.git("rev-parse", "HEAD").decode().strip())
 
     def test_ignored_kotlin_under_source_build_is_rejected(self):
-        self.assertEqual(capture_actual.clean_source(),
+        self.assertEqual(capture_actual.clean_source(focused=False),
                          capture_actual.git("rev-parse", "HEAD").decode().strip())
         for relative in ("tools/numerical/portable/src/commonTest/kotlin/portable/"
                          "build/Injected.kt",
@@ -466,9 +509,9 @@ class CaptureSourceGuardTest(unittest.TestCase):
             self.assertEqual(capture_actual.git("status", "--porcelain",
                                                 "--untracked-files=all"), b"")
             with self.subTest(relative=relative), self.assertRaises(CaptureRejected):
-                capture_actual.clean_source()
+                capture_actual.clean_source(focused=False)
             path.unlink()
-            self.assertEqual(capture_actual.clean_source(),
+            self.assertEqual(capture_actual.clean_source(focused=False),
                              capture_actual.git("rev-parse", "HEAD").decode().strip())
 
 

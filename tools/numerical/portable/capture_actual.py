@@ -317,7 +317,9 @@ def git(*args, focused=False):
                           capture_output=True, env=child_environment(focused)).stdout
 
 
-def clean_source(focused=False):
+def clean_source(*, focused):
+    if type(focused) is not bool:
+        raise CaptureRejected("source focus selection differs")
     if git("--no-replace-objects", "status", "--porcelain",
            "--untracked-files=all", focused=focused).strip():
         raise CaptureRejected("target source is not clean")
@@ -332,6 +334,11 @@ def clean_source(focused=False):
             raise CaptureRejected("ignored file outside exact generated roots")
     return git("--no-replace-objects", "rev-parse", "HEAD",
                focused=focused).decode().strip()
+
+
+def _require_source_unchanged(commit, *, focused):
+    if clean_source(focused=focused) != commit:
+        raise CaptureRejected("target source changed during capture")
 
 
 def archive_file_names(method, worker_log, worker_argument_log=None, version6=False):
@@ -812,8 +819,7 @@ def _run_capture(method, output, reference_case, commit, temporary,
         check_budget(len(class_archive))
         classes.write(class_archive)
     check_budget()
-    if clean_source() != commit:
-        raise CaptureRejected("target source changed during capture")
+    _require_source_unchanged(commit, focused=version6)
     runtime_path = JDK21 / "bin/java"
     check_budget(runtime_path.stat().st_size)
     shutil.copyfile(runtime_path, output / "runtime-java")
