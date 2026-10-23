@@ -93,7 +93,8 @@ class FocusedReplayTest(unittest.TestCase):
         jdwp = ("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,"
                  "address=127.0.0.1:40001")
         flags = agent + " " + jdwp + " -XX:+DisableAttachMechanism -Xshare:off " + \
-            "-Dportable.booleanMirror=" + metadata["mirror_path"]
+            "-Dportable.booleanMirror=" + metadata["mirror_path"] + \
+            " -Djdk.lang.Process.launchMechanism=FORK"
         prefix = "[41][info][arguments] "
         def worker_log(options):
             return ("\n".join(prefix + row for row in (
@@ -104,6 +105,11 @@ class FocusedReplayTest(unittest.TestCase):
         selected = ("41", "/tmp/dyn4k-tools/jdk21/bin/java",
                     ("java", agent, jdwp, "GradleWorkerMain"))
         verify_boolean_startup(worker_log(flags), selected, metadata, 40001)
+        for changed in (flags.replace(" -Djdk.lang.Process.launchMechanism=FORK", ""),
+                        flags + " -Djdk.lang.Process.launchMechanism=FORK",
+                        flags.replace("=FORK", "=POSIX_SPAWN")):
+            with self.subTest(launch=changed), self.assertRaises(FocusedRejected):
+                verify_boolean_startup(worker_log(changed), selected, metadata, 40001)
         for option in ("-javaagent:/home/other.jar", "-agentlib:other=1"):
             with self.subTest(option=option), self.assertRaises(FocusedRejected):
                 verify_boolean_startup(worker_log(flags + " " + option), selected,
