@@ -36,6 +36,7 @@ class CaptureSourceGuardTest(unittest.TestCase):
         self.assertEqual(focused["DYN4K_CAPTURE_ENV_SENTINEL"],
                          "portable-capture-check")
         self.assertTrue(focused["PATH"].startswith(str(capture_actual.JDK21 / "bin")))
+        self.assertIn("/Cellar/strace/7.2/bin", focused["PATH"])
         for name in ("OLLAMA_API_KEY", "FAKE_SECRET", "JAVA_TOOL_OPTIONS",
                      "GRADLE_OPTS", "HTTPS_PROXY"):
             self.assertNotIn(name, focused)

@@ -253,7 +253,9 @@ def child_environment(focused=False):
         environment = {"TMPDIR": name, "JAVA_HOME": str(JDK21),
                        "ANDROID_HOME": "/var/home/stewart/Android/Sdk",
                        "GRADLE_USER_HOME": str(home / ".gradle"),
-                       "PATH": f"{JDK21 / 'bin'}:/usr/local/bin:/usr/bin:/bin",
+                       "PATH": (f"{JDK21 / 'bin'}:"
+                                "/var/home/linuxbrew/.linuxbrew/Cellar/strace/7.2/bin:"
+                                "/usr/local/bin:/usr/bin:/bin"),
                        "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
                        "USER": identity, "LOGNAME": identity,
                        "PYTHONDONTWRITEBYTECODE": "1",
