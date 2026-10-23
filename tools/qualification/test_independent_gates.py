@@ -1086,7 +1086,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     ["git", "--no-replace-objects", "show", f"{reviewed}:{relative}"],
                     cwd=ROOT)
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-                local_digest = independent_gates.OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES.get(
+                local_digest = independent_gates.PATH_MODEL_CAPTURE_DEPENDENCIES.get(
                     relative, independent_gates.PINNED_PROSPECTIVE_LOCAL_CHECKERS.get(
                         name, digest))
                 self.assertEqual(local_digest,
@@ -1098,7 +1098,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     ["git", "--no-replace-objects", "show", f"{reviewed}:{relative}"],
                     cwd=ROOT)
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-                self.assertEqual(independent_gates.P2_OUTPUT_PROVENANCE_DEPENDENCIES[
+                self.assertEqual(independent_gates.P2_PATH_MODEL_DEPENDENCIES[
                     relative], hashlib.sha256((ROOT / relative).read_bytes()).hexdigest())
         self.assertEqual(independent_gates.APPROVED_P2_V6_PRODUCERS, producer)
         self.assertIn("tools/numerical/portable/actual_capture_receipt.py", checker)
@@ -1135,7 +1135,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     cwd=ROOT)
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
                 self.assertEqual(
-                    independent_gates.OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES[relative],
+                    independent_gates.PATH_MODEL_CAPTURE_DEPENDENCIES[relative],
                     hashlib.sha256((ROOT / relative).read_bytes()).hexdigest())
                 self.assertEqual(digest, checker[relative])
         for relative, digest in independent_gates.P2_PRIVATE_LAUNCH_DEPENDENCIES.items():
@@ -1144,7 +1144,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     ["git", "--no-replace-objects", "show", f"{current}:{relative}"],
                     cwd=ROOT)).hexdigest())
                 self.assertEqual(
-                    independent_gates.P2_OUTPUT_PROVENANCE_DEPENDENCIES[relative],
+                    independent_gates.P2_PATH_MODEL_DEPENDENCIES[relative],
                     hashlib.sha256((ROOT / relative).read_bytes()).hexdigest())
         historical = independent_gates.PROSPECTIVE_V6_SOURCE_REVISION
         old = independent_gates._prospective_checker_binding(ROOT, historical)
@@ -1233,7 +1233,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     ("git", "--no-replace-objects", "show", f"{current}:{relative}"),
                     cwd=ROOT)
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-                self.assertEqual(independent_gates.OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES[
+                self.assertEqual(independent_gates.PATH_MODEL_CAPTURE_DEPENDENCIES[
                     relative], hashlib.sha256((ROOT / relative).read_bytes()).hexdigest())
                 self.assertEqual(digest, checker[relative])
         old_checker = independent_gates._prospective_checker_binding(ROOT, published)
