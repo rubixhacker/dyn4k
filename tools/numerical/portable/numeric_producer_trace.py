@@ -12,7 +12,7 @@ class Unbound(Rejected):
     """Well formed evidence does not establish every execution premise."""
 
 
-MAX_TRACE_BYTES = 128 * 1024 * 1024
+MAX_TRACE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_THREADS = 1024
 STRING = r'"(?:[^"\\]|\\.)*"'
 FD = r'([0-9]+)<([^>]+)>'

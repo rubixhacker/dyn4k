@@ -356,6 +356,25 @@ class ArchiveTest(unittest.TestCase):
             with self.assertRaisesRegex(Rejected, "linked"):
                 inventory(root)
 
+    def test_capture_trace_budget_rejects_oversized_member_and_total(self):
+        from numeric_producer import inventory, MAX_TRACE_MEMBER
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            process = root / "process"
+            process.mkdir()
+            oversized = process / "trace.1"
+            with oversized.open("wb") as stream:
+                stream.truncate(MAX_TRACE_MEMBER + 1)
+            with self.assertRaisesRegex(Rejected, "raw evidence budget exceeded"):
+                inventory(root)
+            oversized.unlink()
+            for index in range(1, 6):
+                with (process / f"trace.{index}").open("wb") as stream:
+                    stream.truncate(MAX_TRACE_MEMBER if index < 5 else 1)
+            with patch("numeric_producer.digest", return_value="0" * 64):
+                with self.assertRaisesRegex(Rejected, "raw evidence budget exceeded"):
+                    inventory(root)
+
 
 class CompiledPayloadTest(unittest.TestCase):
     def compiled(self, calls=1):

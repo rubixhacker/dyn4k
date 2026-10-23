@@ -41,6 +41,8 @@ REQUIRED = {"gradle.log", "selected.xml", "mirror.log", "compiled-classes.zip",
             "worker-arguments.log", "class-load.log", "classpath-inventory.json"}
 MAX_MEMBER = 128 * 1024 * 1024
 MAX_TOTAL = 512 * 1024 * 1024
+MAX_TRACE_MEMBER = 512 * 1024 * 1024
+MAX_CAPTURE_TOTAL = 2 * 1024 * 1024 * 1024
 MAX_MEMBERS = 1040
 SYSCALLS = ("process,open,openat,openat2,close,close_range,dup,dup2,dup3,fcntl,"
             "read,pread64,readv,preadv,lseek,fstat,newfstatat,statx,"
@@ -245,7 +247,9 @@ def inventory(directory):
         require(path.is_file(), "raw evidence is not regular")
         size = path.stat().st_size
         total += size
-        require(size <= MAX_MEMBER and total <= MAX_TOTAL and len(result) < MAX_MEMBERS,
+        relative = path.relative_to(directory).as_posix()
+        limit = MAX_TRACE_MEMBER if re.fullmatch(r"process/trace\.[1-9][0-9]*", relative) else MAX_MEMBER
+        require(size <= limit and total <= MAX_CAPTURE_TOTAL and len(result) < MAX_MEMBERS,
                 "raw evidence budget exceeded")
         result[path.relative_to(directory).as_posix()] = {"size": size, "sha256": digest(path)}
     return result
@@ -258,7 +262,8 @@ def load_raw(directory, expected):
         require(type(name) is str and not Path(name).is_absolute() and
                 ".." not in Path(name).parts and isinstance(entry, dict) and
                 set(entry) == {"size", "sha256"} and type(entry["size"]) is int and
-                0 <= entry["size"] <= MAX_MEMBER and
+                0 <= entry["size"] <= (MAX_TRACE_MEMBER if re.fullmatch(
+                    r"process/trace\.[1-9][0-9]*", name) else MAX_MEMBER) and
                 re.fullmatch(r"[0-9a-f]{64}", str(entry["sha256"])),
                 "raw member declaration is malformed")
     require(inventory(directory) == expected, "raw inventory or digest differs")
@@ -433,7 +438,7 @@ def _proof(raw, receipt, cases, artifacts, scratch):
         "compiled_after_sha256", "mirror_identity", "sidecar_runtime"},
             "trace command schema differs")
     require(type(metadata["exit"]) is int and metadata["exit"] == 0 and
-            metadata["seconds"] == 900 and metadata["bytes"] == MAX_TOTAL and
+            metadata["seconds"] == 900 and metadata["bytes"] == MAX_CAPTURE_TOTAL and
             metadata["members"] == MAX_MEMBERS and
             metadata["compiled_before_sha256"] == metadata["compiled_after_sha256"] ==
             sha(raw["compiled-classes.zip"]), "capture exit, budget, or compiled payload differs")
@@ -591,7 +596,7 @@ def capture(output, scratch):
     trace_arguments = ["-ff", "-ttt", "-yy", "-s", "131072", "-e", "trace=" + SYSCALLS]
     invocation = [tracer, *trace_arguments, "-o", str(output / "process/trace"), *command]
     budget = CaptureBudget(output, scratch, (PORTABLE / "build",),
-                           limit_bytes=MAX_TOTAL, seconds=900)
+                           limit_bytes=MAX_CAPTURE_TOTAL, seconds=900)
     response_source = None
     with (output / "gradle.log").open("xb") as log:
         process = subprocess.Popen(invocation, cwd=ROOT, env=env, stdout=log,
@@ -601,7 +606,7 @@ def capture(output, scratch):
                 budget.check()
                 require(len(list(output.rglob("*"))) <= MAX_MEMBERS, "capture member budget exceeded")
                 for trace in (output / "process").glob("trace.*"):
-                    require(trace.stat().st_size <= MAX_MEMBER, "capture trace member exceeds budget")
+                    require(trace.stat().st_size <= MAX_TRACE_MEMBER, "capture trace member exceeds budget")
                     for line in trace.read_text(errors="strict").splitlines():
                         if "GradleWorkerMain" in line and "execve(" in line:
                             matches = re.findall(r'"@([^" ]+)"', line)
@@ -667,7 +672,7 @@ def capture(output, scratch):
                 "mirror": str(mirror), "class_root": str(class_root),
                 "arguments_log": str(argument_pattern).replace("%p", worker),
                 "class_load_log": str(class_pattern).replace("%p", worker),
-                "seconds": 900, "bytes": MAX_TOTAL, "members": MAX_MEMBERS,
+                "seconds": 900, "bytes": MAX_CAPTURE_TOTAL, "members": MAX_MEMBERS,
                 "compiled_before_sha256": sha(before), "compiled_after_sha256": sha(after),
                 "mirror_identity": captured_file_identity(mirror),
                 "sidecar_runtime": sidecar_runtime}
