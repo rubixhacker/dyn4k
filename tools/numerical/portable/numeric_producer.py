@@ -539,6 +539,26 @@ def verify_witness_loaders(definitions, loaded, helper, host="jvm"):
             "class witness focused worker loader relationship differs")
 
 
+def verify_witness_classpath(entries, agent_path, agent_sha256, host="jvm8"):
+    agent_count = 0
+    for entry in entries:
+        path = Path(entry["path"])
+        if path == agent_path:
+            agent_count += 1
+            require(entry["sha256"] == agent_sha256,
+                    "class witness agent classpath differs")
+            continue
+        if path.is_dir():
+            shadow = (path / "dyn4k/witness").exists()
+        else:
+            with zipfile.ZipFile(path) as dependency:
+                shadow = any(name.startswith("dyn4k/witness/")
+                             for name in dependency.namelist())
+        require(not shadow, "class witness helper shadow differs")
+    require(agent_count == (1 if host == "jvm8" else 0),
+            "class witness agent classpath differs")
+
+
 def verify_build_runtime(traces, selected_exec):
     build = str(WITNESS_JDK / "bin/java")
     wrappers, daemons = [], []
@@ -652,15 +672,7 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
             {row["name"]: row["origin"] for row in result["helpers"]} == helper,
             "class witness helper class inventory differs")
     verify_witness_loaders(result["definitions"], loaded, helper, host)
-    for entry in classpath_entries:
-        path = Path(entry["path"])
-        if path.is_dir():
-            shadow = (path / "dyn4k/witness").exists()
-        else:
-            with zipfile.ZipFile(path) as dependency:
-                shadow = any(name.startswith("dyn4k/witness/")
-                             for name in dependency.namelist())
-        require(not shadow, "class witness helper shadow differs")
+    verify_witness_classpath(classpath_entries, agent_path, sha(rebuilt), host)
     for name, location in {**loaded, **helper}.items():
         expected_path = agent_path if name in helper else origins[name]
         url = urlparse(location)

@@ -55,6 +55,29 @@ class TracePrivacyTest(unittest.TestCase):
 
 
 class TransportTest(unittest.TestCase):
+    def test_witness_classpath_accepts_only_its_exact_agent_provider(self):
+        from numeric_producer import verify_witness_classpath
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            agent = root / "agent.jar"
+            shadow = root / "shadow.jar"
+            with zipfile.ZipFile(agent, "w") as archive:
+                archive.writestr("dyn4k/witness/NumericClassWitness.class", b"agent")
+            with zipfile.ZipFile(shadow, "w") as archive:
+                archive.writestr("dyn4k/witness/NumericClassWitness.class", b"shadow")
+            digest = hashlib.sha256(agent.read_bytes()).hexdigest()
+            entry = {"path": str(agent), "sha256": digest}
+            verify_witness_classpath([entry], agent, digest)
+            with self.assertRaisesRegex(Rejected, "agent classpath differs"):
+                verify_witness_classpath([], agent, digest)
+            with self.assertRaisesRegex(Rejected, "agent classpath differs"):
+                verify_witness_classpath([entry, entry], agent, digest)
+            with self.assertRaisesRegex(Rejected, "agent classpath differs"):
+                verify_witness_classpath([{**entry, "sha256": "0" * 64}], agent, digest)
+            with self.assertRaisesRegex(Rejected, "helper shadow differs"):
+                verify_witness_classpath([entry, {"path": str(shadow), "sha256": "0" * 64}],
+                                         agent, digest)
+
     def test_portable_provider_inventory_rejects_shadowed_loose_class(self):
         from numeric_producer import portable_class_inputs
         with tempfile.TemporaryDirectory() as directory:
