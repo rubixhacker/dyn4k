@@ -1108,7 +1108,8 @@ class EnvironmentSentinelTest(unittest.TestCase):
         with patch.object(capture_actual, "child_environment",
                           return_value={"TMPDIR": os.environ["TMPDIR"]}) as selected:
             with self.assertRaises(FocusedRejected):
-                focused_receipt._proof({}, {}, {}, {}, {}, [], {}, {}, [])
+                focused_receipt._proof({}, {}, {}, {}, {}, [], {}, {}, [],
+                                       {}, {}, [])
         selected.assert_called_once_with(focused=True)
 
     def test_public_v6_loader_rejects_escaped_private_trace_bytes(self):
