@@ -151,6 +151,7 @@ PRIVATE_LAUNCH_SOURCE_REVISION = "42df45088321a592323ebb02ba9c1a1d6fb655e0"
 BASELINE_COMPAT_SOURCE_REVISION = "b133e6e886dc17bff8ad8ccc3654d6538da18da8"
 OUTPUT_PROVENANCE_SOURCE_REVISION = "7fa5f1756ec8f5472bfc2e288b8b8b32aab648e5"
 FAILED_OUTPUT_WRAPPER_SOURCE_REVISION = "317c8e05fc5937b63c151f34e8df4e015b32c863"
+OUTPUT_REVIEW_REMEDY_SOURCE_REVISION = "e7ba841b3403ec69da4adbaf40a5dc4b94e838ce"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -404,7 +405,7 @@ BASELINE_COMPAT_CAPTURE_DEPENDENCIES = {
     "tools/numerical/portable/actual_capture_receipt.py":
         "e9e64ced059c60fb4b02b7d3b5d5ac51514946ff4687a4f0fe87705a480c193a",
 }
-OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES = {
+UNREVIEWED_OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES = {
     **BASELINE_COMPAT_CAPTURE_DEPENDENCIES,
     "tools/numerical/portable/actual_arithmetic.py":
         "4d2c4aa88bc85b96f7abfa196d73be08a50312408412da8ceb36c0bb8c7a0f6f",
@@ -420,6 +421,11 @@ OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES = {
         "c92b50ca2eb2502e1098a2ef6a532f6bccc4978ca345431a59df514a19b3fb55",
     "tools/numerical/portable/src/jvmTest/kotlin/portable/FocusedBooleanArithmeticSourceTest.kt":
         "b8eb3a06b6b0c8738767810c84d6778f361a264d12d3b6b10ed3d67c82833591",
+}
+OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES = {
+    **UNREVIEWED_OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES,
+    "tools/numerical/portable/actual_output_v6.py":
+        "a7176fed905b0c5db7d92d3db7f3c75e8fde935afe23f3e0b9910b79e3e20ff7",
 }
 P2_V6_DEPENDENCIES = {
     **P2_EXECUTABLE_LOCAL_DEPENDENCIES,
@@ -493,7 +499,7 @@ APPROVED_P2_BASELINE_COMPAT_PRODUCERS = {
     **APPROVED_P2_PRIVATE_LAUNCH_PRODUCERS,
     "run.py": "2f53b8baed1907370b16b0ce48dbe039c396445f27c74c5f843e7ca06650c01b",
 }
-APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS = {
+UNREVIEWED_P2_OUTPUT_PROVENANCE_PRODUCERS = {
     **APPROVED_P2_BASELINE_COMPAT_PRODUCERS,
     "actual_arithmetic.py":
         "4d2c4aa88bc85b96f7abfa196d73be08a50312408412da8ceb36c0bb8c7a0f6f",
@@ -501,6 +507,11 @@ APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS = {
         "c92b50ca2eb2502e1098a2ef6a532f6bccc4978ca345431a59df514a19b3fb55",
     "actual_output_v6.py":
         "3a79676fd5a5f35340947e904808d97e97a6d7204eea013408e156e6f8ed2fe7",
+}
+APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS = {
+    **UNREVIEWED_P2_OUTPUT_PROVENANCE_PRODUCERS,
+    "actual_output_v6.py":
+        "a7176fed905b0c5db7d92d3db7f3c75e8fde935afe23f3e0b9910b79e3e20ff7",
 }
 PINNED_P2_CURRENT_LOCAL_PRODUCERS = dict(APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS)
 APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS = {
@@ -962,13 +973,14 @@ def _prospective_checker_binding(repository, candidate_sha):
         return checked.returncode == 0
 
     executable_window = descends_from(PROSPECTIVE_EXECUTABLE_CHECKER_REVISION)
+    output_review_window = descends_from(OUTPUT_REVIEW_REMEDY_SOURCE_REVISION)
     output_provenance_window = descends_from(OUTPUT_PROVENANCE_SOURCE_REVISION)
     baseline_compat_window = descends_from(BASELINE_COMPAT_SOURCE_REVISION)
     private_launch_window = descends_from(PRIVATE_LAUNCH_SOURCE_REVISION)
     v6_window = descends_from(PROSPECTIVE_V6_SOURCE_REVISION)
-    if output_provenance_window:
+    if output_review_window:
         approved = APPROVED_PROSPECTIVE_OUTPUT_PROVENANCE_CHECKERS
-    elif descends_from(FAILED_OUTPUT_WRAPPER_SOURCE_REVISION):
+    elif output_provenance_window or descends_from(FAILED_OUTPUT_WRAPPER_SOURCE_REVISION):
         raise ValueError("prospective policy/checker blob differs: incomplete output source")
     elif baseline_compat_window:
         approved = APPROVED_PROSPECTIVE_BASELINE_COMPAT_CHECKERS
@@ -1029,7 +1041,7 @@ def _prospective_checker_binding(repository, candidate_sha):
         if hashlib.sha256(committed).hexdigest() != expected:
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
     executable_dependencies = (OUTPUT_PROVENANCE_CAPTURE_DEPENDENCIES
-                               if output_provenance_window else
+                               if output_review_window else
                                BASELINE_COMPAT_CAPTURE_DEPENDENCIES
                                if baseline_compat_window else
                                PRIVATE_LAUNCH_CAPTURE_DEPENDENCIES
@@ -1138,6 +1150,7 @@ def _p2_producer_binding(repository, candidate_sha):
 
     if not descends_from(PROSPECTIVE_CHECKER_REVISION):
         raise ValueError("candidate predates reviewed P2 raw producer revision")
+    output_review_window = descends_from(OUTPUT_REVIEW_REMEDY_SOURCE_REVISION)
     output_provenance_window = descends_from(OUTPUT_PROVENANCE_SOURCE_REVISION)
     baseline_compat_window = descends_from(BASELINE_COMPAT_SOURCE_REVISION)
     private_launch_window = descends_from(PRIVATE_LAUNCH_SOURCE_REVISION)
@@ -1148,9 +1161,9 @@ def _p2_producer_binding(repository, candidate_sha):
     rotation_premise = descends_from(P2_ROTATION_PREMISE_SOURCE_REVISION)
     boolean_jdi_final = descends_from(P2_BOOLEAN_JDI_FINAL_SOURCE_REVISION)
     boolean_jdi = descends_from(P2_BOOLEAN_JDI_SOURCE_REVISION)
-    if output_provenance_window:
+    if output_review_window:
         approved = APPROVED_P2_OUTPUT_PROVENANCE_PRODUCERS
-    elif descends_from(FAILED_OUTPUT_WRAPPER_SOURCE_REVISION):
+    elif output_provenance_window or descends_from(FAILED_OUTPUT_WRAPPER_SOURCE_REVISION):
         raise ValueError("reviewed P2 raw producer blob differs: incomplete output source")
     elif baseline_compat_window:
         approved = APPROVED_P2_BASELINE_COMPAT_PRODUCERS
@@ -1226,7 +1239,7 @@ def _p2_producer_binding(repository, candidate_sha):
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     if jdk21_jdi:
         dependencies = (P2_OUTPUT_PROVENANCE_DEPENDENCIES
-                        if output_provenance_window else
+                        if output_review_window else
                         P2_BASELINE_COMPAT_DEPENDENCIES
                         if baseline_compat_window else
                         P2_PRIVATE_LAUNCH_DEPENDENCIES

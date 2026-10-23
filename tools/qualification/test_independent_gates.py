@@ -1276,7 +1276,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     independent_gates._p2_producer_binding(ROOT, current)
 
     def test_output_provenance_window_binds_complete_source_and_rejects_partial_wrapper(self):
-        revision = independent_gates.OUTPUT_PROVENANCE_SOURCE_REVISION
+        revision = independent_gates.OUTPUT_REVIEW_REMEDY_SOURCE_REVISION
         checker = independent_gates._prospective_checker_binding(ROOT, revision)
         producer = independent_gates._p2_producer_binding(ROOT, revision)
         self.assertEqual(producer,
@@ -1296,12 +1296,14 @@ class IndependentGateSeamTests(unittest.TestCase):
                     ["git", "--no-replace-objects", "show", f"{revision}:{relative}"],
                     cwd=ROOT)
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-        with self.assertRaisesRegex(ValueError, "incomplete output source"):
-            independent_gates._prospective_checker_binding(
-                ROOT, independent_gates.FAILED_OUTPUT_WRAPPER_SOURCE_REVISION)
-        with self.assertRaisesRegex(ValueError, "incomplete output source"):
-            independent_gates._p2_producer_binding(
-                ROOT, independent_gates.FAILED_OUTPUT_WRAPPER_SOURCE_REVISION)
+        for incomplete in (independent_gates.FAILED_OUTPUT_WRAPPER_SOURCE_REVISION,
+                           independent_gates.OUTPUT_PROVENANCE_SOURCE_REVISION,
+                           "ccd7188bd78a5e2667219d9338bc323d25fac839"):
+            with self.subTest(incomplete=incomplete):
+                with self.assertRaisesRegex(ValueError, "incomplete output source"):
+                    independent_gates._prospective_checker_binding(ROOT, incomplete)
+                with self.assertRaisesRegex(ValueError, "incomplete output source"):
+                    independent_gates._p2_producer_binding(ROOT, incomplete)
         old = independent_gates.BASELINE_COMPAT_SOURCE_REVISION
         self.assertEqual(independent_gates.APPROVED_P2_BASELINE_COMPAT_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, old))
