@@ -66,6 +66,19 @@ def changed_capture_actual():
     return module
 
 
+def changed_ambient_comparator(directory):
+    ambient = directory / "ambient"
+    ambient.mkdir()
+    marker = directory / "ambient-compare-executed"
+    checked = (ROOT / "tools/numerical/compare.py").read_bytes()
+    changed = checked + (f"\nfrom pathlib import Path\n"
+                         f"Path({str(marker)!r}).write_text('executed')\n").encode()
+    (ambient / "compare.py").write_bytes(changed)
+    assert hashlib.sha256(changed).hexdigest() != independent_gates.APPROVED_POLICY[
+        "tools/numerical/compare.py"]
+    return ambient, marker
+
+
 def reviewed_arithmetic_at(revision):
     approved = {
         "6040b40265975b9091db430d79269cb5ea3d9868":
@@ -1099,30 +1112,36 @@ class IndependentGateSeamTests(unittest.TestCase):
             return module
 
         prior_path = list(sys.path)
-        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(sys.modules, stale), \
-                mock.patch.object(builtins, "__import__", inspect_import):
-            with self.assertRaisesRegex(ValueError, "raw archive file is missing"):
-                independent_gates.verify_prospective_case_subgates(
-                    Path(temporary), receipt, ROOT, revision,
-                    {"dyn4k-core": "a" * 64},
-                    independent_gates.verified_numerical_source_sha256(ROOT, revision))
-            self.assertEqual(set(names), set(loaded))
-            for name in names:
-                self.assertIn("dyn4k-prospective-checker-", str(loaded[name][0]))
-                expected = (independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED[
-                    "tools/numerical/compare.py"] if name == "compare" else
-                    independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS[f"{name}.py"])
-                self.assertEqual(expected, loaded[name][1], name)
-                self.assertIs(stale[name], sys.modules[name])
-            self.assertEqual(set(CAPTURE_REPLAY_NAMES) - {"boolean_rotation_jdi"},
-                             set(capture_loaded))
-            for name, (path, digest) in capture_loaded.items():
-                self.assertIn("dyn4k-prospective-checker-", str(path), name)
-                self.assertEqual(independent_gates.PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES[
-                    "tools/numerical/portable/" + name.replace(".", "/") + ".py"], digest)
-            for name in CAPTURE_REPLAY_NAMES:
-                self.assertIs(stale[name], sys.modules[name])
-            self.assertEqual(prior_path, sys.path)
+        with tempfile.TemporaryDirectory() as temporary:
+            ambient, marker = changed_ambient_comparator(Path(temporary))
+            with mock.patch.dict(sys.modules, stale), mock.patch.object(
+                    builtins, "__import__", inspect_import), mock.patch.object(
+                    sys, "path", [str(ambient), *sys.path]):
+                with self.assertRaisesRegex(ValueError, "raw archive file is missing"):
+                    independent_gates.verify_prospective_case_subgates(
+                        Path(temporary), receipt, ROOT, revision,
+                        {"dyn4k-core": "a" * 64},
+                        independent_gates.verified_numerical_source_sha256(ROOT, revision))
+                self.assertFalse(marker.exists(), "changed ambient comparator executed")
+                self.assertEqual(set(names), set(loaded))
+                for name in names:
+                    self.assertIn("dyn4k-prospective-checker-", str(loaded[name][0]))
+                    expected = (independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED[
+                        "tools/numerical/compare.py"] if name == "compare" else
+                        independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS[f"{name}.py"])
+                    self.assertEqual(expected, loaded[name][1], name)
+                    self.assertIs(stale[name], sys.modules[name])
+                self.assertEqual(set(CAPTURE_REPLAY_NAMES) - {"boolean_rotation_jdi"},
+                                 set(capture_loaded))
+                for name, (path, digest) in capture_loaded.items():
+                    self.assertIn("dyn4k-prospective-checker-", str(path), name)
+                    self.assertEqual(independent_gates.PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES[
+                        "tools/numerical/portable/" + name.replace(".", "/") + ".py"], digest)
+                for name in CAPTURE_REPLAY_NAMES:
+                    self.assertIs(stale[name], sys.modules[name])
+                self.assertEqual([str(ambient), *prior_path], sys.path)
+            self.assertFalse(marker.exists())
+        self.assertEqual(prior_path, sys.path)
 
     def test_p2_host_ignores_stale_numeric_helpers_and_restores_cache_on_success(self):
         revision = independent_gates.PROSPECTIVE_REPLAY_SCRATCH_REVISION
@@ -1164,6 +1183,7 @@ class IndependentGateSeamTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            ambient, marker = changed_ambient_comparator(root)
             for relative in ("baseline", "candidate/jvm", "arithmetic"):
                 (root / relative).mkdir(parents=True)
             sidecar = root / "sidecar.json"
@@ -1178,10 +1198,12 @@ class IndependentGateSeamTests(unittest.TestCase):
             (root / "candidate/jvm/receipt.json").write_text(json.dumps({"runtime": runtime}))
             prior_path = list(sys.path)
             with mock.patch.dict(sys.modules, stale), mock.patch.object(
-                    builtins, "__import__", inspect_import):
+                    builtins, "__import__", inspect_import), mock.patch.object(
+                    sys, "path", [str(ambient), *sys.path]):
                 summary, case_order, case_methods, identity = independent_gates._verify_p2_host(
                     root, {"baseline": "baseline", "candidate": "candidate",
                            "arithmetic": "arithmetic"}, sidecar, ROOT, revision, source, artifact)
+                self.assertFalse(marker.exists(), "changed ambient comparator executed")
                 self.assertEqual(source, summary["candidate_source_sha256"])
                 self.assertEqual(independent_gates.PROSPECTIVE_CASE_COUNT, len(case_order))
                 self.assertEqual(set(case_order), set(case_methods))
@@ -1201,7 +1223,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     self.assertIs(stale[name], sys.modules[name])
                 for name in CAPTURE_REPLAY_NAMES:
                     self.assertIs(stale[name], sys.modules[name])
-                self.assertEqual(prior_path, sys.path)
+                self.assertEqual([str(ambient), *prior_path], sys.path)
                 with mock.patch.object(independent_gates.shutil, "copytree",
                                        side_effect=ValueError("forced replay rejection")):
                     with self.assertRaisesRegex(ValueError, "forced replay rejection"):
@@ -1213,7 +1235,10 @@ class IndependentGateSeamTests(unittest.TestCase):
                     self.assertIs(stale[name], sys.modules[name])
                 for name in CAPTURE_REPLAY_NAMES:
                     self.assertIs(stale[name], sys.modules[name])
-                self.assertEqual(prior_path, sys.path)
+                self.assertEqual([str(ambient), *prior_path], sys.path)
+                self.assertFalse(marker.exists())
+            self.assertFalse(marker.exists())
+            self.assertEqual(prior_path, sys.path)
 
     def test_prospective_checker_pins_historical_and_assembled_source(self):
         current = subprocess.check_output(["git", "rev-parse", "HEAD"],

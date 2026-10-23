@@ -1482,7 +1482,7 @@ def _verify_p2_host(root, bridge, sidecar, repository, candidate_sha,
     modules = PORTABLE_REPLAY_MODULES + P2_LOCAL_REPLAY_MODULES
     prior = {name: sys.modules.pop(name, None) for name in modules}
     sys.dont_write_bytecode = True
-    sys.path.insert(0, str(portable))
+    sys.path[:0] = [str(portable), str(portable.parent)]
     try:
         from prospective_compare import compare_host
         from cases import declared_cases
@@ -1623,7 +1623,7 @@ def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
         for name in names:
             sys.modules.pop(name, None)
         sys.dont_write_bytecode = True
-        sys.path.insert(0, package_path)
+        sys.path[:0] = [package_path, str(Path(package_path).parent)]
         try:
             import prospective_compare
             declared = {case["id"]: case for case in prospective_compare.declared_cases()
