@@ -4,7 +4,7 @@ import json
 import re
 import zipfile
 
-from actual_trace import (_arguments, _project_descriptors, _validate_calls,
+from actual_trace import (V6_FD_START, _arguments, _project_descriptors, _validate_calls,
                           _version6_fd_token, normalize_rich_traces,
                           trace_exposes_environment)
 from boolean_rotation_jdi import jdi_bridge
@@ -70,20 +70,63 @@ def _opening(call):
 
 
 def _protected_observer_operand(call, paths):
-    operand = _first_descriptor(call)
-    if operand is not None and operand[1] in paths:
-        return True
     name = call.split("(", 1)[0]
-    if name not in ("open", "openat", "openat2", "stat", "lstat",
-                    "newfstatat", "statx", "rename", "renameat",
-                    "renameat2", "unlink", "unlinkat", "truncate"):
-        return False
-    for argument in _arguments(call):
-        if (argument.startswith('"') and argument.endswith('"') and
-                quoted(argument).decode("utf-8") in paths):
-            return True
-        if any(argument.endswith("<" + path + ">") for path in paths):
-            return True
+    path_positions = {
+        "open": (0,), "openat": (1,), "openat2": (1,), "creat": (0,),
+        "stat": (0,), "lstat": (0,), "newfstatat": (1,), "statx": (1,),
+        "rename": (0, 1), "renameat": (1, 3), "renameat2": (1, 3),
+        "unlink": (0,), "unlinkat": (1,), "truncate": (0,),
+        "execve": (0,), "execveat": (1,),
+    }.get(name, ())
+    if path_positions:
+        arguments = _arguments(call)
+        for position in path_positions:
+            if position < len(arguments):
+                value = arguments[position]
+                if (value.startswith('"') and value.endswith('"') and
+                        quoted(value).decode("utf-8") in paths):
+                    return True
+    quoted_text = False
+    escaped = False
+    index = 0
+    while index < len(call):
+        char = call[index]
+        if quoted_text:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted_text = False
+            index += 1
+            continue
+        if char == '"':
+            quoted_text = True
+            index += 1
+            continue
+        directory = call.startswith("AT_FDCWD<", index)
+        if directory or V6_FD_START.match(call, index):
+            fd, end = _version6_fd_token(call, index, directory=directory)
+            beginning = index + len(fd) + 1
+            closing = end - 1 - (len("(deleted)") if call[index:end].endswith(
+                "(deleted)") else 0)
+            if call[beginning:closing] in paths:
+                return True
+            index = end
+            continue
+        index += 1
+    return False
+
+
+def _observer_unsupported_operation(call):
+    name = call.split("(", 1)[0]
+    if name in ("clone", "clone3", "fork", "vfork", "dup", "dup2", "dup3",
+                "close_range", "sendmsg", "recvmsg"):
+        return True
+    if name == "fcntl":
+        projected = _project_descriptors(call, version6_raw=True)
+        return re.fullmatch(r"fcntl\([0-9]+, F_GETFD\) = [^\r\n]+",
+                            projected) is None
     return False
 
 
@@ -161,7 +204,8 @@ def verify_observer(raw_zip, interpreter, paths, identities, worker_events,
     started = False
     for _, _, _, call in events:
         if not started and call != execs[0][1]:
-            _require(not _protected_observer_operand(call, paths),
+            _require(not _observer_unsupported_operation(call) and
+                     not _protected_observer_operand(call, paths),
                      "version 6 observer protected launch action differs")
             continue
         if call == execs[0][1]:
@@ -190,6 +234,9 @@ def verify_observer(raw_zip, interpreter, paths, identities, worker_events,
             next_role += 1
             active = None
             continue
+        if active is not None:
+            raise Rejected("version 6 observer protected action differs: " +
+                           call.split("(", 1)[0])
         if call.startswith("fcntl("):
             operand = _first_descriptor(call)
             projected = _project_descriptors(call, version6_raw=True)
@@ -198,8 +245,8 @@ def verify_observer(raw_zip, interpreter, paths, identities, worker_events,
                     re.fullmatch(r"fcntl\(" + re.escape(operand[0]) +
                                  r", F_GETFD\) = [^\r\n]+", projected)):
                 continue
-        if (call.startswith(("clone(", "clone3(", "fork(", "vfork(",
-                             "dup(", "dup2(", "dup3(", "fcntl(", "write(",
+        if (_observer_unsupported_operation(call) or
+                call.startswith(("fcntl(", "write(",
                              "writev(", "pwrite", "rename(", "unlink(",
                              "truncate(", "ftruncate(", "close_range(",
                              "socket(", "sendto(", "sendmsg(")) or

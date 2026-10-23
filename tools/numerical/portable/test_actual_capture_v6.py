@@ -143,6 +143,49 @@ class FocusedReplayTest(unittest.TestCase):
         result = actual_output_v6.verify_observer(
             packed(rows), interpreter, paths, identities, producer, producer)
         self.assertEqual(result["status"], "PROVED_V6_OUTPUT_OBSERVER")
+        protected_transfers = (
+            f'sendfile(1<pipe:[8]>, 3<{paths[0]}>, NULL, 1) = 1',
+            f'mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, 3<{paths[0]}>, 0) = 0x1000',
+            f'copy_file_range(1<pipe:[8]>, NULL, 3<{paths[0]}>, NULL, 1, 0) = 1',
+            f'splice(1<pipe:[8]>, NULL, 3<{paths[0]}>, NULL, 1, 0) = 1',
+        )
+        for transfer in protected_transfers:
+            with self.subTest(protected_transfer=transfer.split("(", 1)[0]):
+                with self.assertRaisesRegex(Rejected, "observer protected action"):
+                    actual_output_v6.verify_observer(
+                        packed([*rows[:2], "2.000002 " + transfer, *rows[2:]]),
+                        interpreter, paths, identities, producer, producer)
+        for operation in (
+                f'renameat(AT_FDCWD, "/usr/lib/loader", AT_FDCWD, "{paths[0]}") = 0',
+                f'unlinkat(AT_FDCWD, "{paths[0]}", 0) = 0'):
+            with self.subTest(protected_path=operation.split("(", 1)[0]):
+                with self.assertRaisesRegex(Rejected, "observer protected action"):
+                    actual_output_v6.verify_observer(
+                        packed([*rows[:2], "2.000002 " + operation, *rows[2:]]),
+                        interpreter, paths, identities, producer, producer)
+        with self.assertRaisesRegex(Rejected, "observer protected action"):
+            actual_output_v6.verify_observer(
+                packed([*rows[:2],
+                        '2.000002 read(7</usr/lib/loader>, "x", 1) = 1',
+                        *rows[2:]]), interpreter, paths, identities,
+                producer, producer)
+        for transfer in (
+                'sendfile(1<pipe:[8]>, 7</usr/lib/loader>, NULL, 1) = 1',
+                'mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, '
+                '7</usr/lib/loader>, 0) = 0x1000',
+                'copy_file_range(1<pipe:[8]>, NULL, '
+                '7</usr/lib/loader>, NULL, 1, 0) = 1',
+                'splice(1<pipe:[8]>, NULL, '
+                '7</usr/lib/loader>, NULL, 1, 0) = 1'):
+            with self.subTest(unprotected_transfer=transfer.split("(", 1)[0]):
+                launch = (
+                    '1.000001 openat(AT_FDCWD, "/usr/lib/loader", O_RDONLY) = '
+                    '7</usr/lib/loader>',
+                    '1.000002 ' + transfer,
+                    '1.000003 close(7</usr/lib/loader>) = 0')
+                self.assertEqual(actual_output_v6.verify_observer(
+                    packed([*launch, *rows]), interpreter, paths, identities,
+                    producer, producer)["status"], "PROVED_V6_OUTPUT_OBSERVER")
         for label, changed in (
                 ("early", [rows[0].replace("2.000001", "0.000001"), *rows[1:]]),
                 ("wrong_flags", [line.replace("O_NOFOLLOW", "O_TRUNC")
@@ -192,6 +235,26 @@ class FocusedReplayTest(unittest.TestCase):
             packed([*unprotected, mention, *rows]), interpreter, paths,
             identities, producer, producer)["status"],
             "PROVED_V6_OUTPUT_OBSERVER")
+        fd_mention = '3<' + paths[0] + '> ->'
+        quoted_mention = ('1.000004 write(1<pipe:[8]>, ' +
+                          json.dumps(fd_mention) + ', ' +
+                          str(len(fd_mention)) + ') = ' + str(len(fd_mention)))
+        self.assertEqual(actual_output_v6.verify_observer(
+            packed([*unprotected, quoted_mention, *rows]), interpreter,
+            paths, identities, producer, producer)["status"],
+            "PROVED_V6_OUTPUT_OBSERVER")
+        for label, prefix_call in (
+                ("child", 'clone(flags=CLONE_VM|CLONE_FILES) = 90'),
+                ("alias", 'dup(7</usr/lib/loader>) = 8</usr/lib/loader>'),
+                ("control_alias", 'fcntl(7</usr/lib/loader>, F_DUPFD, 0) = '
+                 '8</usr/lib/loader>')):
+            with self.subTest(prefix=label):
+                with self.assertRaisesRegex(Rejected,
+                                            "observer protected launch action"):
+                    actual_output_v6.verify_observer(
+                        packed([*unprotected[:1], '1.000002 ' + prefix_call,
+                                *unprotected[1:], *rows]), interpreter, paths,
+                        identities, producer, producer)
 
     def test_version6_auxiliary_socket_requires_shared_live_object(self):
         payload = b"NUMERICAL_JSON {}\n"
