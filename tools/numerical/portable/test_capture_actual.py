@@ -200,6 +200,21 @@ class CaptureSourceGuardTest(unittest.TestCase):
                          hashlib.sha256(raw).hexdigest())
         self.assertEqual(budget.check(), len(raw))
         self.assertFalse(any(output.iterdir()))
+        (private / "extra").write_bytes(b"x")
+        with self.assertRaisesRegex(CaptureRejected, "budget"):
+            budget.check()
+
+    def test_forbidden_key_name_is_retained_only_in_private_diagnostic(self):
+        private = self.root / "private"
+        private.mkdir(mode=0o700)
+        private.chmod(0o700)
+        trace = self.root / "jdi-helper-trace.42"
+        trace.write_bytes(b'read(4, "OLLAMA_API_KEY", 14) = 14\n')
+        with self.assertRaisesRegex(CaptureRejected, "JDI helper trace exposed"):
+            capture_actual.private_trace_or_reject(trace, private, None,
+                                                   "JDI helper")
+        self.assertFalse(trace.exists())
+        self.assertEqual((private / trace.name).stat().st_mode & 0o777, 0o600)
 
     def test_private_trace_rejection_preserves_error_on_move_failure(self):
         scratch = self.root / "scratch"
