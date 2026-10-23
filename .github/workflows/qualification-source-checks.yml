@@ -55,6 +55,8 @@ jobs:
             python3 -B -m unittest -v \
               test_actual_arithmetic \
               test_actual_capture_receipt \
+              test_actual_capture_v6 \
+              test_actual_trace \
               test_capture_actual \
               test_rotation_oracle \
               test_rotation_marker \
@@ -89,9 +91,10 @@ jobs:
         run: |
           set -euo pipefail
           unset OLLAMA_API_KEY
-          evidence="$RUNNER_TEMP/numeric-class-witness"
-          mkdir -p "$evidence/tmp"
-          export TMPDIR="$evidence/tmp"
+          export TMPDIR="$HOME/d4tmp"
+          mkdir -p "$TMPDIR"
+          chmod 700 "$TMPDIR"
+          test "${#TMPDIR}" -le 40
           export JAVA_TOOL_OPTIONS="-XX:-UsePerfData -Djava.io.tmpdir=$TMPDIR"
           test -n "${JAVA_HOME_21_X64:-}"
           test -d "$JAVA_HOME_21_X64"
@@ -102,6 +105,7 @@ jobs:
           command -v strace
           env -u OLLAMA_API_KEY \
             DYN4K_CLASS_WITNESS_JDK_HOME="$JAVA_HOME_21_X64" \
+            DYN4K_JDI_JDK_HOME="$JAVA_HOME_21_X64" \
             DYN4K_TEST_JDK8_HOME="$JAVA_HOME_8_X64" \
             PYTHONDONTWRITEBYTECODE=1 \
             PYTHONPATH=tools/numerical/portable \

@@ -106,7 +106,8 @@ providers.gradleProperty("portableWorkerClassLoadLog").orNull?.let { logPattern 
 
 providers.gradleProperty("portableClassWitnessAgent").orNull?.let { agent ->
     val witness = providers.gradleProperty("portableClassWitnessOutput").get()
-    require(File(agent).isAbsolute && File(witness).isAbsolute &&
+    val witnessFile = witness.removePrefix("boolean:")
+    require(File(agent).isAbsolute && File(witnessFile).isAbsolute &&
         !agent.contains('=') && !witness.contains('='))
     tasks.named<Test>("jvmTest") {
         jvmArgs("-javaagent:$agent=$witness", "-XX:+DisableAttachMechanism", "-Xshare:off")
@@ -136,6 +137,14 @@ providers.gradleProperty("portableNumericProbeMirror").orNull?.let { mirror ->
     require(File(mirror).isAbsolute)
     tasks.named<Test>("jvmTest") {
         systemProperty("portable.numericProbeMirror", mirror)
+        maxParallelForks = 1
+    }
+}
+
+providers.gradleProperty("portableBooleanMirror").orNull?.let { mirror ->
+    require(File(mirror).isAbsolute)
+    tasks.named<Test>("jvmTest") {
+        systemProperty("portable.booleanMirror", mirror)
         maxParallelForks = 1
     }
 }

@@ -1,10 +1,12 @@
 import com.sun.jdi.Bootstrap;
 import com.sun.jdi.DoubleValue;
 import com.sun.jdi.Field;
+import com.sun.jdi.IntegerValue;
 import com.sun.jdi.Location;
 import com.sun.jdi.Method;
 import com.sun.jdi.ObjectReference;
 import com.sun.jdi.ReferenceType;
+import com.sun.jdi.StringReference;
 import com.sun.jdi.StackFrame;
 import com.sun.jdi.Value;
 import com.sun.jdi.VirtualMachine;
@@ -111,7 +113,39 @@ public final class RotationJdiProbe {
         Files.write(output.resolve("methods.tsv"), methods);
         Files.writeString(output.resolve("class.txt"),
                           type.name() + "\n" + type.constantPoolCount() + "\n" +
-                          type.classLoader().uniqueID() + "\n");
+                          (type.classLoader() == null ? 0 : type.classLoader().uniqueID()) + "\n");
+    }
+
+    private static void captureLoaderBridge(VirtualMachine vm, ReferenceType transform,
+                                            Path output) throws Exception {
+        List<ReferenceType> agents = vm.classesByName("dyn4k.witness.NumericClassWitness");
+        if (agents.size() != 1) throw new IllegalStateException("Agent type is not unique");
+        ReferenceType agent = agents.get(0);
+        Field loaderField = agent.fieldByName("focusedTransformLoader");
+        Field labelField = agent.fieldByName("focusedTransformLabel");
+        Field ordinalField = agent.fieldByName("focusedTransformOrdinal");
+        if (loaderField == null || labelField == null || ordinalField == null ||
+            !(agent.getValue(labelField) instanceof StringReference label) ||
+            !(agent.getValue(ordinalField) instanceof IntegerValue ordinal) ||
+            agent.classLoader() == null)
+            throw new IllegalStateException("Agent loader bridge is missing");
+        Value observed = agent.getValue(loaderField);
+        long transformId = transform.classLoader() == null ? 0 :
+                           transform.classLoader().uniqueID();
+        long observedId = observed == null ? 0 :
+                          observed instanceof ObjectReference object ? object.uniqueID() : -1;
+        if (transformId != observedId || ordinal.value() < 1)
+            throw new IllegalStateException("Transform loader object differs");
+        Path agentCode = output.resolve("agent-code");
+        Files.createDirectory(agentCode);
+        captureCode(agent, agentCode);
+        Files.writeString(output.resolve("loader.tsv"),
+                          "transform\t" + transformId + "\n" +
+                          "observed\t" + observedId + "\n" +
+                          "agent\t" + agent.classLoader().uniqueID() + "\n" +
+                          "label\t" + label.value() + "\n" +
+                          "ordinal\t" + ordinal.value() + "\n" +
+                          "provider_count\t" + agents.size() + "\n");
     }
 
     static String terminalEvent(Event event) {
@@ -121,13 +155,16 @@ public final class RotationJdiProbe {
     }
 
     public static void main(String[] args) throws Exception {
+        boolean loaderOnly = args.length == 6 && args[0].equals("attach-loader");
         if ((args.length != 6 && args.length != 7) ||
-            !(args[0].equals("launch") || args[0].equals("attach")))
+            !(args[0].equals("launch") || args[0].equals("attach") || loaderOnly))
             throw new IllegalArgumentException("Expected mode, output, target, main-or-port, class, count");
         Path output = Path.of(args[1]);
         Files.createDirectory(output);
         int expected = Integer.parseInt(args[5]);
-        if (expected <= 0) throw new IllegalArgumentException("Expected positive count");
+        if (expected < 0 || (expected == 0 && !loaderOnly) ||
+            (expected > 0 && loaderOnly))
+            throw new IllegalArgumentException("Expected positive count");
         int deadlineSeconds = args.length == 7 ? Integer.parseInt(args[6]) : 20;
         if (deadlineSeconds < 1 || deadlineSeconds > 600)
             throw new IllegalArgumentException("Invalid observation deadline");
@@ -177,11 +214,11 @@ public final class RotationJdiProbe {
             var entry = requests.createMethodEntryRequest();
             entry.addClassFilter(args[4]);
             entry.setSuspendPolicy(EventRequest.SUSPEND_ALL);
-            entry.enable();
+            if (!loaderOnly) entry.enable();
             var exit = requests.createMethodExitRequest();
             exit.addClassFilter(args[4]);
             exit.setSuspendPolicy(EventRequest.SUSPEND_ALL);
-            exit.enable();
+            if (!loaderOnly) exit.enable();
             vm.resume();
             long deadline = System.nanoTime() + Duration.ofSeconds(deadlineSeconds).toNanos();
             while (endpoint == null) {
@@ -203,6 +240,9 @@ public final class RotationJdiProbe {
                         if (event instanceof ClassPrepareEvent preparedEvent) {
                             if (++prepared != 1) throw new IllegalStateException("Duplicate class load");
                             captureCode(preparedEvent.referenceType(), output);
+                            if (args[4].equals("org.dyn4j.geometry.Transform"))
+                                captureLoaderBridge(vm, preparedEvent.referenceType(), output);
+                            if (loaderOnly) endpoint = "loader-ready";
                         } else if (event instanceof MethodEntryEvent methodEvent &&
                                    methodEvent.method().name().equals("rotatePivotObserved")) {
                             List<StackFrame> frames = methodEvent.thread().frames();
@@ -257,11 +297,12 @@ public final class RotationJdiProbe {
                     events.resume();
                 }
             }
-            if (!"vm-death".equals(endpoint) || prepared != 1 ||
+            if (!(loaderOnly ? "loader-ready".equals(endpoint) :
+                  "vm-death".equals(endpoint)) || prepared != 1 ||
                 entered != expected || exited != expected ||
                 pending.values().stream().anyMatch(stack -> !stack.isEmpty()))
                 throw new IllegalStateException("Incomplete target observation");
-            if (requireBodyMap) {
+            if (requireBodyMap && !loaderOnly) {
                 if (body1 <= 0 || body2 <= 0 || integrated != body2 || body1 == body2)
                     throw new IllegalStateException("Source body map is incomplete");
                 Files.writeString(output.resolve("body-map.tsv"), "b0\t" + body1 +

@@ -32,7 +32,7 @@ PORTABLE = Path(__file__).resolve().parent
 WRAPPER = "tools/numerical/portable/src/jvmTest/kotlin/portable/NumericProbeMatrixTest.kt"
 WRAPPER_SHA256 = "6e9d5a3436f2d10f0a40606a21b8cafafb548f8911e993725b2fda97f12a260a"
 OBSERVER = "tools/numerical/portable/class_witness/NumericClassWitness.java"
-OBSERVER_SHA256 = "1bed2d631df60b6db97dc3cbdd8903917ccff234455ebafcc03808978321d564"
+OBSERVER_SHA256 = "6341deddfb6e764a95c9700cfdc552111923ba7141c8896166a0bc3e45b3667f"
 WITNESS_JDK = Path("/tmp/dyn4k-tools/jdk21")
 KEYS = {"schema", "candidate_commit", "source_sha256", "fixture_source_sha256",
         "trace_sha256", "primary_receipt_sha256", "geometry_case_sha256", "artifact_sha256",

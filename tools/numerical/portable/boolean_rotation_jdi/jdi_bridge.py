@@ -3,6 +3,7 @@ import io
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import tempfile
 import zipfile
@@ -22,6 +23,38 @@ JOINT_METHOD = "solvePositionConstraints"
 
 class EvidenceRejected(ValueError):
     pass
+
+
+def verify_loader_bridge(raw, transform_id, agent_id, focus):
+    try:
+        rows = raw.decode("ascii").splitlines(keepends=True)
+        names = ("transform", "observed", "agent", "label", "ordinal",
+                 "provider_count")
+        if len(rows) != len(names) or any(not row.endswith("\n") for row in rows):
+            raise EvidenceRejected("JDI loader bridge inventory differs")
+        fields = [row[:-1].split("\t") for row in rows]
+        if any(len(row) != 2 or row[0] != name
+               for row, name in zip(fields, names)):
+            raise EvidenceRejected("JDI loader bridge fields differ")
+        values = [row[1] for row in fields]
+        ids = [int(value) for value in values[:3]]
+        ordinal = int(values[4])
+        if (type(transform_id) is not int or type(agent_id) is not int or
+                not isinstance(focus, dict) or
+                ids != [transform_id, transform_id, agent_id] or
+                transform_id < 0 or agent_id <= 0 or
+                values[3] != focus.get("loader") or
+                ordinal != focus.get("ordinal") or
+                values[5] != "1" or
+                (transform_id == 0) != (values[3] == "bootstrap")):
+            raise EvidenceRejected("JDI loader object or witness relationship differs")
+        return {"status": "MATCHED_JDI_LOADER_OBJECT", "loader_object_id": transform_id,
+                "agent_loader_object_id": agent_id, "observer_label": values[3],
+                "definition_ordinal": ordinal}
+    except (UnicodeError, ValueError, TypeError) as error:
+        if isinstance(error, EvidenceRejected):
+            raise
+        raise EvidenceRejected("JDI loader bridge is malformed") from error
 
 
 def _method(text, name):
@@ -132,11 +165,15 @@ def compile_helper(source, temporary_root):
     environment = os.environ.copy()
     environment.pop("OLLAMA_API_KEY", None)
     environment["JAVA_HOME"] = str(jdk)
-    environment["TMPDIR"] = str(temporary_root)
+    supplied_tmp = Path(os.environ.get("TMPDIR", ""))
+    selected_tmp = supplied_tmp if supplied_tmp.is_absolute() and (
+        supplied_tmp.resolve().is_relative_to(Path.home().resolve()) and
+        len(os.fsencode(str(supplied_tmp))) <= 40) else temporary_root
+    environment["TMPDIR"] = str(selected_tmp)
     javac = jdk / "bin/javac"
     _require_jdk21_javac(javac, environment)
     run = subprocess.run((str(javac), "--add-modules", "jdk.jdi",
-                          "-J-Djava.io.tmpdir=" + str(temporary_root),
+                          "-J-Djava.io.tmpdir=" + str(selected_tmp),
                           "-d", str(classes), str(java)), env=environment,
                          capture_output=True, timeout=30, check=False)
     if run.returncode:
@@ -184,21 +221,27 @@ def verify_body_map(raw, calls):
             "qualification": "UNPASSED", "calls": len(calls)}
 
 
-def verify_jdi_archive(raw, class_bytes, class_name, expected_count, markers):
+def verify_jdi_archive(raw, class_bytes, class_name, expected_count, markers,
+                       agent_bytes=None, focus=None):
     if type(raw) is not bytes or type(class_bytes) is not bytes or \
             type(class_name) is not str or type(expected_count) is not int or \
             type(markers) is not list or len(markers) != expected_count:
         raise EvidenceRejected("JDI archive input identity differs")
     required = {"body-map.tsv", "class.txt", "complete.txt",
                 "constant-pool.bin", "events.tsv", "methods.tsv"}
+    if agent_bytes is not None:
+        required |= {"loader.tsv", "agent-code/class.txt",
+                     "agent-code/constant-pool.bin", "agent-code/methods.tsv"}
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             names = archive.namelist()
             if (len(names) != len(set(names)) or not required <= set(names) or
                     any(name not in required and
-                        re.fullmatch(r"method-[0-9]+\.bin", name) is None
+                        re.fullmatch(r"(?:agent-code/)?method-[0-9]+\.bin", name) is None
                         for name in names) or
                     sum(item.file_size for item in archive.infolist()) > 64 * 1024 * 1024 or
+                    any(stat.S_ISLNK(item.external_attr >> 16)
+                        for item in archive.infolist()) or
                     archive.testzip() is not None):
                 raise EvidenceRejected("JDI archive inventory differs")
             temporary_root = Path(os.environ.get("TMPDIR", ""))
@@ -208,6 +251,7 @@ def verify_jdi_archive(raw, class_bytes, class_name, expected_count, markers):
             with tempfile.TemporaryDirectory(dir=temporary_root) as scratch:
                 output = Path(scratch)
                 for name in names:
+                    (output / name).parent.mkdir(parents=True, exist_ok=True)
                     (output / name).write_bytes(archive.read(name))
                 code = verify_probe_code(output, class_bytes, class_name)
                 if code["status"] != "MATCHED_JDI_LOADED_CODE":
@@ -221,9 +265,20 @@ def verify_jdi_archive(raw, class_bytes, class_name, expected_count, markers):
                             call[key] != marker.get(key) for key in
                             ("pre", "trig", "post", "angle_bits")):
                         raise EvidenceRejected("JDI operation bits differ from worker marker")
+                loader = None
+                if agent_bytes is not None:
+                    agent_code = verify_probe_code(output / "agent-code", agent_bytes,
+                                                   "dyn4k.witness.NumericClassWitness")
+                    if agent_code["status"] != "MATCHED_JDI_LOADED_CODE":
+                        raise EvidenceRejected("JDI agent provider bytes differ")
+                    transform_id = int((output / "class.txt").read_text().splitlines()[2])
+                    agent_id = int((output / "agent-code/class.txt").read_text().splitlines()[2])
+                    loader = verify_loader_bridge((output / "loader.tsv").read_bytes(),
+                                                  transform_id, agent_id, focus)
             return {"status": "MATCHED_JDI_BYTES_UNPASSED_ORIGIN",
                     "qualification": "UNPASSED", "calls": calls,
-                    "artifact_class_sha256": code["artifact_class_sha256"]}
+                    "artifact_class_sha256": code["artifact_class_sha256"],
+                    "loader_bridge": loader}
     except (OSError, UnicodeError, ValueError, zipfile.BadZipFile, RuntimeError,
             KeyError, IndexError) as error:
         if isinstance(error, EvidenceRejected):

@@ -1,5 +1,6 @@
 import hashlib
 import io
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -30,9 +31,11 @@ def build_agent(source: bytes, jdk: Path, output: Path, scratch: Path) -> bytes:
     source_path.write_bytes(source)
     classes = scratch / "classes"
     classes.mkdir()
+    environment = os.environ.copy()
+    environment.pop("OLLAMA_API_KEY", None)
     process = subprocess.run([str(jdk / "bin/javac"), "--release", "8", "-encoding", "UTF-8",
                               "-d", str(classes), str(source_path)], capture_output=True,
-                             timeout=60, check=False)
+                             timeout=60, check=False, env=environment)
     if process.returncode:
         raise Rejected("class witness source did not compile")
     class_files = sorted(classes.rglob("*.class"))
@@ -54,14 +57,18 @@ def build_agent(source: bytes, jdk: Path, output: Path, scratch: Path) -> bytes:
 
 
 def read_witness(raw: bytes, expected_classes: dict[str, bytes],
-                 expected_origins: dict[str, str] | None = None) -> dict:
+                 expected_origins: dict[str, str] | None = None,
+                 profile: str = "numeric") -> dict:
+    if profile not in ("numeric", "boolean"):
+        raise Rejected("class witness profile differs")
+    schema = SCHEMA if profile == "numeric" else "class-witness/3"
     if len(raw) > 32 * 1024 * 1024 or not raw.endswith(b"\n"):
         raise Rejected("class witness is incomplete or oversized")
     try:
         lines = raw.decode("ascii").splitlines()
     except UnicodeError as error:
         raise Rejected("class witness is not ASCII") from error
-    if len(lines) < 6 or lines[0] != "BEGIN\t" + SCHEMA:
+    if len(lines) < 6 or lines[0] != "BEGIN\t" + schema:
         raise Rejected("class witness start differs")
     end = re.fullmatch(r"END\t(OK|FAIL)\t([0-9]+)\t([0-9]{20})", lines[-1])
     if end is None or end[1] != "OK" or int(end[3]) != len(raw):
@@ -103,7 +110,18 @@ def read_witness(raw: bytes, expected_classes: dict[str, bytes],
     if len(definitions) != int(end[2]):
         raise Rejected("class witness count differs")
     loaded = []
-    for ordinal, line in enumerate(lines[seal_index + 1:-1], 1):
+    focus = None
+    loaded_lines = lines[seal_index + 1:-1]
+    if profile == "boolean":
+        if not loaded_lines or not loaded_lines[-1].startswith("FOCUS\t"):
+            raise Rejected("class witness focus terminal record differs")
+        fields = loaded_lines.pop().split("\t")
+        if len(fields) != 4 or fields[1] != "org/dyn4j/geometry/Transform" or \
+                re.fullmatch(r"(?:bootstrap|system|L[1-9][0-9]*)", fields[2]) is None or \
+                re.fullmatch(r"[1-9][0-9]*", fields[3]) is None:
+            raise Rejected("class witness focus terminal record differs")
+        focus = {"name": fields[1], "loader": fields[2], "ordinal": int(fields[3])}
+    for ordinal, line in enumerate(loaded_lines, 1):
         fields = line.split("\t")
         if len(fields) != 5 or fields[:2] != ["LOADED", str(ordinal)]:
             raise Rejected("class witness successful-load sequence differs")
@@ -118,5 +136,13 @@ def read_witness(raw: bytes, expected_classes: dict[str, bytes],
                 (by_name[row["name"]]["loader"], by_name[row["name"]]["origin"])
                 for row in loaded)):
         raise Rejected("class witness successful loads differ from callbacks")
-    return {"schema": SCHEMA, "helpers": helpers, "definitions": definitions, "loaded": loaded,
-            "sha256": _sha(raw)}
+    if profile == "boolean":
+        transform = by_name.get(focus["name"])
+        if transform is None or transform["loader"] != focus["loader"] or \
+                transform["sequence"] != focus["ordinal"]:
+            raise Rejected("class witness focus definition differs")
+    result = {"schema": schema, "helpers": helpers, "definitions": definitions,
+              "loaded": loaded, "sha256": _sha(raw)}
+    if profile == "boolean":
+        result["focus"] = focus
+    return result

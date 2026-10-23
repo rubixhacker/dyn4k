@@ -26,6 +26,11 @@ public final class NumericClassWitness {
         "portable/NumericProbeMatrixTest", "portable/PortableMatrixTest",
         "portable/NumericalRecorder"
     };
+    private static final String[] BOOLEAN_CRITICAL = {
+        "portable/FocusedBooleanArithmeticSourceTest",
+        "portable/RevoluteLimitsFalseCaptureTest", "portable/NumericalRecorder",
+        "org/dyn4j/geometry/Transform"
+    };
     private static final char[] HEX = "0123456789abcdef".toCharArray();
     private static final int OPEN = 0;
     private static final int SEALED = 1;
@@ -39,6 +44,10 @@ public final class NumericClassWitness {
     private static Instrumentation instrument;
     private static int state;
     private static final Map<String, String> definitions = new HashMap<String, String>();
+    private static boolean booleanProfile;
+    public static ClassLoader focusedTransformLoader;
+    public static String focusedTransformLabel;
+    public static int focusedTransformOrdinal;
 
     private NumericClassWitness() {}
 
@@ -107,6 +116,11 @@ public final class NumericClassWitness {
                 throw new IllegalStateException("class witness record is malformed");
             }
             count++;
+            if (booleanProfile && name.equals("org/dyn4j/geometry/Transform")) {
+                focusedTransformLoader = loader;
+                focusedTransformLabel = id;
+                focusedTransformOrdinal = count;
+            }
             definitions.put(name, id + "\t" + origin);
             write("CLASS\t" + count + "\t" + name + "\t" + hash(bytes) + "\t" + id +
                   "\t" + origin + "\tjava:" + Thread.currentThread().getId() + "\n");
@@ -129,7 +143,7 @@ public final class NumericClassWitness {
     private static synchronized void finish() {
         try {
             state = SEALED;
-            for (String name : CRITICAL) {
+            for (String name : booleanProfile ? BOOLEAN_CRITICAL : CRITICAL) {
                 if (!seen.contains(name)) {
                     failed = true;
                 }
@@ -165,6 +179,15 @@ public final class NumericClassWitness {
             if (!loadedNames.equals(seen) || loadedCount != count) {
                 failed = true;
             }
+            if (booleanProfile) {
+                if (focusedTransformLabel == null || focusedTransformOrdinal < 1 ||
+                    !seen.contains("org/dyn4j/geometry/Transform")) {
+                    failed = true;
+                } else {
+                    write("FOCUS\torg/dyn4j/geometry/Transform\t" +
+                          focusedTransformLabel + "\t" + focusedTransformOrdinal + "\n");
+                }
+            }
             String status = failed ? "FAIL" : "OK";
             String start = "END\t" + status + "\t" + count + "\t";
             long finalSize = output.size() + start.length() + 21;
@@ -184,6 +207,10 @@ public final class NumericClassWitness {
     }
 
     public static void premain(String destination, Instrumentation instrumentation) throws Exception {
+        booleanProfile = destination.startsWith("boolean:");
+        if (booleanProfile) {
+            destination = destination.substring("boolean:".length());
+        }
         Path jar = Paths.get(NumericClassWitness.class.getProtectionDomain()
             .getCodeSource().getLocation().toURI()).toRealPath();
         BasicFileAttributes jarAttributes = Files.readAttributes(jar, BasicFileAttributes.class);
@@ -209,7 +236,7 @@ public final class NumericClassWitness {
         };
         provider(hook.getClass(), jar);
         output = FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-        write("BEGIN\tclass-witness/2\n");
+        write("BEGIN\t" + (booleanProfile ? "class-witness/3" : "class-witness/2") + "\n");
         for (Class<?> helper : new Class<?>[] {
                 NumericClassWitness.class, Observer.class, hook.getClass()}) {
             write("HELPER\t" + helper.getName().replace('.', '/') + "\tsystem\t" +

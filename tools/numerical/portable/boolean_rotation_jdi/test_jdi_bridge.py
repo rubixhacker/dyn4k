@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import jdi_bridge
 from jdi_bridge import (EvidenceRejected, compile_helper, parse_call_sites, verify_body_map,
-                        verify_jdi_archive, verify_jdi_file_writes,
+                        verify_jdi_archive, verify_jdi_file_writes, verify_loader_bridge,
                         verify_jdi_transport)
 from witness import read_probe_events
 
@@ -65,6 +65,20 @@ HELPER_SOCKET_TRACE = (
 
 
 class JdiBridgeTest(unittest.TestCase):
+    def test_loader_bridge_joins_jvm_ids_and_observer_label_separately(self):
+        raw = (b"transform\t41\nobserved\t41\nagent\t7\n"
+               b"label\tL2\nordinal\t17\nprovider_count\t1\n")
+        focus = {"name": "org/dyn4j/geometry/Transform", "loader": "L2",
+                 "ordinal": 17}
+        self.assertEqual(verify_loader_bridge(raw, 41, 7, focus)["loader_object_id"], 41)
+        for broken in (raw.replace(b"observed\t41", b"observed\t42"),
+                       raw.replace(b"label\tL2", b"label\tL1"),
+                       raw.replace(b"ordinal\t17", b"ordinal\t18"),
+                       raw.replace(b"provider_count\t1", b"provider_count\t2"),
+                       raw + b"label\tL2\n"):
+            with self.subTest(raw=broken), self.assertRaises(EvidenceRejected):
+                verify_loader_bridge(broken, 41, 7, focus)
+
     def test_compile_helper_rejects_missing_javac_for_default_and_override(self):
         selected_jdks = (
             (None, Path("/default/jdk")),

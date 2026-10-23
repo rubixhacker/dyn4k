@@ -220,7 +220,8 @@ def verify_rotation_premise_capture(xml, expected_ids):
         raise CaptureRejected("rotation premise output is malformed") from error
 
 
-def verify_capture(xml, method, expected_ids=None, reset_order="either"):
+def verify_capture(xml, method, expected_ids=None, reset_order="either",
+                   boolean_test_class=_FOCUSED_BOOLEAN_CLASS):
     if method not in _WRAPPERS:
         raise CaptureRejected("unknown producer method")
     if reset_order not in {"pre", "post", "either"}:
@@ -564,7 +565,7 @@ def verify_capture(xml, method, expected_ids=None, reset_order="either"):
                             (("tests", "1"), ("skipped", "0"),
                              ("failures", "0"), ("errors", "0"))) or \
             len(testcases) != 1 or \
-            testcases[0].get("classname") != (_FOCUSED_BOOLEAN_CLASS if
+            testcases[0].get("classname") != (boolean_test_class if
                 method == _FOCUSED_BOOLEAN_METHOD else
                 "portable.ProspectiveArithmeticTest") or \
             testcases[0].get("name") not in (method, f"{method}[jvm]") or \
@@ -837,7 +838,8 @@ def _verify_worker_class_load(raw, worker_pid, require_toi_reset, method,
     return observed
 
 
-def _check_process(files, runtime_executable, method, jdi_port=None):
+def _check_process(files, runtime_executable, method, jdi_port=None,
+                   boolean_test_class=_FOCUSED_BOOLEAN_CLASS):
     if runtime_executable != _PINNED_JAVA:
         raise CaptureRejected("runtime executable identity differs")
     try:
@@ -878,7 +880,7 @@ def _check_process(files, runtime_executable, method, jdi_port=None):
             f"-Xlog:class+load=info:file={log_paths[0]}:pid,level,tags:filecount=0" \
             not in process_lines[0]:
         raise CaptureRejected("executed worker class-load option differs")
-    target_class = (_FOCUSED_BOOLEAN_CLASS if method == _FOCUSED_BOOLEAN_METHOD
+    target_class = (boolean_test_class if method == _FOCUSED_BOOLEAN_METHOD
                     else "portable.RotationPremiseFixtureTest"
                     if method == "captureRotationPremises"
                     else "portable.ProspectiveArithmeticTest")
@@ -1269,7 +1271,8 @@ def _verify_boolean_jdi(files, summary, worker_pid):
         raise CaptureRejected("JDI source or process evidence differs") from error
 
 
-def make_capture_receipt(files, method, commit, expected_ids, runtime_executable):
+def make_capture_receipt(files, method, commit, expected_ids, runtime_executable,
+                         boolean_test_class=_FOCUSED_BOOLEAN_CLASS):
     requires_writes = method in ("captureWheelActive", "captureRotationPremises",
                                  _FOCUSED_BOOLEAN_METHOD)
     required_files = _RECEIPT_FILES | ({"worker_write_traces"}
@@ -1300,10 +1303,12 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
             raise CaptureRejected("JDI transport declaration differs") from error
     classpath_evidence, worker_pid, log_path, portable_classes = _check_process(
         files, runtime_executable, method,
-        jdi_port=jdi_transport.get("port") if jdi_transport else None)
+        jdi_port=jdi_transport.get("port") if jdi_transport else None,
+        boolean_test_class=boolean_test_class)
     reset_order = ("pre" if commit == "fe4d63cb7f08cea304e5691f2f2ebc23379db6b0"
                    else "post")
-    summary = verify_capture(files["xml"], method, expected_ids, reset_order)
+    summary = verify_capture(files["xml"], method, expected_ids, reset_order,
+                             boolean_test_class)
     if method == _FOCUSED_BOOLEAN_METHOD:
         if expected_ids != [_FOCUSED_BOOLEAN_CASE] or \
                 _sha(files["reference_case"]) != _FOCUSED_BOOLEAN_REFERENCE_SHA256 or \
@@ -1363,12 +1368,13 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
 
 
 def verify_capture_receipt(receipt, files, method, commit, expected_ids,
-                           runtime_executable):
+                           runtime_executable,
+                           boolean_test_class=_FOCUSED_BOOLEAN_CLASS):
     if type(receipt) is not dict or type(receipt.get("exit_code")) is not int or \
             receipt["exit_code"] != 0:
         raise CaptureRejected("target receipt or process exit differs")
     expected = make_capture_receipt(files, method, commit, expected_ids,
-                                    runtime_executable)
+                                    runtime_executable, boolean_test_class)
     if receipt != expected:
         raise CaptureRejected("target receipt identity or captured bytes differ")
     summary = dict(expected["summary"])

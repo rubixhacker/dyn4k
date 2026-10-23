@@ -1,10 +1,14 @@
 import hashlib
+import io
+import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import tempfile
 import unittest
+import zipfile
 
 from receipt import Rejected
 from numeric_class_witness import build_agent, read_witness
@@ -56,6 +60,217 @@ def witness(rows=None, status="OK", loaded=None):
 
 
 class ClassWitnessTest(unittest.TestCase):
+    def test_boolean_profile_requires_transform_terminal_identity(self):
+        transform = b"transform-class"
+        digest = hashlib.sha256(transform).hexdigest().encode()
+        helpers = b"".join(("HELPER\t" + name + "\tsystem\tfile:/agent/\n").encode()
+                           for name in ("dyn4k/witness/NumericClassWitness",
+                                        "dyn4k/witness/NumericClassWitness$Observer",
+                                        "dyn4k/witness/NumericClassWitness$1"))
+        prefix = (b"BEGIN\tclass-witness/3\n" + helpers +
+                  b"CLASS\t1\torg/dyn4j/geometry/Transform\t" + digest +
+                  b"\tL1\tfile:/engine/\tjava:1\nSEALED\t1\n" +
+                  b"LOADED\t1\torg/dyn4j/geometry/Transform\tL1\tfile:/engine/\n" +
+                  b"FOCUS\torg/dyn4j/geometry/Transform\tL1\t1\n")
+        ending = b"END\tOK\t1\t"
+        raw = prefix + ending + f"{len(prefix) + len(ending) + 21:020d}\n".encode()
+        expected = {"org/dyn4j/geometry/Transform": transform}
+        observed = read_witness(raw, expected, profile="boolean")
+        self.assertEqual(observed["focus"], {"name": "org/dyn4j/geometry/Transform",
+                                              "loader": "L1", "ordinal": 1})
+        for changed in (raw.replace(b"\tL1\t1\nEND", b"\tL2\t1\nEND"),
+                        raw.replace(b"\tL1\t1\nEND", b"\tL1\t2\nEND"),
+                        raw.replace(b"FOCUS\t", b"OTHER\t")):
+            with self.subTest(changed=changed[-90:]), self.assertRaises(Rejected):
+                read_witness(changed, expected, profile="boolean")
+        with self.assertRaises(Rejected):
+            read_witness(witness(), {"portable/PortableMatrixTest": b"class"},
+                         profile="boolean")
+
+    def test_boolean_profile_observes_non_system_loader_through_real_jdi(self):
+        from actual_trace import (checked_projection, normalize_rich_traces,
+                                  rich_trace_arguments)
+        from boolean_rotation_jdi import jdi_bridge
+        from boolean_rotation_jdi.loaded_code import verify_probe_code
+        from numeric_producer import captured_file_identity
+        from numeric_producer_trace import (successful_execve, verify_stable_input,
+                                            verify_transport)
+        environment = os.environ.copy()
+        environment.pop("OLLAMA_API_KEY", None)
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory)
+            source = root / "source"
+            classes = root / "classes"
+            source.mkdir()
+            classes.mkdir()
+            bodies = {
+                "portable/FocusedBooleanArithmeticSourceTest": "public class FocusedBooleanArithmeticSourceTest {}",
+                "portable/RevoluteLimitsFalseCaptureTest": "public class RevoluteLimitsFalseCaptureTest {}",
+                "portable/NumericalRecorder": "public class NumericalRecorder {}",
+                "org/dyn4j/geometry/Transform": "public class Transform {}",
+            }
+            sources = []
+            for name, body in bodies.items():
+                path = source / (name + ".java")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("package " + name.rsplit("/", 1)[0].replace("/", ".")
+                                + "; " + body)
+                sources.append(path)
+            main = source / "Main.java"
+            main.write_text(
+                "import java.net.URLClassLoader; import java.nio.file.Paths; "
+                "public class Main { public static void main(String[] a) throws Exception { "
+                "URLClassLoader loader = new URLClassLoader(new java.net.URL[]{"
+                "Paths.get(a[0]).toUri().toURL()}, null); "
+                "Class.forName(\"portable.FocusedBooleanArithmeticSourceTest\", true, loader); "
+                "Class.forName(\"portable.RevoluteLimitsFalseCaptureTest\", true, loader); "
+                "Class.forName(\"portable.NumericalRecorder\", true, loader); "
+                "Class.forName(\"org.dyn4j.geometry.Transform\", true, loader); } }")
+            built = subprocess.run([str(JDK / "bin/javac"), "--release", "8",
+                                    "-d", str(classes), str(main),
+                                    *map(str, sources)], capture_output=True, timeout=30,
+                                   env=environment)
+            self.assertEqual(built.returncode, 0, built.stderr.decode())
+            agent = root / "agent.jar"
+            built_agent = build_agent(SOURCE.read_bytes(), JDK, agent, root / "agent-build")
+            agent_before = captured_file_identity(agent)
+            runtime_before = captured_file_identity(JDK / "bin/java")
+            helper, helper_zip = jdi_bridge.compile_helper(
+                (Path(__file__).parent / "boolean_rotation_jdi/RotationJdiProbe.java").read_bytes(),
+                root / "helper-build")
+            with socket.socket() as reserved:
+                reserved.bind(("127.0.0.1", 0))
+                port = reserved.getsockname()[1]
+            witness_path = root / "witness.log"
+            tracer = shutil.which("strace")
+            self.assertIsNotNone(tracer)
+            target = subprocess.Popen([tracer, *rich_trace_arguments(),
+                "-o", str(root / "worker-trace"),
+                str(JDK / "bin/java"),
+                f"-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=127.0.0.1:{port}",
+                "-javaagent:" + str(agent) + "=boolean:" + str(witness_path),
+                "-cp", str(classes), "Main", str(classes)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
+            try:
+                output = root / "jdi-output"
+                observed = subprocess.run([tracer, *rich_trace_arguments(),
+                    "-o", str(root / "helper-trace"),
+                    str(JDK / "bin/java"), "--add-modules", "jdk.jdi", "-cp", str(helper),
+                    "RotationJdiProbe", "attach-loader", str(output), "127.0.0.1",
+                    str(port), "org.dyn4j.geometry.Transform", "0"],
+                    capture_output=True, timeout=60, env=environment)
+                stdout, stderr = target.communicate(timeout=60)
+            finally:
+                if target.poll() is None:
+                    target.kill()
+                    target.communicate()
+            self.assertEqual(observed.returncode, 0, observed.stderr.decode())
+            self.assertEqual(target.returncode, 0, stderr.decode())
+            expected = {name: (classes / (name + ".class")).read_bytes()
+                        for name in bodies}
+            record = read_witness(witness_path.read_bytes(), expected, profile="boolean")
+            focus = record["focus"]
+            self.assertRegex(focus["loader"], r"L[1-9][0-9]*")
+            transform_code = verify_probe_code(
+                output, expected["org/dyn4j/geometry/Transform"],
+                "org.dyn4j.geometry.Transform")
+            self.assertEqual(transform_code["status"], "MATCHED_JDI_LOADED_CODE")
+            with zipfile.ZipFile(io.BytesIO(built_agent)) as compiled_agent:
+                agent_class = compiled_agent.read(
+                    "dyn4k/witness/NumericClassWitness.class")
+            agent_code = verify_probe_code(
+                output / "agent-code", agent_class,
+                "dyn4k.witness.NumericClassWitness")
+            self.assertEqual(agent_code["status"], "MATCHED_JDI_LOADED_CODE")
+            transform_id = int((output / "class.txt").read_text().splitlines()[2])
+            agent_id = int((output / "agent-code/class.txt").read_text().splitlines()[2])
+            bridge = jdi_bridge.verify_loader_bridge(
+                (output / "loader.tsv").read_bytes(), transform_id, agent_id, focus)
+            self.assertGreater(bridge["loader_object_id"], 0)
+            retained_traces = {}
+            for prefix, expected_call in (("worker-trace", b"bind("),
+                                          ("helper-trace", b"connect(")):
+                archived = io.BytesIO()
+                with zipfile.ZipFile(archived, "w") as trace_zip:
+                    for trace_file in sorted(root.glob(prefix + ".*")):
+                        trace_zip.writestr(
+                            "trace." + trace_file.name.rsplit(".", 1)[1],
+                            trace_file.read_bytes())
+                retained_traces[prefix] = archived.getvalue()
+                protected = ({str(agent), str(witness_path)} if prefix == "worker-trace"
+                             else {str(path) for path in output.rglob("*") if path.is_file()})
+                projected = checked_projection(archived.getvalue(), protected)
+                self.assertGreater(projected["raw_bytes"], 0)
+                with zipfile.ZipFile(io.BytesIO(projected["legacy_zip"])) as legacy:
+                    self.assertTrue(any(expected_call in legacy.read(name)
+                                        for name in legacy.namelist()))
+                if prefix == "worker-trace":
+                    with zipfile.ZipFile(io.BytesIO(archived.getvalue())) as raw_zip:
+                        traces = {name[6:]: raw_zip.read(name)
+                                  for name in raw_zip.namelist()}
+                    normalized, _ = normalize_rich_traces(traces)
+                    selected = []
+                    for tid, data in normalized.items():
+                        for line in data.decode().splitlines():
+                            if " execve(" not in line:
+                                continue
+                            executed = successful_execve(line.split(" ", 1)[1])
+                            if executed is not None and executed[0] == str(JDK / "bin/java") \
+                                    and "Main" in executed[1]:
+                                selected.append((tid, *executed))
+                    self.assertEqual(len(selected), 1)
+                    worker = selected[0]
+                    input_proof = verify_stable_input(
+                        normalized, str(agent), captured_file_identity(agent),
+                        worker[0], built_agent, worker[1:])
+                    self.assertGreater(input_proof["reads"], 0)
+                    output_proof = verify_transport(
+                        normalized, str(witness_path), witness_path.read_bytes(),
+                        worker, mirror_identity=captured_file_identity(witness_path),
+                        shared_writers=True)
+                    self.assertEqual(output_proof["mirror_destination"],
+                                     str(witness_path))
+            self.assertEqual(captured_file_identity(agent), agent_before)
+            self.assertEqual(captured_file_identity(JDK / "bin/java"), runtime_before)
+            evidence_path = os.environ.get("DYN4K_FOCUSED_PILOT_EVIDENCE")
+            if evidence_path is not None:
+                evidence = Path(evidence_path)
+                self.assertTrue(evidence.is_dir() and not any(evidence.iterdir()))
+                payloads = {
+                    "agent.jar": built_agent,
+                    "class-witness.log": witness_path.read_bytes(),
+                    "helper-classes.zip": helper_zip,
+                    "worker-traces.zip": retained_traces["worker-trace"],
+                    "helper-traces.zip": retained_traces["helper-trace"],
+                }
+                jdi_zip = io.BytesIO()
+                with zipfile.ZipFile(jdi_zip, "w") as archive:
+                    for path in sorted(path for path in output.rglob("*") if path.is_file()):
+                        archive.writestr(path.relative_to(output).as_posix(), path.read_bytes())
+                payloads["jdi-output.zip"] = jdi_zip.getvalue()
+                for name, data in payloads.items():
+                    with (evidence / name).open("xb") as target:
+                        target.write(data)
+                summary = {
+                    "schema": "focused-boolean-toy-pilot/1",
+                    "status": "PASSED_TOY_LOADER_AND_TRANSPORT",
+                    "qualification": "UNPASSED",
+                    "agent_before": agent_before,
+                    "agent_after": captured_file_identity(agent),
+                    "runtime_before": runtime_before,
+                    "runtime_after": captured_file_identity(JDK / "bin/java"),
+                    "loader_label": focus["loader"],
+                    "loader_object_id": bridge["loader_object_id"],
+                    "definition_ordinal": focus["ordinal"],
+                    "agent_input_reads": input_proof["reads"],
+                    "witness_destination": output_proof["mirror_destination"],
+                    "files": {name: hashlib.sha256(data).hexdigest()
+                              for name, data in payloads.items()},
+                }
+                with (evidence / "pilot.json").open("x") as target:
+                    json.dump(summary, target, indent=2, sort_keys=True)
+                    target.write("\n")
+
     def test_rebuild_is_deterministic_and_capabilities_are_absent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
