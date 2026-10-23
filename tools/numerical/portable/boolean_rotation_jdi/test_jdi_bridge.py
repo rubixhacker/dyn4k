@@ -107,6 +107,50 @@ class JdiBridgeTest(unittest.TestCase):
                                           archive({"trace.456": helper}),
                                           40001, 123, 456, HELPER_ARGS)
         self.assertEqual(result["status"], "PROVED_JDI_RAW_EXCHANGE")
+        valid_schedules = (
+            ("blocking receives",
+             worker.replace(b'1.000008 recvfrom', b'1.00000715 recvfrom'),
+             helper.replace(b'1.000010 read', b'1.0000085 read')),
+            ("equal per-thread timestamps",
+             worker.replace(b'1.000002 bind', b'1.000003 bind').replace(
+                b'1.000009 sendto', b'1.000008 sendto').replace(
+                b'1.000012 recvfrom', b'1.000008 recvfrom'),
+             helper.replace(b'1.000010 read', b'1.0000072 read').replace(
+                b'1.000011 write', b'1.0000072 write')),
+            ("connect enters before accept",
+             worker.replace(b'1.000005 accept', b'1.0000075 accept'), helper),
+        )
+        for label, changed_worker, changed_helper in valid_schedules:
+            with self.subTest(schedule=label):
+                self.assertEqual(verify_jdi_transport_v6(
+                    archive({"trace.123": changed_worker}),
+                    archive({"trace.456": changed_helper}),
+                    40001, 123, 456, HELPER_ARGS)["status"],
+                    "PROVED_JDI_RAW_EXCHANGE")
+
+        def reverse_calls(trace, first_stamp, second_stamp):
+            rows = trace.splitlines(keepends=True)
+            first = next(index for index, row in enumerate(rows)
+                         if row.startswith(first_stamp + b' '))
+            second = next(index for index, row in enumerate(rows)
+                          if row.startswith(second_stamp + b' '))
+            rows[first], rows[second] = (
+                rows[second].replace(second_stamp, first_stamp, 1),
+                rows[first].replace(first_stamp, second_stamp, 1))
+            return b''.join(rows)
+
+        for label, changed_worker, changed_helper in (
+                ("worker listener order",
+                 reverse_calls(worker, b'1.000002', b'1.000003'), helper),
+                ("worker handshake order",
+                 reverse_calls(worker, b'1.000008', b'1.000009'), helper),
+                ("helper handshake order",
+                 worker, reverse_calls(helper, b'1.0000072', b'1.000010'))):
+            with self.subTest(order=label):
+                with self.assertRaises(EvidenceRejected):
+                    verify_jdi_transport_v6(archive({"trace.123": changed_worker}),
+                                             archive({"trace.456": changed_helper}),
+                                             40001, 123, 456, HELPER_ARGS)
         for changed_worker, changed_helper in (
                 (worker.replace(b'1.000005 accept',
                                 b'1.0000031 close(9<TCP:[127.0.0.1:40001]>) = 0\n'

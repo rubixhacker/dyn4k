@@ -59,7 +59,47 @@ def witness(rows=None, status="OK", loaded=None):
     return body + (end + f"{len(body) + len(end) + 21:020d}\n").encode()
 
 
+def _retain_unverified_pilot_traces(evidence, traces, metadata):
+    if not evidence.is_dir() or any(evidence.iterdir()):
+        raise AssertionError("pilot diagnostic directory must be empty")
+    files = {"worker-traces.zip": traces["worker-trace"],
+             "helper-traces.zip": traces["helper-trace"]}
+    for name, data in files.items():
+        with (evidence / name).open("xb") as target:
+            target.write(data)
+    diagnostic = {
+        "schema": "focused-boolean-toy-pilot-diagnostic/1",
+        **metadata,
+        "status": "UNVERIFIED",
+        "qualification": "UNPASSED",
+        "files": {name: hashlib.sha256(data).hexdigest()
+                  for name, data in files.items()},
+        "raw_bytes": {name: len(data) for name, data in files.items()},
+    }
+    with (evidence / "diagnostic.json").open("x") as target:
+        json.dump(diagnostic, target, indent=2, sort_keys=True)
+        target.write("\n")
+
+
 class ClassWitnessTest(unittest.TestCase):
+    def test_unverified_pilot_raw_traces_are_retained(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            evidence = Path(directory)
+            traces = {"worker-trace": b"worker raw\n",
+                      "helper-trace": b"helper raw\n"}
+            _retain_unverified_pilot_traces(
+                evidence, traces, {"port": 40001, "helper_command": ["java"],
+                                   "worker_returncode": 0, "helper_returncode": 0})
+            self.assertEqual((evidence / "worker-traces.zip").read_bytes(),
+                             traces["worker-trace"])
+            self.assertEqual((evidence / "helper-traces.zip").read_bytes(),
+                             traces["helper-trace"])
+            diagnostic = json.loads((evidence / "diagnostic.json").read_text())
+            self.assertEqual(diagnostic["status"], "UNVERIFIED")
+            self.assertEqual(diagnostic["files"]["worker-traces.zip"],
+                             hashlib.sha256(traces["worker-trace"]).hexdigest())
+            self.assertEqual(diagnostic["port"], 40001)
+
     def test_boolean_profile_requires_transform_terminal_identity(self):
         transform = b"transform-class"
         digest = hashlib.sha256(transform).hexdigest().encode()
@@ -178,6 +218,22 @@ class ClassWitnessTest(unittest.TestCase):
                 if target.poll() is None:
                     target.kill()
                     target.communicate()
+            retained_traces = {}
+            for prefix in ("worker-trace", "helper-trace"):
+                archived = io.BytesIO()
+                with zipfile.ZipFile(archived, "w") as trace_zip:
+                    for trace_file in sorted(root.glob(prefix + ".*")):
+                        trace_zip.writestr(
+                            "trace." + trace_file.name.rsplit(".", 1)[1],
+                            trace_file.read_bytes())
+                retained_traces[prefix] = archived.getvalue()
+            evidence_path = os.environ.get("DYN4K_FOCUSED_PILOT_EVIDENCE")
+            if evidence_path is not None:
+                _retain_unverified_pilot_traces(
+                    Path(evidence_path), retained_traces,
+                    {"port": port, "helper_command": helper_command,
+                     "worker_returncode": target.returncode,
+                     "helper_returncode": observed.returncode})
             self.assertEqual(observed.returncode, 0, observed.stderr.decode())
             self.assertEqual(target.returncode, 0, stderr.decode())
             helper_argument_before = captured_file_identity(helper_arguments)
@@ -202,22 +258,15 @@ class ClassWitnessTest(unittest.TestCase):
             bridge = jdi_bridge.verify_loader_bridge(
                 (output / "loader.tsv").read_bytes(), transform_id, agent_id, focus)
             self.assertGreater(bridge["loader_object_id"], 0)
-            retained_traces = {}
             for prefix, expected_call in (("worker-trace", b"bind("),
                                           ("helper-trace", b"connect(")):
-                archived = io.BytesIO()
-                with zipfile.ZipFile(archived, "w") as trace_zip:
-                    for trace_file in sorted(root.glob(prefix + ".*")):
-                        trace_zip.writestr(
-                            "trace." + trace_file.name.rsplit(".", 1)[1],
-                            trace_file.read_bytes())
-                retained_traces[prefix] = archived.getvalue()
+                archived = retained_traces[prefix]
                 protected = ({str(agent), str(witness_path)} if prefix == "worker-trace"
                              else ({str(path) for path in output.rglob("*") if path.is_file()} |
                                    {str(helper / name) for name in helper_members} |
                                    {str(helper_arguments)}))
                 projected = checked_projection(
-                    archived.getvalue(), protected,
+                    archived, protected,
                     strict_outputs=({str(path) for path in output.rglob("*")
                                      if path.is_file()} if prefix == "helper-trace"
                                     else ()))
@@ -226,7 +275,7 @@ class ClassWitnessTest(unittest.TestCase):
                     self.assertTrue(any(expected_call in legacy.read(name)
                                         for name in legacy.namelist()))
                 if prefix == "worker-trace":
-                    with zipfile.ZipFile(io.BytesIO(archived.getvalue())) as raw_zip:
+                    with zipfile.ZipFile(io.BytesIO(archived)) as raw_zip:
                         traces = {name[6:]: raw_zip.read(name)
                                   for name in raw_zip.namelist()}
                     normalized, _ = normalize_rich_traces(traces)
@@ -320,16 +369,15 @@ class ClassWitnessTest(unittest.TestCase):
                              "MATCHED_JDI_FILE_WRITES_UNPASSED_LOADER")
             self.assertEqual(captured_file_identity(agent), agent_before)
             self.assertEqual(captured_file_identity(JDK / "bin/java"), runtime_before)
-            evidence_path = os.environ.get("DYN4K_FOCUSED_PILOT_EVIDENCE")
             if evidence_path is not None:
                 evidence = Path(evidence_path)
-                self.assertTrue(evidence.is_dir() and not any(evidence.iterdir()))
+                self.assertEqual({path.name for path in evidence.iterdir()},
+                                 {"worker-traces.zip", "helper-traces.zip",
+                                  "diagnostic.json"})
                 payloads = {
                     "agent.jar": built_agent,
                     "class-witness.log": witness_path.read_bytes(),
                     "helper-classes.zip": helper_zip,
-                    "worker-traces.zip": retained_traces["worker-trace"],
-                    "helper-traces.zip": retained_traces["helper-trace"],
                     "jdi-helper-arguments.log": helper_arguments.read_bytes(),
                 }
                 jdi_zip = io.BytesIO()
@@ -361,8 +409,10 @@ class ClassWitnessTest(unittest.TestCase):
                     "raw_jdi_transport": transport_proof,
                     "jdi_file_writes": jdi_file_proof,
                     "witness_destination": output_proof["mirror_destination"],
-                    "files": {name: hashlib.sha256(data).hexdigest()
-                              for name, data in payloads.items()},
+                    "files": {**{name: hashlib.sha256(data).hexdigest()
+                                  for name, data in payloads.items()},
+                              **{name + "s.zip": hashlib.sha256(data).hexdigest()
+                                  for name, data in retained_traces.items()}},
                 }
                 with (evidence / "pilot.json").open("x") as target:
                     json.dump(summary, target, indent=2, sort_keys=True)
