@@ -404,6 +404,16 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
                  "PYTHONPATH=tools/qualification python3 -B -m unittest -v "
                  "test_independent_gates"),
+                ("name: Test portable qualification source modules",
+                 "env -u OLLAMA_API_KEY -u DYN4K_UPSTREAM_SOURCE "
+                 "-u DYN4K_RETAINED_FULL_JVM_ARCHIVE "
+                 "-u DYN4K_JVM_MODE_PUBLICATION "
+                 "-u DYN4K_RETAINED_BROWSER_PRODUCER "
+                 "-u DYN4K_RETAINED_BROWSER_ARCHIVES "
+                 "PYTHONDONTWRITEBYTECODE=1 "
+                 "PYTHONPATH=tools/qualification python3 -B -m unittest -v "
+                 "test_collection test_compiler_modes test_full_corpus "
+                 "test_independent_adapter"),
                 ("name: Check migration guide links and claims",
                  "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
                  "python3 -B docs/guide/check_links.py"),
@@ -621,6 +631,35 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     self.assert_source_checks_job_contract(mutated)
 
+    def test_portable_qualification_source_suite_rejects_noop_and_missing_modules(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assert_source_checks_job_contract(source)
+        suite = re.search(
+            r"(?m)^      - name: Test portable qualification source modules\n"
+            r"        run: (.+)\n", source,
+        ).group(0)
+        self.assertEqual(1, source.count(suite))
+        mutations = (
+            ("suite command replaced by no-op", "python3 -B -m unittest -v",
+             "true # python3 -B -m unittest -v"),
+            ("one module omitted", "test_collection test_compiler_modes test_full_corpus "
+             "test_independent_adapter", "test_collection test_compiler_modes "
+             "test_full_corpus"),
+            ("secret not removed", "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
+             "PYTHONPATH=tools/qualification", "PYTHONDONTWRITEBYTECODE=1 "
+             "PYTHONPATH=tools/qualification"),
+            ("bytecode writes enabled", "PYTHONDONTWRITEBYTECODE=1 "
+             "PYTHONPATH=tools/qualification", "PYTHONDONTWRITEBYTECODE=0 "
+             "PYTHONPATH=tools/qualification"),
+            ("qualification import path omitted", "PYTHONPATH=tools/qualification "
+             "python3 -B", "python3 -B"),
+        )
+        for name, old, new in mutations:
+            with self.subTest(mutation=name):
+                self.assertIn(old, source)
+                with self.assertRaises(AssertionError):
+                    self.assert_source_checks_job_contract(source.replace(old, new, 1))
+
     def test_push_and_pull_request_do_not_schedule_qualification_jobs(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertEqual(["workflow_dispatch"], list(workflow_event_blocks(workflow)))
@@ -708,6 +747,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "      - name: Test bounded JDI wait on JDK 21",
              "      - name: Test qualification manifest and publication contracts",
              "      - name: Test independent qualification gate seams",
+             "      - name: Test portable qualification source modules",
              "      - name: Check migration guide links and claims",
              "      - name: Test migration guide checks"],
             step_names,
