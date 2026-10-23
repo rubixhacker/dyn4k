@@ -361,6 +361,140 @@ class ProspectiveComparisonTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "producer"):
             verify_candidate_inventory(lane, {"one"}, {"jvm", "linux-x64"})
 
+    def test_compare_host_admits_declared_absent_receipts_during_capture(self):
+        from run import HOST_TASKS, other_lane_status
+
+        lane = self.root / "candidate" / "jvm"
+        (lane / "cases").mkdir(parents=True)
+        (lane / "cases" / "one.jsonl").write_text("case\n")
+        (lane / "receipt.json").write_text("{}\n")
+        baseline = self.root / "baseline"
+        baseline.mkdir()
+        (baseline / "verified.json").write_text("{}\n")
+        attestation = self.root / "attestation.json"
+        attestation.write_text("{}\n")
+        outer = lane.parent / "android-device"
+        outer.mkdir()
+        status, reason = other_lane_status(outer.name)
+        receipt = {"host": outer.name, "status": status, "reason": reason,
+                   "candidate_commit": "commit", "source_sha256": "source",
+                   "expected_cases": 1, "executed_cases": 0, "skipped": 0,
+                   "qualification": "UNPASSED"}
+        (outer / "receipt.json").write_text(json.dumps(receipt))
+        sibling = lane.parent / "jvm8"
+        sibling.mkdir()
+        (sibling / "receipt.json").write_text(json.dumps({
+            **receipt, "host": sibling.name, "reason":
+            "Host task was not selected for this invocation"}))
+        captured = lane.parent / "node-js"
+        (captured / "cases").mkdir(parents=True)
+        (captured / "cases" / "one.jsonl").write_text("captured case\n")
+        (captured / "trace.jsonl").write_text("captured trace\n")
+        (captured / "receipt.json").write_text(json.dumps({
+            "schema": "portable-numerical-receipt/1",
+            "candidate_commit": "commit", "source_sha256": "source"}))
+
+        class InventoryAccepted(Exception):
+            pass
+
+        with patch("baseline_capture.verify_attestation", return_value={}), \
+                patch("prospective_compare.declared_cases", return_value=[{"id": "one"}]), \
+                patch("run.clean_identity", return_value=("commit", "source")), \
+                patch("prospective_compare.verify_baseline_manifest",
+                      side_effect=InventoryAccepted):
+            with self.assertRaises(InventoryAccepted):
+                compare_host(baseline, lane, set(), attestation)
+
+        verify_candidate_inventory(lane, {"one"}, HOST_TASKS, "commit", "source")
+        captured_receipt = captured / "receipt.json"
+        forged = json.loads(captured_receipt.read_text())
+        forged["status"] = "PASSED"
+        captured_receipt.write_text(json.dumps(forged))
+        with self.assertRaises(Exception):
+            verify_candidate_inventory(lane, {"one"}, HOST_TASKS, "commit", "source")
+        del forged["status"]
+        captured_receipt.write_text(json.dumps(forged))
+        trace = captured / "trace.jsonl"
+        trace.unlink()
+        trace.symlink_to(lane / "cases" / "one.jsonl")
+        with self.assertRaises(Exception):
+            verify_candidate_inventory(lane, {"one"}, HOST_TASKS, "commit", "source")
+
+    def test_declared_absent_receipts_reject_forgery_and_extra_evidence(self):
+        from run import HOST_TASKS, other_lane_status
+
+        lane = self.root / "jvm"
+        (lane / "cases").mkdir(parents=True)
+        (lane / "cases" / "one.jsonl").write_text("case\n")
+        (lane / "receipt.json").write_text("{}\n")
+        outer = self.root / "linux-arm64"
+        outer.mkdir()
+        status, reason = other_lane_status(outer.name)
+        receipt = {"host": outer.name, "status": status, "reason": reason,
+                   "candidate_commit": "commit", "source_sha256": "source",
+                   "expected_cases": 1, "executed_cases": 0, "skipped": 0,
+                   "qualification": "UNPASSED"}
+        path = outer / "receipt.json"
+        path.write_text(json.dumps(receipt))
+
+        def check():
+            verify_candidate_inventory(lane, {"one"}, HOST_TASKS, "commit", "source")
+
+        check()
+        with self.assertRaises(Exception):
+            verify_candidate_inventory(lane, {"one"}, HOST_TASKS)
+        path.write_text(json.dumps({**receipt, "candidate_commit": None,
+                                    "source_sha256": None}))
+        with self.assertRaises(Exception):
+            verify_candidate_inventory(lane, {"one"}, HOST_TASKS)
+        path.write_text(json.dumps(receipt))
+        for change in ({"host": "unknown"}, {"status": "PASSED"},
+                       {"status": "NOT_RUN"}, {"reason": "unbound"},
+                       {"candidate_commit": "stale"}, {"source_sha256": "stale"},
+                       {"expected_cases": 0}, {"expected_cases": True},
+                       {"executed_cases": 1}, {"skipped": 1},
+                       {"qualification": "PASSED"},
+                       {"schema": "portable-numerical-receipt/1"}):
+            with self.subTest(change=change):
+                path.write_text(json.dumps({**receipt, **change}))
+                with self.assertRaises(Exception):
+                    check()
+        path.write_text(json.dumps(receipt))
+        partial = dict(receipt)
+        del partial["reason"]
+        path.write_text(json.dumps(partial))
+        with self.assertRaises(Exception):
+            check()
+        path.write_text(json.dumps(receipt))
+        for name in ("cases", "numeric-probe-receipt.json", "trace.jsonl"):
+            with self.subTest(extra=name):
+                extra = outer / name
+                if name == "cases":
+                    extra.mkdir()
+                else:
+                    extra.write_text("forged\n")
+                with self.assertRaises(Exception):
+                    check()
+                if name == "cases":
+                    extra.rmdir()
+                else:
+                    extra.unlink()
+        rogue = self.root / "unknown"
+        rogue.mkdir()
+        (rogue / "receipt.json").write_text(json.dumps(receipt))
+        with self.assertRaises(Exception):
+            check()
+        (rogue / "receipt.json").unlink()
+        rogue.rmdir()
+        rogue.write_text("unknown producer\n")
+        with self.assertRaises(Exception):
+            check()
+        rogue.unlink()
+        path.unlink()
+        path.symlink_to(lane / "receipt.json")
+        with self.assertRaises(Exception):
+            check()
+
     def numeric_probe_fixture(self):
         lane = self.root / "jvm"
         (lane / "xml").mkdir(parents=True)

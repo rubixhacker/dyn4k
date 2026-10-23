@@ -915,26 +915,87 @@ def verify_numeric_probe(lane, commit, source_sha256, trace_sha256, artifacts,
     return True
 
 
-def verify_candidate_inventory(lane, expected_ids, hosts):
+def verify_candidate_inventory(lane, expected_ids, hosts, commit=None, source_sha256=None):
+    from run import OTHER_LANES, other_lane_status
+
     lane = Path(lane)
     if lane.name not in hosts:
         raise Rejected("candidate producer is not declared")
+    if lane.is_symlink():
+        raise Rejected("candidate producer is a symbolic link")
     expected_files = {f"{case_id}.jsonl" for case_id in expected_ids}
     cases = lane / "cases"
-    if not cases.is_dir() or {path.name for path in cases.iterdir()} != expected_files:
+    if (not cases.is_dir() or cases.is_symlink() or
+            {path.name for path in cases.iterdir()} != expected_files or
+            any(path.is_symlink() or not path.is_file() for path in cases.iterdir())):
         raise Rejected("candidate case file set differs")
     probe = lane / "numeric-probe-receipt.json"
     expected_receipts = {"receipt.json"} | ({probe.name} if probe.is_file() else set())
-    if {path.name for path in lane.glob("*receipt*.json")} != expected_receipts:
+    if ({path.name for path in lane.glob("*receipt*.json")} != expected_receipts or
+            any(path.is_symlink() or not path.is_file()
+                for path in lane.glob("*receipt*.json"))):
         raise Rejected("candidate receipt set differs")
     root = lane.parent
-    if list(root.glob("*receipt*.json")):
-        raise Rejected("candidate root has an additional receipt")
-    for path in root.glob("*/*receipt*.json"):
-        if path.parent.name not in hosts:
+    declared = set(hosts) | set(OTHER_LANES)
+    allowed_root_files = {"publication.json", "publication.log", "summary.json"}
+    for path in root.iterdir():
+        if path.name not in declared | allowed_root_files or path.is_symlink():
+            raise Rejected("candidate receipt has an undeclared producer")
+    for path in root.rglob("*receipt*.json"):
+        if path.parent.parent != root or path.parent.name not in declared:
             raise Rejected("candidate receipt has an undeclared producer")
         if path.name not in {"receipt.json", "numeric-probe-receipt.json"}:
             raise Rejected("candidate receipt set differs")
+    absent_fields = {"host", "status", "reason", "candidate_commit", "source_sha256",
+                     "expected_cases", "executed_cases", "skipped", "qualification"}
+    for name in declared:
+        sibling = root / name
+        if not sibling.exists():
+            continue
+        if not sibling.is_dir() or sibling.is_symlink():
+            raise Rejected("candidate receipt producer path differs")
+        receipt_path = sibling / "receipt.json"
+        if name == lane.name:
+            continue
+        if (not isinstance(commit, str) or not commit or
+                not isinstance(source_sha256, str) or not source_sha256):
+            raise Rejected("candidate inventory identity is required")
+        if not receipt_path.is_file() or receipt_path.is_symlink():
+            raise Rejected("candidate sibling receipt differs")
+        try:
+            receipt = json.loads(receipt_path.read_text())
+        except (OSError, ValueError) as error:
+            raise Rejected("candidate sibling receipt is invalid") from error
+        if not isinstance(receipt, dict):
+            raise Rejected("candidate sibling receipt schema differs")
+        if name in OTHER_LANES or receipt.get("schema") != "portable-numerical-receipt/1":
+            if name in OTHER_LANES:
+                status, reason = other_lane_status(name)
+            else:
+                status, reason = "NOT_RUN", "Host task was not selected for this invocation"
+            if (set(receipt) != absent_fields or receipt["host"] != name or
+                    receipt["status"] != status or receipt["reason"] != reason or
+                    receipt["candidate_commit"] != commit or
+                    receipt["source_sha256"] != source_sha256 or
+                    type(receipt["expected_cases"]) is not int or
+                    receipt["expected_cases"] != len(expected_ids) or
+                    type(receipt["executed_cases"]) is not int or
+                    receipt["executed_cases"] != 0 or
+                    type(receipt["skipped"]) is not int or receipt["skipped"] != 0 or
+                    receipt["qualification"] != "UNPASSED" or
+                    {path.name for path in sibling.iterdir()} != {"receipt.json"}):
+                raise Rejected("candidate absent-lane receipt differs")
+        elif (receipt.get("candidate_commit") != commit or
+              receipt.get("source_sha256") != source_sha256 or
+              "status" in receipt or "qualification" in receipt or
+              not (sibling / "trace.jsonl").is_file() or
+              (sibling / "trace.jsonl").is_symlink() or
+              not (sibling / "cases").is_dir() or
+              (sibling / "cases").is_symlink() or
+              {path.name for path in (sibling / "cases").iterdir()} != expected_files or
+              any(path.is_symlink() or not path.is_file()
+                  for path in (sibling / "cases").iterdir())):
+            raise Rejected("candidate captured sibling receipt differs")
 
 
 def verify_arithmetic_captures(root, lane, commit, source_sha256, artifact_sha256):
@@ -1005,7 +1066,8 @@ def compare_host(baseline, lane, frozen_ids, baseline_attestation=None,
     manifest = json.loads((Path(baseline) / "verified.json").read_text())
     cases = declared_cases()
     expected = {case["id"] for case in cases}
-    verify_candidate_inventory(lane, expected, HOST_TASKS)
+    commit, source_sha256 = clean_identity()
+    verify_candidate_inventory(lane, expected, HOST_TASKS, commit, source_sha256)
     verify_baseline_manifest(manifest, expected, PINNED_JAR_SHA256, fixture_source_sha256())
     verify_baseline_bytes(baseline, manifest)
     catalog = load_policy_catalog()
@@ -1014,7 +1076,6 @@ def compare_host(baseline, lane, frozen_ids, baseline_attestation=None,
     host = Path(lane).name
     if host not in HOST_TASKS:
         raise Rejected("candidate host is not a declared producer")
-    commit, source_sha256 = clean_identity()
     target_artifacts = artifacts(host)
     publication_path = Path(lane).parent / "publication.json"
     publication = json.loads(publication_path.read_text())
