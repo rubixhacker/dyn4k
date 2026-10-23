@@ -283,6 +283,7 @@ def environment(scratch):
         result.pop(key, None)
     result["PYTHONDONTWRITEBYTECODE"] = "1"
     result["TMPDIR"] = str(scratch)
+    result["JAVA_TOOL_OPTIONS"] = "-Djava.io.tmpdir=" + str(scratch) + " -XX:-UsePerfData"
     return result
 
 
@@ -313,7 +314,8 @@ def compile_source(source, repository, scratch):
         raise Rejected("source archive is malformed") from error
     command = [str(checkout / "gradlew"), "-p", str(checkout / "tools/numerical/portable"),
                "compileKotlinJvm", "compileTestKotlinJvm", "--offline", "--no-daemon",
-               "--rerun-tasks", "--console=plain", "-Pkotlin.compiler.execution.strategy=in-process",
+               "--rerun-tasks", "--console=plain", "--max-workers=2",
+               "-Pkotlin.compiler.execution.strategy=in-process",
                "-PportableRepository=" + str(repository)]
     bounded_command(command, checkout, scratch, scratch / "recompile.log")
     return archive_classes(checkout / "tools/numerical/portable/build/classes/kotlin/jvm")
@@ -561,7 +563,7 @@ def capture(output, scratch):
     (output / "process").mkdir()
     env = environment(scratch)
     build = [str(ROOT / "gradlew"), "-p", str(PORTABLE), "compileKotlinJvm", "compileTestKotlinJvm",
-             "--rerun-tasks", "--offline", "--no-daemon", "--console=plain",
+             "--rerun-tasks", "--offline", "--no-daemon", "--console=plain", "--max-workers=2",
              "-Pkotlin.compiler.execution.strategy=in-process",
              "-PportableRepository=" + str(ROOT / "build/staging-repository")]
     bounded_command(build, ROOT, scratch, scratch / "compile.log", env=env)
@@ -575,11 +577,11 @@ def capture(output, scratch):
     mirror = output / "mirror.log"
     argument_pattern = scratch / "arguments-%p.log"
     class_pattern = scratch / "classes-%p.log"
-    env["JAVA_TOOL_OPTIONS"] = ("-Djava.io.tmpdir=" + str(scratch) +
+    env["JAVA_TOOL_OPTIONS"] += (
         " -Xlog:arguments=info:file=" + str(argument_pattern) + ":pid,level,tags:filecount=0")
     command, _ = method_command("jvm", METHOD, output)
     command[command.index("--tests") + 1] = CLASS + "." + METHOD
-    command += ["--offline", "-Pkotlin.compiler.execution.strategy=in-process",
+    command += ["--offline", "--max-workers=2", "-Pkotlin.compiler.execution.strategy=in-process",
                 "-PportableNumericProbeMirror=" + str(mirror),
                 "-PportableWorkerClassLoadLog=" + str(class_pattern)]
     tracer = shutil.which("strace")
