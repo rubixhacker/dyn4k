@@ -36,6 +36,8 @@ The direct mirror must equal the complete XML output in order, including its fin
 
 Capture requires a clean committed source tree, the pinned JDK 21, the existing staged build tools, and a private home-backed TMPDIR whose path is at most 40 bytes. The output directory must be new and outside the source tree. The indexed reference case must have the pinned bytes.
 
+The initial and final source checks use an explicit focused mode. Their Git children receive the same controlled environment as the focused capture. An omitted source-check mode fails before Git starts. Older capture profiles select their legacy mode explicitly.
+
 Run the capture with:
 
 ~~~text
