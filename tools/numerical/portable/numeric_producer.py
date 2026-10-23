@@ -32,7 +32,7 @@ PORTABLE = Path(__file__).resolve().parent
 WRAPPER = "tools/numerical/portable/src/jvmTest/kotlin/portable/NumericProbeMatrixTest.kt"
 WRAPPER_SHA256 = "6e9d5a3436f2d10f0a40606a21b8cafafb548f8911e993725b2fda97f12a260a"
 OBSERVER = "tools/numerical/portable/class_witness/NumericClassWitness.java"
-OBSERVER_SHA256 = "de1dd91ff31438814dc542144d01699ba6e721a90a59f8a07eb00073ea851fd2"
+OBSERVER_SHA256 = "5db19c6d04d8ede68712559f32374511425683322b832797659dc1bdd9305d8e"
 WITNESS_JDK = Path("/tmp/dyn4k-tools/jdk21")
 KEYS = {"schema", "candidate_commit", "source_sha256", "fixture_source_sha256",
         "trace_sha256", "primary_receipt_sha256", "geometry_case_sha256", "artifact_sha256",
@@ -210,6 +210,16 @@ def require_java8_classes(payload, artifact, agent):
                         "Java 8 observer class major differs: " + name)
 
 
+def portable_class_inputs(payload, class_root):
+    entries = [(relative.split("/", 1)[1].removesuffix(".class"),
+                class_root / relative, data)
+               for relative, data in payload.items()
+               if relative.split("/", 1)[1].startswith("portable/")]
+    result = {name: (path, data) for name, path, data in entries}
+    require(len(result) == len(entries), "duplicate loose class provider")
+    return result
+
+
 def verify_call_edge(raw):
     from pulley_jdi_v2 import Reader
     reader = Reader(raw)
@@ -334,14 +344,9 @@ def load_raw(directory, expected, host="jvm"):
 
 
 def environment(scratch):
-    result = os.environ.copy()
-    for key in ("OLLAMA_API_KEY", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS",
-                "CLASSPATH", "JAVA_OPTS", "GRADLE_OPTS", "JDK_HOME", "JRE_HOME",
-                "ANDROID_SDK_ROOT", "GRADLE_JAVA_HOME", "KOTLIN_JAVA_HOME"):
-        result.pop(key, None)
-    result["PYTHONDONTWRITEBYTECODE"] = "1"
-    result["JAVA_HOME"] = str(WITNESS_JDK)
-    result["ANDROID_HOME"] = "/var/home/stewart/Android/Sdk"
+    from run import controlled_java_environment
+    result = controlled_java_environment()
+    require(result["JAVA_HOME"] == str(WITNESS_JDK), "class witness compiler JDK differs")
     result["JAVA_TOOL_OPTIONS"] = "-Djava.io.tmpdir=" + str(scratch) + " -XX:-UsePerfData"
     return result
 
@@ -373,7 +378,7 @@ def compile_source(source, repository, scratch):
         raise Rejected("source archive is malformed") from error
     command = [str(checkout / "gradlew"), "-p", str(checkout / "tools/numerical/portable"),
                "compileKotlinJvm", "compileTestKotlinJvm", "--offline", "--no-daemon",
-               "--rerun-tasks", "--console=plain", "--max-workers=2",
+               "--rerun-tasks", "--console=plain", "--max-workers=1",
                "-Pkotlin.compiler.execution.strategy=in-process",
                "-PportableRepository=" + str(repository)]
     bounded_command(command, checkout, scratch, scratch / "recompile.log")
@@ -432,10 +437,25 @@ def _startup(raw, selected_exec, host="jvm"):
     return executable, argv, classpaths[0], response_path, response, tokens
 
 
+def verify_java8_classpaths(startup, observation):
+    bootstrap = Path(startup)
+    test_paths = observation["classpath"].split(os.pathsep)
+    effective_paths = observation["effective_classpath"].split(os.pathsep)
+    require(bootstrap.is_absolute() and bootstrap.name == "gradle-worker.jar" and
+            bootstrap.parts[-4:-1] == ("caches", "9.5.0", "workerMain") and
+            bootstrap.is_file() and len(test_paths) == len(set(test_paths)) and
+            test_paths == effective_paths[:len(test_paths)] and
+            startup not in test_paths and effective_paths.count(startup) == 1,
+            "Java 8 bootstrap and test classpaths differ")
+
+
 def _providers(raw, observation, startup, payload, artifact, class_root, worker,
                host="jvm", successful=None):
     from actual_arithmetic import _inspect_worker_classpath
-    require(observation["classpath"] == startup, "executed startup classpath differs")
+    if host == "jvm8":
+        verify_java8_classpaths(startup, observation)
+    else:
+        require(observation["classpath"] == startup, "executed startup classpath differs")
     maps = {source_set: {name.split("/", 1)[1]: sha(data) for name, data in payload.items()
                         if name.startswith(source_set + "/")} for source_set in ("main", "test")}
     effective = observation["effective_classpath"]
@@ -544,7 +564,7 @@ def verify_build_runtime(traces, selected_exec):
 
 
 def _witness(raw, source, metadata, traces, worker, payload, artifact, class_root,
-             classpath_entries, selected_exec, scratch, host="jvm"):
+             classpath_entries, selected_exec, scratch, host="jvm", startup=None):
     agent_path = Path(metadata["agent_path"])
     witness_path = Path(metadata["witness_path"])
     require(agent_path.is_absolute() and witness_path.is_absolute() and
@@ -567,16 +587,6 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
     input_proof = verify_stable_input(traces, str(agent_path), metadata["agent_identity"],
                                       worker, rebuilt, selected_exec[1:])
     provider_reads = {}
-    if host == "jvm8":
-        paths = {"engine": (artifact, artifact.read_bytes())}
-        paths.update({name: (class_root / relative, payload[relative])
-                      for name, relative in CRITICAL_CLASS_FILES.items()})
-        require(set(metadata["provider_inputs"]) == set(paths),
-                "Java 8 provider input inventory differs")
-        for name, (path, data) in paths.items():
-            proof = verify_stable_input(traces, str(path), metadata["provider_inputs"][name],
-                                        worker, data, selected_exec[1:])
-            provider_reads[name] = proof["reads"]
     output_proof = verify_transport(traces, str(witness_path), raw["class-witness.log"],
                                     selected_exec,
                                     mirror_identity=metadata["witness_identity"],
@@ -585,6 +595,7 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
             "class witness worker differs")
     expected = {name.split("/", 1)[1].removesuffix(".class"): data
                 for name, data in payload.items()}
+    require(len(expected) == len(payload), "class witness duplicate compiled provider")
     origins = {name: class_root / source_set for source_set in ("main", "test")
                for name in (entry.split("/", 1)[1].removesuffix(".class") for entry in payload
                             if entry.startswith(source_set + "/"))}
@@ -600,13 +611,27 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
     required = {"portable/NumericProbeMatrixTest", "portable/PortableMatrixTest",
                 "portable/NumericalRecorder"}
     require(required <= witnessed, "class witness critical definition is absent")
+    if host == "jvm8":
+        loose = portable_class_inputs(payload, class_root)
+        all_paths = {"bootstrap": (Path(startup), Path(startup).read_bytes()),
+                     "engine": (artifact, artifact.read_bytes()), **loose}
+        require(set(metadata["provider_inputs"]) == set(all_paths) and
+                {name for name in witnessed if name.startswith("portable/")} <= set(loose),
+                "Java 8 provider input inventory differs")
+        selected_paths = {name: all_paths[name] for name in
+                          {"bootstrap", "engine"} |
+                          {name for name in witnessed if name.startswith("portable/")}}
+        for name, (path, data) in selected_paths.items():
+            proof = verify_stable_input(traces, str(path), metadata["provider_inputs"][name],
+                                        worker, data, selected_exec[1:],
+                                        allow_external_readers=True)
+            provider_reads[name] = proof["reads"]
     loaded = {}
-    helper = {}
+    helper = {row["name"]: row["origin"] for row in result["helpers"]}
     if host == "jvm8":
         loaded = {row["name"]: row["origin"] for row in result["loaded"]}
-        helper = {"dyn4k/witness/NumericClassWitness": agent_path.as_uri(),
-                  "dyn4k/witness/NumericClassWitness$Observer": agent_path.as_uri()}
     else:
+        helper = {}
         for line in raw["class-load.log"].decode().splitlines():
             match = re.fullmatch(r"\[([0-9]+)\]\[info\]\[class,load\] ([^ ]+) source: (.*)", line)
             require(match is not None and match[1] == worker, "class witness load record differs")
@@ -614,7 +639,8 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
             if name.startswith("dyn4k/witness/"):
                 require(name not in helper, "duplicate class witness helper load")
                 helper[name] = match[3]
-            elif name.startswith(("portable/", "org/dyn4j/")) and "$$Lambda/" not in name:
+            elif name.startswith(("portable/", "org/dyn4j/")) and not re.fullmatch(
+                    r".+\$\$Lambda\$[0-9]+/0x[0-9a-f]+", name):
                 require(name in expected and name not in loaded,
                         "class witness loaded provider inventory differs")
                 loaded[name] = match[3]
@@ -622,8 +648,9 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
     with zipfile.ZipFile(io.BytesIO(rebuilt)) as jar:
         helpers = {name.removesuffix(".class") for name in jar.namelist()
                    if name.endswith(".class")}
-    if host == "jvm":
-        require(set(helper) == helpers, "class witness helper class inventory differs")
+    require(set(helper) == helpers and
+            {row["name"]: row["origin"] for row in result["helpers"]} == helper,
+            "class witness helper class inventory differs")
     verify_witness_loaders(result["definitions"], loaded, helper, host)
     for entry in classpath_entries:
         path = Path(entry["path"])
@@ -751,7 +778,8 @@ def _proof(raw, receipt, cases, artifacts, scratch):
                         for token in tokens), "Java 8 worker startup option differs")
         allowed = {"-XX:+DisableAttachMechanism", "-Xshare:off", "-XX:-UsePerfData",
                    "-Xmx512m", "-Dfile.encoding=UTF-8", "-Duser.country",
-                   "-Duser.language=en", "-Duser.variant", "-ea"}
+                   "-Duser.language=en", "-Duser.variant", "-ea",
+                   "-Djava.security.manager=worker.org.gradle.process.internal.worker.child.BootstrapSecurityManager"}
         prefixes = ("-Djava.io.tmpdir=", "-Dorg.gradle.internal.worker.tmpdir=",
                     "-Dportable.numericProbeMirror=")
         flags = tokens[1:tokens.index("-cp")]
@@ -803,7 +831,7 @@ def _proof(raw, receipt, cases, artifacts, scratch):
     require(class_map(rebuilt) == payload, "independent deterministic recompilation differs")
     proof["class_witness"] = _witness(raw, source, metadata, traces, proof["worker_pid"],
                                       payload, Path(artifacts["target"]), class_root,
-                                      entries, selected_exec, scratch, host)
+                                      entries, selected_exec, scratch, host, startup)
     proof.update({"runtime_executable_sha256": digest(executable),
                   "build_runtime_sha256": build_runtime_sha,
                   "classpath_sha256": sha(encoded(entries)),
@@ -851,7 +879,8 @@ def _validate_proof(proof):
             type(witness["definition_count"]) is int and witness["definition_count"] >= 3 and
             type(witness["input_reads"]) is int and witness["input_reads"] > 0 and
             isinstance(witness["provider_reads"], dict) and
-            set(witness["provider_reads"]) in (set(), {"engine", *CRITICAL_CLASS_FILES}) and
+            (not witness["provider_reads"] or
+             {"bootstrap", "engine", *CRITICAL_CLASS_FILES} <= set(witness["provider_reads"])) and
             all(type(value) is int and value > 0 for value in witness["provider_reads"].values()) and
             type(witness["helper_provider"]) is str and witness["helper_provider"].startswith("file:/") and
             type(witness["writer_tids"]) is list and witness["writer_tids"] and
@@ -927,7 +956,7 @@ def capture(output, scratch, host="jvm", jdk8_home=None):
     (output / "process").mkdir()
     env = environment(scratch)
     build = [str(ROOT / "gradlew"), "-p", str(PORTABLE), "compileKotlinJvm", "compileTestKotlinJvm",
-             "--rerun-tasks", "--offline", "--no-daemon", "--console=plain", "--max-workers=2",
+             "--rerun-tasks", "--offline", "--no-daemon", "--console=plain", "--max-workers=1",
              "-Pkotlin.compiler.execution.strategy=in-process",
              "-PportableRepository=" + str(ROOT / "build/staging-repository")]
     bounded_command(build, ROOT, scratch, scratch / "compile.log", env=env)
@@ -957,7 +986,7 @@ def capture(output, scratch, host="jvm", jdk8_home=None):
             " -Xlog:arguments=info:file=" + str(argument_pattern) + ":pid,level,tags:filecount=0")
     command, _ = method_command(host, METHOD, output, jdk8_home, trace_jvm8=False)
     command[command.index("--tests") + 1] = CLASS + "." + METHOD
-    command += ["--offline", "--max-workers=1",
+    command += ["--offline",
                 "-PportableNumericProbeMirror=" + str(mirror),
                 "-PportableClassWitnessAgent=" + str(agent),
                 "-PportableClassWitnessOutput=" + str(witness)]
@@ -1070,9 +1099,10 @@ def capture(output, scratch, host="jvm", jdk8_home=None):
     if host == "jvm8":
         metadata["jdk8_home"] = str(jdk8_home)
         metadata["provider_inputs"] = {
+            "bootstrap": captured_file_identity(startup),
             "engine": captured_file_identity(dependency),
-            **{name: captured_file_identity(class_root / relative)
-               for name, relative in CRITICAL_CLASS_FILES.items()}}
+            **{name: captured_file_identity(path)
+               for name, (path, _) in portable_class_inputs(payload, class_root).items()}}
     (output / "trace-command.json").write_bytes(encoded(metadata))
     load_raw(output, inventory(output), host)
     require(clean_identity() == (commit, source_sha), "source changed during capture")

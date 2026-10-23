@@ -55,6 +55,63 @@ class TracePrivacyTest(unittest.TestCase):
 
 
 class TransportTest(unittest.TestCase):
+    def test_portable_provider_inventory_rejects_shadowed_loose_class(self):
+        from numeric_producer import portable_class_inputs
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = {"main/portable/Shared.class": b"one",
+                       "test/portable/Shared.class": b"two"}
+            with self.assertRaisesRegex(Rejected, "duplicate loose class"):
+                portable_class_inputs(payload, root)
+            payload.pop("test/portable/Shared.class")
+            self.assertEqual(set(portable_class_inputs(payload, root)), {"portable/Shared"})
+
+    def test_unfinished_wait_for_child_does_not_obscure_worker_file_events(self):
+        traces = self.trace()
+        traces["99"] = (b"0.900000 clone(flags=SIGCHLD) = 100\n"
+                        b"0.950000 wait4(100 <unfinished ...>) = ?\n"
+                        b"1.900000 +++ exited with 0 +++\n")
+        self.assertEqual(verify_transport(traces, "/work/mirror.log", b"hello\n",
+                                          TRANSPORT_EXEC, "/work/args.txt",
+                                          b"-cp\n/a\n")["worker_pid"], "100")
+        broken = dict(traces)
+        broken["100"] = broken["100"].replace(
+            b'1.210000 write(4</work/mirror.log>, "hello\\n", 6) = 6',
+            b'1.210000 write(4</work/mirror.log>, "hello\\n", 6 <unfinished ...>) = ?')
+        with self.assertRaises(Unbound):
+            verify_transport(broken, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
+                             "/work/args.txt", b"-cp\n/a\n")
+
+    def test_java8_provider_can_be_built_before_worker_then_read_with_multidigit_fd(self):
+        path = "/work/selected.class"
+        selected = ("/jdk8/bin/java", ("/jdk8/bin/java",
+                    "worker.org.gradle.process.internal.worker.GradleWorkerMain"))
+        parent = (b"0.800000 clone(flags=SIGCHLD) = 100\n"
+                  b"0.900000 openat(AT_FDCWD, \"/work/selected.class\", O_WRONLY|O_CREAT) = 5</work/selected.class>\n"
+                  b"0.910000 write(5</work/selected.class>, \"abcdef\", 6) = 6\n"
+                  b"0.920000 close(5</work/selected.class>) = 0\n"
+                  b"2.100000 +++ exited with 0 +++\n")
+        worker = (b'1.000000 execve("/jdk8/bin/java", ["/jdk8/bin/java", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0) = 0\n'
+                  b'1.100000 openat(AT_FDCWD, "/work/selected.class", O_RDONLY) = 54</work/selected.class>\n'
+                  b'1.110000 fstat(54</work/selected.class>, {st_mode=S_IFREG|0644, st_size=6, st_dev=makedev(0, 1), st_ino=44}) = 0\n'
+                  b'1.120000 read(54</work/selected.class>, "abc", 3) = 3\n'
+                  b'1.130000 mmap(NULL, 6, PROT_READ, MAP_SHARED, 54</work/selected.class>, 0) = 0x1000\n'
+                  b'1.140000 read(54</work/selected.class>, "def", 3) = 3\n'
+                  b'1.150000 close(54</work/selected.class>) = 0\n'
+                  b'2.000000 +++ exited with 0 +++\n')
+        identity = {"device_major": 0, "device_minor": 1, "inode": 44, "size": 6}
+        proof = verify_stable_input({"99": parent, "100": worker}, path, identity,
+                                    "100", b"abcdef", selected,
+                                    allow_external_readers=True)
+        self.assertEqual((proof["reads"], proof["read_only_maps"]), (2, 1))
+        late_write = parent.replace(b"2.100000 +++ exited",
+                                    b"1.180000 write(5</work/selected.class>, \"x\", 1) = 1\n"
+                                    b"2.100000 +++ exited")
+        with self.assertRaisesRegex(Rejected, "provider input changed"):
+            verify_stable_input({"99": late_write, "100": worker}, path, identity,
+                                "100", b"abcdef", selected,
+                                allow_external_readers=True)
+
     def test_ordered_shared_descriptor_writes_bind_all_worker_threads(self):
         trace = self.trace()["100"]
         trace = trace.replace(b'1.210000 write(4</work/mirror.log>, "hello\\n", 6) = 6',
@@ -673,6 +730,24 @@ class StartupTest(unittest.TestCase):
                      ("100", "/jdk8/bin/java", ("/jdk8/bin/java", "@/args.txt",
                       "worker.org.gradle.process.internal.worker.GradleWorkerMain", "executor")),
                      "jvm8")
+
+    def test_java8_bootstrap_is_distinct_from_observed_test_loader_paths(self):
+        from numeric_producer import verify_java8_classpaths
+        with tempfile.TemporaryDirectory() as directory:
+            bootstrap = Path(directory) / "caches/9.5.0/workerMain/gradle-worker.jar"
+            bootstrap.parent.mkdir(parents=True)
+            bootstrap.write_bytes(b"worker")
+            test_paths = "/classes/test:/classes/main:/staged/engine.jar"
+            observed = {"classpath": test_paths,
+                        "effective_classpath": test_paths + ":" + str(bootstrap)}
+            verify_java8_classpaths(str(bootstrap), observed)
+            for changed in ({**observed, "classpath": str(bootstrap)},
+                            {**observed, "effective_classpath": test_paths},
+                            {**observed, "effective_classpath": str(bootstrap) + ":" + test_paths},
+                            {**observed, "effective_classpath":
+                             test_paths + ":" + str(bootstrap) + ":" + str(bootstrap)}):
+                with self.subTest(changed=changed), self.assertRaises(Rejected):
+                    verify_java8_classpaths(str(bootstrap), changed)
 
     def test_java8_requires_major_52_for_every_selected_class(self):
         from numeric_producer import require_java8_classes

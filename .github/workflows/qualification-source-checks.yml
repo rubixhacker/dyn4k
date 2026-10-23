@@ -15,6 +15,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            8
+            21
       - name: Reject hosted macOS routes
         run: python3 -B tools/qualification/guard_hosted_runners.py
       - name: Test qualification workflow contracts
@@ -42,6 +48,7 @@ jobs:
             -u DYN4K_PULLEY_REAL_CLASSPATH \
             -u DYN4K_PULLEY_CACHE_ROOT \
             -u ANDROID_SDK_ROOT \
+            DYN4K_TEST_JDK8_HOME="$JAVA_HOME_8_X64" \
             PYTHONPATH=tools/numerical/portable:tools/numerical/portable/boolean_rotation_jdi \
             python3 -B -m unittest -v \
               test_actual_arithmetic \
@@ -57,12 +64,18 @@ jobs:
               test_pulley_jdi_v2 \
               test_pulley_jdi_classpath_v2 \
               test_external_rotation_binding \
-              test_numeric_producer
+              test_numeric_producer \
+              test_run
       - name: Test bounded JDI wait on JDK 21
         run: |
           test -n "${JAVA_HOME_21_X64:-}"
           test -x "$JAVA_HOME_21_X64/bin/java"
           test -x "$JAVA_HOME_21_X64/bin/javac"
+          test -n "${JAVA_HOME_8_X64:-}"
+          test -x "$JAVA_HOME_8_X64/bin/java"
+          test -x "$JAVA_HOME_8_X64/bin/javac"
+          "$JAVA_HOME_8_X64/bin/java" -version 2>&1 | grep -Eq 'version "1\.8\.'
+          "$JAVA_HOME_8_X64/bin/javac" -version 2>&1 | grep -Eq '^javac 1\.8\.'
           "$JAVA_HOME_21_X64/bin/java" -version 2>&1 | grep -Eq 'version "21\.'
           command -v strace
           env -u OLLAMA_API_KEY \
@@ -87,6 +100,7 @@ jobs:
           command -v strace
           env -u OLLAMA_API_KEY \
             DYN4K_CLASS_WITNESS_JDK_HOME="$JAVA_HOME_21_X64" \
+            DYN4K_TEST_JDK8_HOME="$JAVA_HOME_8_X64" \
             PYTHONDONTWRITEBYTECODE=1 \
             PYTHONPATH=tools/numerical/portable \
             python3 -B -m unittest -v test_numeric_class_witness

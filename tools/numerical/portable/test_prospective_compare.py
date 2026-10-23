@@ -806,6 +806,19 @@ class ProspectiveComparisonTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "numeric producer receipt schema"):
             verify_numeric_probe(lane, "commit", "source", "trace", artifacts, runtime)
 
+    def test_public_schema_two_dispatches_jvm8_to_bound_raw_verifier(self):
+        from numeric_producer import KEYS
+        lane, _, runtime, artifacts, _, _ = self.numeric_probe_fixture()
+        target = lane.parent / "jvm8"
+        lane.rename(target)
+        receipt = {key: None for key in KEYS}
+        receipt.update({"schema": "portable-binary64-probe-receipt/2",
+                        "candidate_commit": "wrong", "files": {}})
+        (target / "numeric-probe").mkdir()
+        (target / "numeric-probe-receipt.json").write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(Exception, "numeric producer source identity differs"):
+            verify_numeric_probe(target, "commit", "source", "trace", artifacts, runtime)
+
     def test_arithmetic_bridge_rejects_unbound_and_checks_matrix_case(self):
         from actual_arithmetic import (CaptureRejected, make_capture_receipt,
                                        verify_capture_receipt as verify_raw_receipt)

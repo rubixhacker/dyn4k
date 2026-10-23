@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import run
+from jdk8_test_runtime import selected_test_jdk8_home
 from cases import declared_cases
 
 
@@ -349,7 +350,7 @@ class ExtractionTest(unittest.TestCase):
                 patch.object(run.shutil, "which", return_value="/usr/bin/strace"):
             lane = Path(directory)
             method = "freeMotionForcesDampingAndRestitution"
-            jdk8 = Path("/var/home/stewart/dyn4k-resume-20261022-yZgd7q/jdk8-preparation/jdk8u504-b01")
+            jdk8 = selected_test_jdk8_home()
             command, execution_log = run.method_command("jvm8", method, lane, jdk8)
             self.assertEqual(command[:7], ["/usr/bin/strace", "-f", "-s", "65535",
                                            "-e", "trace=process,openat", "-o"])
@@ -386,7 +387,7 @@ class ExtractionTest(unittest.TestCase):
         with patch.object(run.shutil, "which", return_value=None):
             with self.assertRaisesRegex(run.Rejected, "strace is unavailable"):
                 run.method_command("jvm8", "freeMotionForcesDampingAndRestitution",
-                                   Path("/tmp/unused"), Path("/var/home/stewart/dyn4k-resume-20261022-yZgd7q/jdk8-preparation/jdk8u504-b01"))
+                                   Path("/tmp/unused"), selected_test_jdk8_home())
         with self.assertRaisesRegex(run.Rejected, "unknown numerical matrix method"):
             run.method_command("jvm8", "unrecorded", Path("/tmp/unused"))
         with self.assertRaisesRegex(run.Rejected, "explicit Java 8 home"):
@@ -394,7 +395,7 @@ class ExtractionTest(unittest.TestCase):
                                Path("/tmp/unused"))
 
     def test_java8_requires_real_home_and_direct_classpath(self):
-        jdk8 = Path("/var/home/stewart/dyn4k-resume-20261022-yZgd7q/jdk8-preparation/jdk8u504-b01")
+        jdk8 = selected_test_jdk8_home()
         self.assertEqual(run.selected_jdk8_home(jdk8), jdk8)
         for invalid in (None, Path("relative"), Path("/missing-jdk8"),
                         Path("/tmp/dyn4k-tools/jdk21")):
@@ -405,6 +406,14 @@ class ExtractionTest(unittest.TestCase):
             response.write_text("-cp /classes")
             with self.assertRaisesRegex(run.Rejected, "argument file is unsupported"):
                 run._java_classpath([str(jdk8 / "bin/java"), "@" + str(response)], "jvm8")
+
+    def test_java8_test_runtime_is_explicit_and_fails_on_wrong_version(self):
+        with patch.dict(os.environ, {"DYN4K_TEST_JDK8_HOME": ""}):
+            with self.assertRaisesRegex(RuntimeError, "DYN4K_TEST_JDK8_HOME"):
+                selected_test_jdk8_home()
+        with patch.dict(os.environ, {"DYN4K_TEST_JDK8_HOME": "/tmp/dyn4k-tools/jdk21"}):
+            with self.assertRaisesRegex(RuntimeError, "wrong java version"):
+                selected_test_jdk8_home()
 
     def test_java_8_worker_open_proof_requires_staged_jar_in_worker_tree(self):
         with tempfile.TemporaryDirectory() as directory:

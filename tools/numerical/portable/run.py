@@ -154,7 +154,8 @@ def stage(output, commit, source_sha256):
     started = __import__("time").time()
     env = controlled_java_environment()
     command = [str(ROOT / "gradlew"), *STAGE_TASKS, "--rerun-tasks", "--no-daemon",
-               "--console=plain", "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"]
+               "--console=plain", "--max-workers=1",
+               "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"]
     with (output / "publication.log").open("x", encoding="utf-8") as log:
         completed = subprocess.run(command, cwd=ROOT, env=env, stdout=log,
                                    stderr=subprocess.STDOUT, check=False)
@@ -939,7 +940,7 @@ def method_command(host, method, lane, jdk8_home=None, trace_jvm8=True):
                "--init-script", str(PROVENANCE_SCRIPT)))
     if host == "jvm8":
         jdk8_home = selected_jdk8_home(jdk8_home)
-        command.extend(("-PportableJvm8=true",
+        command.extend(("--max-workers=1", "-PportableJvm8=true",
                         "-Dorg.gradle.java.installations.paths=" + str(jdk8_home)))
     execution_log = None
     if host == "linux-x64" or host in WASM_HOSTS:

@@ -335,9 +335,14 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 raise AssertionError("duplicate workflow step structural key")
             if first_key == "uses":
                 self.assertEqual(["uses", "with"], keys)
-                self.assertEqual("actions/checkout@v4", first_value)
-                self.assertEqual([("fetch-depth", "0")],
-                                 _yaml_structural_entries_at_indent(block, 10))
+                if first_value == "actions/checkout@v4":
+                    self.assertEqual([("fetch-depth", "0")],
+                                     _yaml_structural_entries_at_indent(block, 10))
+                else:
+                    self.assertEqual("actions/setup-java@v4", first_value)
+                    self.assertEqual([("distribution", "temurin"), ("java-version", "|")],
+                                     _yaml_structural_entries_at_indent(block, 10))
+                    self.assertIn("          java-version: |\n            8\n            21\n", block)
             else:
                 self.assertEqual(["name", "run"], keys)
             multiline = re.search(r"(?ms)^        run: \|\n((?: {10}.*\n)+)", block)
@@ -352,6 +357,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         self.assertEqual(
             [
                 ("uses: actions/checkout@v4", None),
+                ("uses: actions/setup-java@v4", None),
                 ("name: Reject hosted macOS routes",
                  "python3 -B tools/qualification/guard_hosted_runners.py"),
                 ("name: Test qualification workflow contracts",
@@ -377,6 +383,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "-u DYN4K_PULLEY_REAL_CLASSPATH "
                  "-u DYN4K_PULLEY_CACHE_ROOT "
                  "-u ANDROID_SDK_ROOT "
+                 "DYN4K_TEST_JDK8_HOME=\"$JAVA_HOME_8_X64\" "
                  "PYTHONPATH=tools/numerical/portable:"
                  "tools/numerical/portable/boolean_rotation_jdi "
                  "python3 -B -m unittest -v "
@@ -385,11 +392,18 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "test_prospective_compare test_witness test_source_guard "
                  "test_jdi_bridge test_pulley_jdi_v1 test_pulley_jdi_v2 "
                  "test_pulley_jdi_classpath_v2 test_external_rotation_binding "
-                 "test_numeric_producer"),
+                 "test_numeric_producer test_run"),
                 ("name: Test bounded JDI wait on JDK 21",
                  "test -n \"${JAVA_HOME_21_X64:-}\" "
                  "test -x \"$JAVA_HOME_21_X64/bin/java\" "
                  "test -x \"$JAVA_HOME_21_X64/bin/javac\" "
+                 "test -n \"${JAVA_HOME_8_X64:-}\" "
+                 "test -x \"$JAVA_HOME_8_X64/bin/java\" "
+                 "test -x \"$JAVA_HOME_8_X64/bin/javac\" "
+                 "\"$JAVA_HOME_8_X64/bin/java\" -version 2>&1 | "
+                 "grep -Eq 'version \"1\\.8\\.' "
+                 "\"$JAVA_HOME_8_X64/bin/javac\" -version 2>&1 | "
+                 "grep -Eq '^javac 1\\.8\\.' "
                  "\"$JAVA_HOME_21_X64/bin/java\" -version 2>&1 | "
                  "grep -Eq 'version \"21\\.' "
                  "command -v strace "
@@ -414,6 +428,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "grep -Eq '^javac 21\\.' "
                  "command -v strace env -u OLLAMA_API_KEY "
                  "DYN4K_CLASS_WITNESS_JDK_HOME=\"$JAVA_HOME_21_X64\" "
+                 "DYN4K_TEST_JDK8_HOME=\"$JAVA_HOME_8_X64\" "
                  "PYTHONDONTWRITEBYTECODE=1 "
                  "PYTHONPATH=tools/numerical/portable "
                  "python3 -B -m unittest -v test_numeric_class_witness"),
@@ -772,6 +787,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         step_names = re.findall(r"(?m)^      - (?:name: .+|uses: .+)$", job)
         self.assertEqual(
             ["      - uses: actions/checkout@v4",
+             "      - uses: actions/setup-java@v4",
              "      - name: Reject hosted macOS routes",
              "      - name: Test qualification workflow contracts",
              "      - name: Test hosted runner guard",
@@ -808,7 +824,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "-u DYN4K_PULLEY_CANDIDATE_JAR "
             "-u DYN4K_PULLEY_REAL_CLASSPATH "
             "-u DYN4K_PULLEY_CACHE_ROOT "
-             "-u ANDROID_SDK_ROOT "
+            "-u ANDROID_SDK_ROOT "
+            "DYN4K_TEST_JDK8_HOME=\"$JAVA_HOME_8_X64\" "
             "PYTHONPATH=tools/numerical/portable:"
             "tools/numerical/portable/boolean_rotation_jdi "
             "python3 -B -m unittest -v "
@@ -817,7 +834,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "test_prospective_compare test_witness test_source_guard "
             "test_jdi_bridge test_pulley_jdi_v1 test_pulley_jdi_v2 "
             "test_pulley_jdi_classpath_v2 test_external_rotation_binding "
-            "test_numeric_producer",
+            "test_numeric_producer test_run",
             command,
         )
 
@@ -843,6 +860,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "grep -Eq '^javac 21\\.' command -v strace "
             "env -u OLLAMA_API_KEY "
             "DYN4K_CLASS_WITNESS_JDK_HOME=\"$JAVA_HOME_21_X64\" "
+            "DYN4K_TEST_JDK8_HOME=\"$JAVA_HOME_8_X64\" "
             "PYTHONDONTWRITEBYTECODE=1 "
             "PYTHONPATH=tools/numerical/portable "
             "python3 -B -m unittest -v test_numeric_class_witness",
@@ -875,7 +893,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("Java major check omitted", "grep -Eq 'version \"21\\.'", "cat"),
             ("javac major check omitted", "grep -Eq '^javac 21\\.'", "cat"),
             ("producer module omitted",
-             "              test_external_rotation_binding \\\n              test_numeric_producer\n",
+             "              test_external_rotation_binding \\\n              test_numeric_producer \\\n              test_run\n",
              "              test_external_rotation_binding\n"),
         )
         observer = re.search(

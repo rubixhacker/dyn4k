@@ -12,6 +12,9 @@ SCHEMA = "class-witness/2"
 AGENT_CLASS = "dyn4k.witness.NumericClassWitness"
 MANIFEST = b"Manifest-Version: 1.0\r\nPremain-Class: " + AGENT_CLASS.encode() + b"\r\n\r\n"
 SOURCE_NAME = "NumericClassWitness.java"
+HELPERS = {"dyn4k/witness/NumericClassWitness",
+           "dyn4k/witness/NumericClassWitness$Observer",
+           "dyn4k/witness/NumericClassWitness$1"}
 
 
 def _sha(raw):
@@ -58,20 +61,29 @@ def read_witness(raw: bytes, expected_classes: dict[str, bytes],
         lines = raw.decode("ascii").splitlines()
     except UnicodeError as error:
         raise Rejected("class witness is not ASCII") from error
-    if len(lines) < 3 or lines[0] != "BEGIN\t" + SCHEMA:
+    if len(lines) < 6 or lines[0] != "BEGIN\t" + SCHEMA:
         raise Rejected("class witness start differs")
     end = re.fullmatch(r"END\t(OK|FAIL)\t([0-9]+)\t([0-9]{20})", lines[-1])
     if end is None or end[1] != "OK" or int(end[3]) != len(raw):
         raise Rejected("class witness terminal record differs")
+    helpers = []
+    for line in lines[1:4]:
+        fields = line.split("\t")
+        if (len(fields) != 4 or fields[0] != "HELPER" or fields[1] not in HELPERS or
+                fields[2] != "system" or not fields[3].startswith("file:/")):
+            raise Rejected("class witness helper record differs")
+        helpers.append({"name": fields[1], "loader": fields[2], "origin": fields[3]})
+    if {row["name"] for row in helpers} != HELPERS:
+        raise Rejected("class witness helper inventory differs")
     definitions = []
     seen = set()
     try:
         seal_index = next(index for index, line in enumerate(lines) if line.startswith("SEALED\t"))
     except StopIteration as error:
         raise Rejected("class witness seal is absent") from error
-    if lines[seal_index] != "SEALED\t" + str(seal_index - 1):
+    if lines[seal_index] != "SEALED\t" + str(seal_index - 4):
         raise Rejected("class witness seal count differs")
-    for ordinal, line in enumerate(lines[1:seal_index], 1):
+    for ordinal, line in enumerate(lines[4:seal_index], 1):
         fields = line.split("\t")
         if len(fields) != 7 or fields[0] != "CLASS" or fields[1] != str(ordinal):
             raise Rejected("class witness sequence differs")
@@ -106,5 +118,5 @@ def read_witness(raw: bytes, expected_classes: dict[str, bytes],
                 (by_name[row["name"]]["loader"], by_name[row["name"]]["origin"])
                 for row in loaded)):
         raise Rejected("class witness successful loads differ from callbacks")
-    return {"schema": SCHEMA, "definitions": definitions, "loaded": loaded,
+    return {"schema": SCHEMA, "helpers": helpers, "definitions": definitions, "loaded": loaded,
             "sha256": _sha(raw)}

@@ -25,6 +25,9 @@ public final class NumericClassWitness {
         "portable/NumericalRecorder"
     };
     private static final char[] HEX = "0123456789abcdef".toCharArray();
+    private static final int OPEN = 0;
+    private static final int SEALED = 1;
+    private static final int CLOSED = 2;
     private static FileChannel output;
     private static final Set<String> seen = new HashSet<String>();
     private static final IdentityHashMap<ClassLoader, String> loaders =
@@ -38,7 +41,7 @@ public final class NumericClassWitness {
     private NumericClassWitness() {}
 
     private static boolean relevant(String name) {
-        return name != null && name.indexOf("$$Lambda$") < 0 &&
+        return name != null &&
             (name.startsWith("portable/") || name.startsWith("org/dyn4j/"));
     }
 
@@ -70,7 +73,7 @@ public final class NumericClassWitness {
     private static synchronized void record(ClassLoader loader, String name,
                                              Class<?> redefining, ProtectionDomain domain,
                                              byte[] bytes) {
-        if (state != 0 || redefining != null) {
+        if (state != OPEN || redefining != null) {
             Runtime.getRuntime().halt(86);
         }
         try {
@@ -117,7 +120,7 @@ public final class NumericClassWitness {
 
     private static synchronized void finish() {
         try {
-            state = 1;
+            state = SEALED;
             for (String name : CRITICAL) {
                 if (!seen.contains(name)) {
                     failed = true;
@@ -163,7 +166,7 @@ public final class NumericClassWitness {
                 failed = true;
             }
             output.close();
-            state = 2;
+            state = CLOSED;
         } catch (Throwable error) {
             failed = true;
         }
@@ -189,11 +192,19 @@ public final class NumericClassWitness {
         MessageDigest.getInstance("SHA-256");
         ByteBuffer.allocate(1);
         Path path = Paths.get(destination);
+        Runnable hook = new Runnable() {
+            @Override public void run() { finish(); }
+        };
+        provider(hook.getClass(), jar);
         output = FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
         write("BEGIN\tclass-witness/2\n");
-        Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
-            @Override public void run() { finish(); }
-        }, "numeric-class-witness-finish"));
+        for (Class<?> helper : new Class<?>[] {
+                NumericClassWitness.class, Observer.class, hook.getClass()}) {
+            write("HELPER\t" + helper.getName().replace('.', '/') + "\tsystem\t" +
+                  helper.getProtectionDomain().getCodeSource().getLocation().toURI()
+                  .toASCIIString() + "\n");
+        }
+        Runtime.getRuntime().addShutdownHook(new Thread(hook, "numeric-class-witness-finish"));
         instrument = instrumentation;
         instrumentation.addTransformer(new Observer(), false);
     }

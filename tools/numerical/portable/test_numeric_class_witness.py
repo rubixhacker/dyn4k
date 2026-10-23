@@ -9,6 +9,7 @@ import unittest
 from receipt import Rejected
 from numeric_class_witness import build_agent, read_witness
 from numeric_producer_trace import verify_stable_input
+from jdk8_test_runtime import selected_test_jdk8_home
 
 
 SOURCE = Path(__file__).with_name("class_witness") / "NumericClassWitness.java"
@@ -45,7 +46,11 @@ def witness(rows=None, status="OK", loaded=None):
     callback = record() if rows is None else rows
     snapshot = (b"LOADED\t1\tportable/PortableMatrixTest\tL1\tfile:/fixture/\n"
                 if loaded is None else loaded)
-    body = b"BEGIN\tclass-witness/2\n" + callback + b"SEALED\t1\n" + snapshot
+    helpers = b"".join(("HELPER\t" + name + "\tsystem\tfile:/agent/\n").encode()
+                       for name in ("dyn4k/witness/NumericClassWitness",
+                                    "dyn4k/witness/NumericClassWitness$Observer",
+                                    "dyn4k/witness/NumericClassWitness$1"))
+    body = b"BEGIN\tclass-witness/2\n" + helpers + callback + b"SEALED\t1\n" + snapshot
     end = f"END\t{status}\t1\t"
     return body + (end + f"{len(body) + len(end) + 21:020d}\n").encode()
 
@@ -71,6 +76,8 @@ class ClassWitnessTest(unittest.TestCase):
                     good.replace(b"file:/fixture/", b"file:/shadow/"),
                     good.replace(b"java:1", b"os:1"),
                     witness(record() + record().replace(b"CLASS\t1", b"CLASS\t2")),
+                    good.replace(b"NumericClassWitness$1", b"NumericClassWitness$2"),
+                    good.replace(b"NumericClassWitness$Observer", b"NumericClassWitness$1"),
                     witness(loaded=b""),
                     witness(loaded=b"LOADED\t1\tportable/PortableMatrixTest\tL2\tfile:/fixture/\n"),
                     witness(loaded=b"LOADED\t1\tportable/PortableMatrixTest\tL1\tfile:/shadow/\n"))
@@ -91,6 +98,7 @@ class ClassWitnessTest(unittest.TestCase):
                 "NumericProbeMatrixTest": "public class NumericProbeMatrixTest {}",
                 "PortableMatrixTest": "public class PortableMatrixTest { public static int answer() { return 75; } }",
                 "NumericalRecorder": "public class NumericalRecorder {}",
+                "Ordinary$$Lambda$Name": "public class Ordinary$$Lambda$Name {}",
             }
             for name, body in sources.items():
                 (package / (name + ".java")).write_text("package portable; " + body)
@@ -98,6 +106,7 @@ class ClassWitnessTest(unittest.TestCase):
             main.write_text("public class Main { public static void main(String[] a) throws Exception { "
                             "Class.forName(\"portable.NumericProbeMatrixTest\"); "
                             "Class.forName(\"portable.NumericalRecorder\"); "
+                            "Class.forName(\"portable.Ordinary$$Lambda$Name\"); "
                             "System.out.println(portable.PortableMatrixTest.answer()); } }")
             javac = subprocess.run([str(JDK / "bin/javac"), "--release", "8", "-d", str(classes),
                                     str(main), *map(str, sorted(package.glob("*.java")))],
@@ -115,17 +124,21 @@ class ClassWitnessTest(unittest.TestCase):
             self.assertEqual(successful.returncode, 0, successful.stderr.decode())
             self.assertEqual(successful.stdout, b"75\n")
             records = read_witness(witness_path.read_bytes(), expected)
-            self.assertEqual(len(records["definitions"]), 3)
-            self.assertEqual(len(records["loaded"]), 3)
+            self.assertEqual(len(records["definitions"]), 4)
+            self.assertEqual(len(records["loaded"]), 4)
+            self.assertEqual({row["name"] for row in records["helpers"]}, {
+                "dyn4k/witness/NumericClassWitness",
+                "dyn4k/witness/NumericClassWitness$Observer",
+                "dyn4k/witness/NumericClassWitness$1"})
             witness_path.unlink()
-            jdk8 = Path("/var/home/stewart/dyn4k-resume-20261022-yZgd7q/jdk8-preparation/jdk8u504-b01")
+            jdk8 = selected_test_jdk8_home()
             java8 = [str(jdk8 / "bin/java"), "-XX:+DisableAttachMechanism", "-Xshare:off",
                      "-javaagent:" + str(agent) + "=" + str(witness_path),
                      "-cp", str(classes), "Main"]
             java8_result = subprocess.run(java8, capture_output=True, check=False, timeout=30)
             self.assertEqual(java8_result.returncode, 0, java8_result.stderr.decode())
             self.assertEqual(java8_result.stdout, b"75\n")
-            self.assertEqual(len(read_witness(witness_path.read_bytes(), expected)["loaded"]), 3)
+            self.assertEqual(len(read_witness(witness_path.read_bytes(), expected)["loaded"]), 4)
             self.assertIn("portable.PortableMatrixTest source:",
                           (root / "loads.log").read_text())
             tracer = shutil.which("strace")
@@ -184,7 +197,7 @@ class ClassWitnessTest(unittest.TestCase):
             self.assertFalse(witness_path.exists())
 
     def test_relevant_load_after_seal_forces_nonzero_java8_exit(self):
-        jdk8 = Path("/var/home/stewart/dyn4k-resume-20261022-yZgd7q/jdk8-preparation/jdk8u504-b01")
+        jdk8 = selected_test_jdk8_home()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             agent = root / "agent.jar"
@@ -206,7 +219,7 @@ class ClassWitnessTest(unittest.TestCase):
                     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                         try {
                             while (!new String(java.nio.file.Files.readAllBytes(
-                                java.nio.file.Paths.get(args[0])), "US-ASCII").contains("SEALED")) {
+                                java.nio.file.Paths.get(args[0])), "US-ASCII").contains("END\\tOK")) {
                                 Thread.sleep(5);
                             }
                             Class.forName("portable.LateRelevant");
@@ -225,7 +238,7 @@ class ClassWitnessTest(unittest.TestCase):
                                      "-cp", str(classes), "LateMain", str(witness_path)],
                                     capture_output=True, timeout=30)
             self.assertEqual(result.returncode, 86, result.stderr.decode())
-            self.assertIn(b"SEALED\t", witness_path.read_bytes())
+            self.assertIn(b"END\tOK", witness_path.read_bytes())
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ MAX_TRACE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_THREADS = 1024
 STRING = r'"(?:[^"\\]|\\.)*"'
 FD = r'([0-9]+)<([^>]+)>'
+MAPPED_FD = r'mmap\([^,]+, [^,]+, [^,]+, [^,]+, ' + FD + r','
 WORKER_MAIN = "worker.org.gradle.process.internal.worker.GradleWorkerMain"
 
 
@@ -87,6 +88,8 @@ def _events(traces, protected):
                 raise Rejected("trace timestamp or syscall record is malformed")
             stamp, call = match.groups()
             if "<unfinished ...>" in call or "resumed>" in call:
+                if re.fullmatch(r"wait4\([1-9][0-9]* <unfinished \.\.\.>\) = \?", call):
+                    continue
                 raise Unbound("trace syscall ordering is ambiguous")
             if Decimal(stamp) < previous:
                 raise Rejected("trace thread time moved backwards")
@@ -124,7 +127,8 @@ def _buffer(call, vector=False):
     return value, int(match[3]) if match[3] else None
 
 
-def verify_stable_input(traces, path, expected_identity, worker, jar, selected_exec):
+def verify_stable_input(traces, path, expected_identity, worker, jar, selected_exec,
+                        *, allow_external_readers=False):
     events = _events(traces, (path,))
     groups = {}
     descriptors = {}
@@ -153,6 +157,23 @@ def verify_stable_input(traces, path, expected_identity, worker, jar, selected_e
             groups[child[1]] = groups[tid] if "CLONE_THREAD" in call else child[1]
             descriptors[child[1]] = (descriptors[tid] if "CLONE_FILES" in call
                                      else dict(descriptors[tid]))
+        if allow_external_readers and groups[tid] != worker and path in call:
+            if not worker_started:
+                continue
+            external_open = re.fullmatch(r'open(?:at|at2)?\((.*?)\) = ' + FD, call)
+            external_write = re.match(r'(?:write|writev|pwrite64|pwritev|ftruncate)\(' + FD,
+                                      call)
+            external_map = re.match(MAPPED_FD, call)
+            if (call.startswith(("rename", "unlink", "truncate", "sendfile",
+                                 "copy_file_range", "splice")) or
+                    (external_write is not None and external_write[2] == path) or
+                    (external_open and ("O_RDONLY" not in external_open[1] or
+                                        any(flag in external_open[1] for flag in
+                                            ("O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC")))) or
+                    (external_map is not None and external_map[2] == path and
+                     "PROT_WRITE" in call and "MAP_SHARED" in call)):
+                raise Rejected("provider input changed outside worker")
+            continue
         opening = re.fullmatch(r'open(?:at|at2)?\((.*?)\) = ' + FD, call)
         if opening:
             args, fd, opened_path = opening.groups()
@@ -195,7 +216,7 @@ def verify_stable_input(traces, path, expected_identity, worker, jar, selected_e
                 raise Rejected("agent input path identity differs")
             path_identity = True
         writer = re.match(r'(?:write|writev|pwrite64|pwritev|ftruncate)\(' + FD, call)
-        mapped_writer = re.match(r'mmap\(.*' + FD + r', [0-9]+\) = ', call)
+        mapped_writer = re.match(MAPPED_FD + r' [0-9]+\) = ', call)
         if (call.startswith(("rename", "unlink", "truncate", "sendfile",
                              "copy_file_range", "splice")) or
                 (writer is not None and writer[2] == path) or
@@ -263,11 +284,12 @@ def verify_stable_input(traces, path, expected_identity, worker, jar, selected_e
                 item["reads"] += 1
                 if not operation.startswith("pread"):
                     item["position"] += count
-        mapped = re.match(r'mmap\(.*' + FD + r',', call)
+        mapped = re.match(MAPPED_FD, call)
         if mapped and mapped[2] == path:
             item = descriptors[tid].get(mapped[1])
             if item is None or mapped[2] != path:
-                raise Unbound("agent input mapping descriptor is unavailable")
+                raise Unbound("agent input mapping descriptor is unavailable: " + tid +
+                              ":" + mapped[1])
             if groups[tid] != worker or not worker_started:
                 continue
             if re.search(r'\) = -[0-9]+(?: |$)', call):

@@ -941,7 +941,7 @@ def _numeric_sidecar_schema(lane):
         if raw_present:
             raise Rejected("numeric probe schema 1 has raw sidecar data")
     elif schema == "portable-binary64-probe-receipt/2":
-        if lane.name != "jvm" or not raw_path.is_dir() or raw_path.is_symlink():
+        if lane.name not in ("jvm", "jvm8") or not raw_path.is_dir() or raw_path.is_symlink():
             raise Rejected("numeric probe schema 2 directory differs")
         files = receipt.get("files")
         if (not isinstance(files, dict) or len(files) > MAX_MEMBERS or
