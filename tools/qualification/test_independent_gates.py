@@ -760,7 +760,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                         "capture_receipt": "missing.json", "arithmetic_audit": "missing-audit.json"}
                        for case in independent_gates.approved_prospective_cases(str(ROOT))]}
         exported = []
-        closure = independent_gates.APPROVED_PROSPECTIVE_JVM8_CHECKERS
+        closure = independent_gates.APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS
         original_extractall = tarfile.TarFile.extractall
 
         def observe(package, path, *args, **kwargs):
@@ -881,7 +881,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual({**independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS,
                           "numeric_producer.py": new},
                          independent_gates.PROSPECTIVE_REPLAY_SCRATCH_CHECKERS)
-        current_digest = independent_gates.APPROVED_PROSPECTIVE_JVM8_CHECKERS[
+        current_digest = independent_gates.APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS[
             "numeric_producer.py"]
         self.assertEqual(current_digest, hashlib.sha256((ROOT / relative).read_bytes()).hexdigest())
         self.assertEqual(current_digest, independent_gates.PINNED_PROSPECTIVE_LOCAL_CHECKERS[
@@ -1267,7 +1267,7 @@ class IndependentGateSeamTests(unittest.TestCase):
              independent_gates.APPROVED_PROSPECTIVE_SIGNED_ZERO_CHECKERS),
             ("dcc8211b51aad7bcb946417ad9019bd57cc6ecf1",
              independent_gates.APPROVED_PROSPECTIVE_REPRESENTED_CHECKERS),
-            (current, independent_gates.APPROVED_PROSPECTIVE_JVM8_CHECKERS),
+            (current, independent_gates.APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS),
         )
         checker_paths = [f"tools/numerical/portable/{name}" for name in
                          independent_gates.APPROVED_PROSPECTIVE_CHECKERS]
@@ -1424,6 +1424,32 @@ class IndependentGateSeamTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "reviewed P2 raw producer blob differs"):
                 independent_gates._p2_producer_binding(ROOT, candidate)
 
+    def test_jvm8_agent_classpath_repair_has_its_own_exact_source_window(self):
+        boundary = "4ec6a2dbb847bbc6fd18374225b12f7cc802d969"
+        previous = independent_gates.PROSPECTIVE_JVM8_SOURCE_REVISION
+        name = "numeric_producer.py"
+        relative = f"tools/numerical/portable/{name}"
+        digest = "2e5f80022e4457955e1f806d5ba7270eec9041726914fd245033e106b06ab3e5"
+        self.assertEqual(boundary, independent_gates.PROSPECTIVE_JVM8_AGENT_SOURCE_REVISION)
+        self.assertEqual(digest, independent_gates.APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS[name])
+        self.assertEqual(digest, hashlib.sha256(subprocess.check_output(
+            ["git", "--no-replace-objects", "show", f"{boundary}:{relative}"], cwd=ROOT)).hexdigest())
+        self.assertEqual(digest, independent_gates._prospective_checker_binding(ROOT, boundary)[relative])
+        self.assertEqual(independent_gates.APPROVED_PROSPECTIVE_JVM8_CHECKERS[name],
+                         independent_gates._prospective_checker_binding(ROOT, previous)[relative])
+        self.assertEqual(independent_gates.APPROVED_PROSPECTIVE_JVM8_CHECKERS[name],
+                         independent_gates._prospective_checker_binding(ROOT, "ecea01e9")[relative])
+        self.assertEqual(25, len(independent_gates._prospective_checker_binding(ROOT, boundary)) - 1)
+
+        original_show = subprocess.check_output
+        def altered(command, *args, **kwargs):
+            if command[-1] == f"{boundary}:{relative}":
+                return b"changed"
+            return original_show(command, *args, **kwargs)
+        with mock.patch.object(subprocess, "check_output", altered):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, boundary)
+
     def test_jvm8_public_source_admission_reaches_raw_gate(self):
         candidate = independent_gates.PROSPECTIVE_JVM8_SOURCE_REVISION
         receipt = {"prospective_catalog_sha256": independent_gates.PROSPECTIVE_POLICY_SHA256,
@@ -1449,7 +1475,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual({**independent_gates.APPROVED_PROSPECTIVE_REPRESENTED_CHECKERS,
                           "prospective_compare.py": new_digest},
                          independent_gates.APPROVED_PROSPECTIVE_NUMERIC_PROBE_CHECKERS)
-        self.assertEqual(independent_gates.APPROVED_PROSPECTIVE_JVM8_CHECKERS,
+        self.assertEqual(independent_gates.APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
                          independent_gates.PINNED_PROSPECTIVE_LOCAL_CHECKERS)
         for revision, digest in ((current, new_digest),
                                  (previous, old_digest),
