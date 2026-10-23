@@ -1166,33 +1166,55 @@ class IndependentAdapterTests(unittest.TestCase):
         import full_browser_consumer
 
         lane = "js:Chromium:current:development"
+        fixture_candidate = "d844a9e5f52bf0e3b356e1c306d6fae4d29acf61"
+        verifier_path = "tools/qualification/full_browser_consumer.py"
+        historical = full_browser_consumer.original(ROOT, fixture_candidate, verifier_path)
+        self.assertEqual("15e881f52c74456a1b9804feddf4abeb3d9c230c1ee51e77acd0b1e5b8e632c6",
+                         hashlib.sha256(historical).hexdigest())
+        self.assertNotEqual(historical, Path(full_browser_consumer.__file__).read_bytes())
+        ancestry = subprocess.run(
+            ["git", "--no-replace-objects", "-C", str(ROOT), "merge-base", "--is-ancestor",
+             fixture_candidate, "HEAD"], capture_output=True, text=True)
+        self.assertEqual(0, ancestry.returncode, ancestry.stderr)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             archive = root / "historical-browser-fixture"
             archive.mkdir()
             (archive / "receipt.json").write_text(json.dumps({
-                "schema": 1, "candidate_sha": BROWSER_CANDIDATE,
+                "schema": 1, "candidate_sha": fixture_candidate,
                 "lane": lane, "status": "PASSED", "consumer_contract_sha256": "0" * 64,
                 "runtime_identity": f"{platform.system()} {platform.release()} {platform.machine()}",
             }))
             suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
-                root, [lane], archive_override=archive)
+                root, [lane], archive_override=archive, candidate_sha=fixture_candidate)
             audit, signature, public, fingerprint = self.signed_inputs(root, signed)
+            self.assertNotIn(fixture_candidate, full_browser_consumer.LEGACY_LOCK_CANDIDATES)
+            with mock.patch.object(qualify, "verify_audit_against_staging"):
+                restricted = independent_adapter.verify_lanes(
+                    ROOT, fixture_candidate, suite, archive_map,
+                    audit, signature, public, fingerprint,
+                    candidate_manifest=candidate, artifact_audit=staged)
+            restricted_gate = restricted[lane]["verification"]["gates"]["staged-consumer"]
+            self.assertEqual("FAILED", restricted_gate["status"])
+            self.assertIn("selected full Chromium candidate, runtime, or artifacts differ",
+                          restricted_gate["reason"])
             with (mock.patch.object(qualify, "verify_audit_against_staging"),
+                  mock.patch.object(full_browser_consumer, "LEGACY_LOCK_CANDIDATES",
+                                    full_browser_consumer.LEGACY_LOCK_CANDIDATES |
+                                    {fixture_candidate}),
                   mock.patch.object(full_browser_consumer, "original",
-                                    return_value=b"historical verifier fixture\n") as original,
+                                    wraps=full_browser_consumer.original) as original,
                   mock.patch.object(full_browser_adapter,
                                     "verify_full_browser_staged_consumer") as replay):
                 verified = independent_adapter.verify_lanes(
-                    ROOT, BROWSER_CANDIDATE, suite, archive_map,
+                    ROOT, fixture_candidate, suite, archive_map,
                     audit, signature, public, fingerprint,
                     candidate_manifest=candidate, artifact_audit=staged)
             gate = verified[lane]["verification"]["gates"]["staged-consumer"]
             self.assertEqual("FAILED", gate["status"])
             self.assertIn("public Chromium verifier differs from exact candidate",
                           gate["reason"])
-            original.assert_called_once_with(
-                ROOT, BROWSER_CANDIDATE, "tools/qualification/full_browser_consumer.py")
+            original.assert_called_once_with(ROOT, fixture_candidate, verifier_path)
             replay.assert_not_called()
 
     def test_signed_schema3_chromium_adapter_handoff_and_wrong_module_map(self):
