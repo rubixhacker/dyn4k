@@ -69,7 +69,8 @@ class JdiBridgeTest(unittest.TestCase):
     def test_version6_raw_transport_requires_live_accept_peer_and_exchange(self):
         worker = (
             b'1.000001 execve("/tmp/dyn4k-tools/jdk21/bin/java", '
-            b'["java", "GradleWorkerMain"], 0x7f) = 0\n'
+            b'["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], '
+            b'0x7f) = 0\n'
             b'1.0000011 socket(AF_INET, SOCK_STREAM, IPPROTO_TCP) = 9<TCP:[90]>\n'
             b'1.000002 bind(9<TCP:[90]>, {sa_family=AF_INET, '
             b'sin_port=htons(40001), sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n'
@@ -107,6 +108,65 @@ class JdiBridgeTest(unittest.TestCase):
                                           archive({"trace.456": helper}),
                                           40001, 123, 456, HELPER_ARGS)
         self.assertEqual(result["status"], "PROVED_JDI_RAW_EXCHANGE")
+        launcher = (
+            b'0.999999 execve("/tmp/dyn4k-tools/jdk21/lib/jspawnhelper", '
+            b'["/tmp/dyn4k-tools/jdk21/lib/jspawnhelper", '
+            b'"21.0.12.1+1-LTS", "540:541:543"], 0x7f) = 0\n')
+        launcher_sha = "e3101d3a580c9ae6e973acbf2e861855e93ebceb0bbd8e5fa3ddf6abbf6fd63d"
+        launched = launcher + worker
+        self.assertEqual(verify_jdi_transport_v6(
+            archive({"trace.123": launched}), archive({"trace.456": helper}),
+            40001, 123, 456, HELPER_ARGS, launcher_sha256=launcher_sha,
+            protected_paths={"/home/stewart/boolean-jdi-test/agent.jar"})["status"],
+            "PROVED_JDI_RAW_EXCHANGE")
+        self.assertEqual(verify_jdi_transport_v6(
+            archive({"trace.123": launcher.replace(b"0.999999", b"1.000001") + worker}),
+            archive({"trace.456": helper}), 40001, 123, 456, HELPER_ARGS,
+            launcher_sha256=launcher_sha,
+            protected_paths={"/home/stewart/boolean-jdi-test/agent.jar"})["status"],
+            "PROVED_JDI_RAW_EXCHANGE")
+        prelude_bad = (
+            ("unknown launcher", launcher.replace(b"/lib/jspawnhelper",
+                                                    b"/lib/other")),
+            ("wrong launcher arguments", launcher.replace(
+                b"540:541:543", b"540:541")),
+            ("changed launcher bytes", launcher),
+            ("extra execution", launcher + launcher.replace(
+                b"0.999999", b"1.000000")),
+            ("prelude socket", launcher +
+             b'1.000000 socket(AF_INET, SOCK_STREAM, IPPROTO_TCP) = 7<TCP:[99]>\n'),
+            ("prelude protected file", launcher +
+             b'1.000000 read(7</home/stewart/boolean-jdi-test/agent.jar>, '
+             b'"abc", 3) = 3\n'),
+            ("prelude protected open", launcher +
+             b'1.000000 openat(AT_FDCWD, '
+             b'"/home/stewart/boolean-jdi-test/agent.jar", O_RDONLY) = 7\n'),
+            ("prelude child", launcher +
+             b'1.000000 clone3({flags=CLONE_FILES, exit_signal=0}, 88) = 900\n'),
+        )
+        for label, prelude in prelude_bad:
+            with self.subTest(launcher=label):
+                with self.assertRaises(EvidenceRejected):
+                    verify_jdi_transport_v6(
+                        archive({"trace.123": prelude + worker}),
+                        archive({"trace.456": helper}), 40001, 123, 456,
+                        HELPER_ARGS,
+                        launcher_sha256=("0" * 64 if label == "changed launcher bytes"
+                                         else launcher_sha),
+                        protected_paths={"/home/stewart/boolean-jdi-test/agent.jar"})
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport_v6(
+                archive({"trace.123": worker + launcher.replace(
+                    b"0.999999", b"1.000015")}),
+                archive({"trace.456": helper}), 40001, 123, 456,
+                HELPER_ARGS, launcher_sha256=launcher_sha)
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport_v6(
+                archive({"trace.123": worker}),
+                archive({"trace.456": helper + launcher.replace(
+                    b"0.999999", b"1.000015")}),
+                40001, 123, 456, HELPER_ARGS,
+                launcher_sha256=launcher_sha)
         worker_packet = next(row for row in worker.splitlines(keepends=True)
                              if row.startswith(b'1.000012 recvfrom'))
         helper_packet = next(row for row in helper.splitlines(keepends=True)

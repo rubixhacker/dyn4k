@@ -1,4 +1,5 @@
 import ast
+import hashlib
 import io
 import os
 from pathlib import Path
@@ -18,6 +19,8 @@ else:
 
 
 JDK21 = Path("/tmp/dyn4k-tools/jdk21")
+JSPAWNHELPER = JDK21 / "lib/jspawnhelper"
+JSPAWNHELPER_SHA256 = "e3101d3a580c9ae6e973acbf2e861855e93ebceb0bbd8e5fa3ddf6abbf6fd63d"
 BODY_METHOD = "integratePosition$lambda$0"
 JOINT_METHOD = "solvePositionConstraints"
 
@@ -476,8 +479,68 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
             "helper_connector": connected[0][0], "port": port}
 
 
+def verify_worker_launch_v6(events, worker_pid, *, focused=True,
+                            launcher_sha256=None, protected_paths=None):
+    from numeric_producer_trace import WORKER_MAIN, successful_execve
+
+    worker = [(stamp, index, call) for stamp, tid, index, call in events
+              if tid == str(worker_pid)]
+    executions = [(stamp, index, successful_execve(call))
+                  for stamp, index, call in worker
+                  if call.startswith(("execve(", "execveat(")) and call.endswith(" = 0")]
+    if (not executions or any(row[2] is None for row in executions) or
+            any(call.startswith("execveat(") and call.endswith(" = 0")
+                for _, _, call in worker)):
+        raise EvidenceRejected("JDI version 6 worker execution differs")
+    java_at, java_index, java = executions[-1]
+    if (java[0] != str(JDK21 / "bin/java") or
+            (WORKER_MAIN if focused else "Main") not in java[1]):
+        raise EvidenceRejected("JDI version 6 selected Java execution differs")
+    if len(executions) == 1:
+        if java_index != 0:
+            raise EvidenceRejected("JDI version 6 Java start differs")
+        return java_at, java_index
+    if (not focused or len(executions) != 2 or
+            type(protected_paths) is not set or not protected_paths or
+            any(type(path) is not str or not path.startswith("/")
+                for path in protected_paths) or
+            launcher_sha256 != JSPAWNHELPER_SHA256):
+        raise EvidenceRejected("JDI version 6 launcher inventory differs")
+    _, launch_index, launcher = executions[0]
+    try:
+        current_sha256 = hashlib.sha256(JSPAWNHELPER.read_bytes()).hexdigest()
+    except OSError as error:
+        raise EvidenceRejected("JDI version 6 pinned launcher is unavailable") from error
+    if (launch_index != 0 or launch_index >= java_index or
+            launcher[0] != str(JSPAWNHELPER) or
+            len(launcher[1]) != 3 or launcher[1][0] != str(JSPAWNHELPER) or
+            re.fullmatch(r"[0-9]+(?:\.[0-9]+)+(?:\+[0-9]+-LTS)?", launcher[1][1]) is None or
+            re.fullmatch(r"[0-9]+:[0-9]+:[0-9]+", launcher[1][2]) is None or
+            current_sha256 != launcher_sha256):
+        raise EvidenceRejected("JDI version 6 pinned launcher differs")
+    socket_calls = ("socket(", "socketpair(", "bind(", "listen(", "accept(",
+                    "accept4(", "connect(", "shutdown(", "sendto(", "recvfrom(",
+                    "sendmsg(", "recvmsg(", "getsockname(", "getpeername(")
+    process_calls = ("clone(", "clone3(", "fork(", "vfork(", "unshare(", "setns(")
+    pathname_calls = ("open(", "openat(", "openat2(", "stat(", "lstat(",
+                      "newfstatat(", "statx(", "rename(", "renameat(",
+                      "renameat2(", "unlink(", "unlinkat(", "truncate(")
+    for _, index, call in worker:
+        if index >= java_index:
+            break
+        if index == launch_index:
+            continue
+        if (call.startswith(socket_calls + process_calls) or
+                any("<" + path + ">" in call for path in protected_paths) or
+                call.startswith(pathname_calls) and
+                any('"' + path + '"' in call for path in protected_paths)):
+            raise EvidenceRejected("JDI version 6 launcher supplied protected evidence")
+    return java_at, java_index
+
+
 def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
-                            helper_pid, expected_argv, *, focused=True):
+                            helper_pid, expected_argv, *, focused=True,
+                            launcher_sha256=None, protected_paths=None):
     from actual_trace import normalize_rich_traces
     from numeric_producer_trace import _events, successful_execve
 
@@ -550,15 +613,12 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
 
     check_births(worker_events, worker_births, worker_pid)
     check_births(helper_events, helper_births, helper_pid)
-    worker_exec = [(tid, successful_execve(call)) for _, tid, _, call in worker_events
-                   if call.startswith(("execve(", "execveat(")) and call.endswith(" = 0")]
+    verify_worker_launch_v6(worker_events, worker_pid, focused=focused,
+                            launcher_sha256=launcher_sha256,
+                            protected_paths=protected_paths)
     helper_exec = [(tid, successful_execve(call)) for _, tid, _, call in helper_events
                    if call.startswith(("execve(", "execveat(")) and call.endswith(" = 0")]
-    if (len(worker_exec) != 1 or worker_exec[0][0] != str(worker_pid) or
-            worker_exec[0][1] is None or
-            ("GradleWorkerMain" if focused else "Main") not in
-            worker_exec[0][1][1] or
-            len(helper_exec) != 1 or helper_exec[0] != (
+    if (len(helper_exec) != 1 or helper_exec[0] != (
                 str(helper_pid), (str(JDK21 / "bin/java"), tuple(expected_argv)))):
         raise EvidenceRejected("JDI version 6 selected Java execution differs")
 

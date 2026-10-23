@@ -6,6 +6,8 @@ The version 6 receipt covers one Boolean method and one case: captureRevoluteLim
 
 The capture retains raw timestamped worker and helper traces. The verifier checks protected operations before it projects syntax for the older process readers. It keeps the original bytes and hashes. The selected worker must read the response and rebuilt agent inputs, write the direct mirror, and produce the class-load, argument, and class witness files at their recorded destinations.
 
+The selected Gradle worker PID may first execute the pinned JDK 21 `jspawnhelper`, then execute the selected Java worker. Replay checks that exact same-PID sequence, the launcher path, stable file identity, and pinned executable digest before trace projection. It rejects another successful execution, a changed helper or worker sequence, and protected socket or file evidence supplied before Java starts. The direct Java start used by the bounded standalone pilot remains supported. The helper process still has one selected Java execution.
+
 Version 6 checks each protected descriptor use across threads, copies, reassignment, and closure. For helper outputs, it permits sequential writes, close, fstat, and an initial zero-length ftruncate before any write. It rejects operations that can change the file offset or bytes outside the byte reader's model. Its helper output scope includes every archived JDI file. The byte check reads the projected trace only after the raw destination check succeeds.
 
 The strict transport check reads the raw worker and helper traces before normalization. It rejects completed split syscalls because normalization represents them at resume time and cannot prove their entry time. The narrow terminal abandoned accept exception remains subject to the raw lifecycle check. This version 6 limit does not change the older receipt behavior.
@@ -42,4 +44,4 @@ Replay first runs the existing whole-lane comparison with no arithmetic-capture 
 
 ## Current evidence boundary
 
-The source phase requires a bounded JDK 21 toy loader and transport pilot at the clean source commit. A toy run cannot establish the 600-step method result. There is no version 6 capture of that case or whole-lane replay yet. The parent and runtime child tickets remain open. Source review, exact-main CI, full capture, independent runtime audit, and retrospective are separate checks.
+The source phase requires a bounded JDK 21 toy loader and transport pilot at the clean source commit. A small traced Gradle unit also checks the actual worker launch route. Neither run establishes the 600-step method result. There is no version 6 capture of that case or whole-lane replay yet. The parent and runtime child tickets remain open. Source review, exact-main CI, full capture, independent runtime audit, and retrospective are separate checks.

@@ -426,6 +426,10 @@ def _run_capture(method, output, reference_case, commit, temporary,
     shutil.copyfile(STAGED_JAR, output / "artifact.jar")
     artifact_before = captured_file_identity(STAGED_JAR) if method == _FOCUSED_BOOLEAN_METHOD else None
     runtime_before = captured_file_identity(JDK21 / "bin/java") if method == _FOCUSED_BOOLEAN_METHOD else None
+    launcher_path = jdi_bridge.JSPAWNHELPER
+    launcher_before = captured_file_identity(launcher_path) if method == _FOCUSED_BOOLEAN_METHOD else None
+    launcher_sha256 = (hashlib.sha256(launcher_path.read_bytes()).hexdigest()
+                       if method == _FOCUSED_BOOLEAN_METHOD else None)
     if budget is not None:
         budget.check()
     class_load_pattern = output / "worker-class-load-%p.log"
@@ -755,7 +759,9 @@ def _run_capture(method, output, reference_case, commit, temporary,
         require_inputs = (
             captured_file_identity(agent) == agent_before and
             captured_file_identity(STAGED_JAR) == artifact_before and
-            captured_file_identity(JDK21 / "bin/java") == runtime_before)
+            captured_file_identity(JDK21 / "bin/java") == runtime_before and
+            captured_file_identity(launcher_path) == launcher_before and
+            hashlib.sha256(launcher_path.read_bytes()).hexdigest() == launcher_sha256)
         if not require_inputs:
             raise CaptureRejected("protected producer input changed during capture")
         metadata = {"schema": "focused-arithmetic-capture/6",
@@ -773,6 +779,9 @@ def _run_capture(method, output, reference_case, commit, temporary,
                     "artifact_after_identity": identity(STAGED_JAR),
                     "runtime_identity": runtime_before,
                     "runtime_after_identity": identity(JDK21 / "bin/java"),
+                    "launcher_identity": launcher_before,
+                    "launcher_after_identity": identity(launcher_path),
+                    "launcher_sha256": launcher_sha256,
                     "helper_class_before": helper_class_before,
                     "helper_class_after": {
                         name: identity(jdi_classes / name)

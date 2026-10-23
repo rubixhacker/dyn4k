@@ -10,7 +10,8 @@ import zipfile
 from actual_capture_receipt import (FILE_NAMES, FocusedRejected,
                                     _expected_classes, _helper_members, _xml_mirror,
                                     verify_boolean_startup, verify_helper_startup,
-                                    load_version6_archive, verify_existing)
+                                    load_version6_archive, verify_existing,
+                                    verify_launcher_input)
 from actual_trace import checked_projection, TraceRejected
 from boolean_rotation_jdi.jdi_bridge import verify_jdi_file_writes
 from prospective_compare import verify_arithmetic_captures
@@ -18,6 +19,22 @@ from receipt import Rejected
 
 
 class FocusedReplayTest(unittest.TestCase):
+    def test_pinned_launcher_identity_and_bytes(self):
+        from boolean_rotation_jdi.jdi_bridge import JSPAWNHELPER
+        from numeric_producer import captured_file_identity
+
+        identity = captured_file_identity(JSPAWNHELPER)
+        digest = hashlib.sha256(JSPAWNHELPER.read_bytes()).hexdigest()
+        metadata = {"launcher_identity": identity,
+                    "launcher_after_identity": identity,
+                    "launcher_sha256": digest}
+        self.assertEqual(verify_launcher_input(metadata), digest)
+        for changed in ({"launcher_sha256": "0" * 64},
+                        {"launcher_identity": identity | {"size": identity["size"] + 1}},
+                        {"launcher_after_identity": identity | {"inode": identity["inode"] + 1}}):
+            with self.subTest(changed=changed), self.assertRaises(FocusedRejected):
+                verify_launcher_input(metadata | changed)
+
     def test_helper_output_destination_is_checked_before_byte_accounting(self):
         def packed(entries):
             output = io.BytesIO()

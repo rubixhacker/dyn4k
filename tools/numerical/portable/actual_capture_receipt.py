@@ -18,7 +18,7 @@ from actual_trace import (TraceRejected, _validate_calls, checked_projection,
 from boolean_rotation_jdi import (jdi_bridge, source_guard as jdi_source_guard,
                                   witness as jdi_witness)
 from numeric_class_witness import build_agent, read_witness
-from numeric_producer import (MAX_TRACE_MEMBER, class_map, select_worker_exec,
+from numeric_producer import (MAX_TRACE_MEMBER, captured_file_identity, class_map, select_worker_exec,
                               verify_build_runtime, verify_witness_classpath)
 from numeric_producer_trace import (_events, successful_execve,
                                     verify_stable_input, verify_transport)
@@ -70,6 +70,25 @@ def decoded(raw):
 def require(condition, reason):
     if not condition:
         raise FocusedRejected(reason)
+
+
+def verify_launcher_input(metadata):
+    path = jdi_bridge.JSPAWNHELPER
+    expected = metadata.get("launcher_identity")
+    after = metadata.get("launcher_after_identity")
+    digest = metadata.get("launcher_sha256")
+    try:
+        current = captured_file_identity(path)
+        current_sha256 = sha(path.read_bytes())
+    except OSError as error:
+        raise FocusedRejected("pinned JDK launcher is unavailable") from error
+    require(type(expected) is dict and set(expected) == {
+        "device_major", "device_minor", "inode", "size"} and
+            all(type(value) is int and value >= 0 for value in expected.values()) and
+            expected == after == current and
+            digest == current_sha256 == jdi_bridge.JSPAWNHELPER_SHA256,
+            "pinned JDK launcher identity or bytes differ")
+    return digest
 
 
 def load_version6_archive(root):
@@ -356,6 +375,7 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
         "response_identity", "agent_after_identity",
         "artifact_identity", "artifact_after_identity",
         "runtime_identity", "runtime_after_identity",
+        "launcher_identity", "launcher_after_identity", "launcher_sha256",
         "helper_class_before", "helper_class_after",
         "helper_argument_path", "helper_argument_identity",
         "worker_pid", "exit_code"} and
@@ -534,7 +554,10 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
             "executed JDI helper main class input is missing")
     jdi_transport = jdi_bridge.verify_jdi_transport_v6(
         files["worker_write_traces"], files["jdi_helper_traces"], transport["port"],
-        int(selected[0]), transport["helper_pid"], argv)
+        int(selected[0]), transport["helper_pid"], argv,
+        launcher_sha256=metadata["launcher_sha256"],
+        protected_paths=protected | {metadata["helper_argument_path"]} |
+        set(class_paths))
     jdi_files = jdi_bridge.verify_jdi_file_writes(
         helper["legacy_zip"], files["jdi_evidence"], paths[1])
     sites = jdi_bridge.derive_call_sites(files["artifact"])
@@ -597,7 +620,9 @@ def make_version6_receipt(files, commit, runtime_executable=_PINNED_JAVA):
         "agent_identity", "witness_identity", "mirror_identity",
         "argument_identity", "class_load_identity", "response_identity",
         "agent_after_identity", "artifact_identity", "artifact_after_identity",
-        "runtime_identity", "runtime_after_identity", "helper_class_before",
+        "runtime_identity", "runtime_after_identity",
+        "launcher_identity", "launcher_after_identity", "launcher_sha256",
+        "helper_class_before",
         "helper_class_after", "helper_argument_path", "helper_argument_identity",
         "worker_pid", "exit_code"} and
         all(type(metadata[key]) is str and metadata[key].startswith("/") for key in (
@@ -618,6 +643,10 @@ def make_version6_receipt(files, commit, runtime_executable=_PINNED_JAVA):
     traces, aborted = normalize_rich_traces(raw_traces)
     events = _events(traces, protected)
     _validate_calls(events, protected)
+    verify_launcher_input(metadata)
+    jdi_bridge.verify_worker_launch_v6(
+        events, metadata["worker_pid"], launcher_sha256=metadata["launcher_sha256"],
+        protected_paths=protected)
     worker = checked_projection(files["worker_write_traces"], protected)
     helper = checked_projection(files["jdi_helper_traces"], protected,
                                 strict_outputs=set(output_paths))
