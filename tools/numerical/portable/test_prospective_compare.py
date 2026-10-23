@@ -349,7 +349,8 @@ class ProspectiveComparisonTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "receipt"):
             verify_candidate_inventory(lane, {"one"}, {"jvm", "linux-x64"})
         (lane / "receipt-copy.json").unlink()
-        (lane / "numeric-probe-receipt.json").write_text("{}\n")
+        (lane / "numeric-probe-receipt.json").write_text(
+            json.dumps({"schema": "portable-binary64-probe-receipt/1"}))
         verify_candidate_inventory(lane, {"one"}, {"jvm", "linux-x64"})
         (lane / "numeric-probe-copy-receipt.json").write_text("{}\n")
         with self.assertRaisesRegex(Exception, "receipt"):
@@ -360,6 +361,53 @@ class ProspectiveComparisonTest(unittest.TestCase):
         (rogue / "receipt.json").write_text("{}\n")
         with self.assertRaisesRegex(Exception, "producer"):
             verify_candidate_inventory(lane, {"one"}, {"jvm", "linux-x64"})
+
+    def test_numeric_sidecar_directory_and_receipt_are_coupled(self):
+        lane = self.root / "jvm"
+        (lane / "cases").mkdir(parents=True)
+        (lane / "cases" / "one.jsonl").write_text("case\n")
+        (lane / "receipt.json").write_text("{}\n")
+        receipt = lane / "numeric-probe-receipt.json"
+        sidecar = lane / "numeric-probe"
+
+        sidecar.mkdir()
+        (sidecar / "undeclared.bin").write_bytes(b"raw")
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_candidate_inventory(lane, {"one"}, {"jvm"})
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_numeric_probe(lane, "commit", "source", "trace", {}, {})
+        receipt.write_text(json.dumps({"schema": "portable-binary64-probe-receipt/1"}))
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_candidate_inventory(lane, {"one"}, {"jvm"})
+        receipt.write_text(json.dumps({"schema": "portable-binary64-probe-receipt/2",
+                                       "files": {}}))
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_candidate_inventory(lane, {"one"}, {"jvm"})
+        (sidecar / "undeclared.bin").unlink()
+        verify_candidate_inventory(lane, {"one"}, {"jvm"})
+        (sidecar / "linked.bin").symlink_to(lane / "receipt.json")
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_candidate_inventory(lane, {"one"}, {"jvm"})
+        (sidecar / "linked.bin").unlink()
+        receipt.write_text(json.dumps({"schema": "portable-binary64-probe-receipt/1"}))
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_candidate_inventory(lane, {"one"}, {"jvm"})
+        receipt.write_text(json.dumps({"schema": "portable-binary64-probe-receipt/2",
+                                       "files": {}}))
+        sidecar.rmdir()
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_candidate_inventory(lane, {"one"}, {"jvm"})
+        sidecar.write_bytes(b"raw")
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_candidate_inventory(lane, {"one"}, {"jvm"})
+        sidecar.unlink()
+        sidecar.symlink_to(lane / "cases", target_is_directory=True)
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_candidate_inventory(lane, {"one"}, {"jvm"})
+        sidecar.unlink()
+        receipt.write_text(json.dumps({"schema": "unknown"}))
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_candidate_inventory(lane, {"one"}, {"jvm"})
 
     def numeric_probe_fixture(self):
         lane = self.root / "jvm"
@@ -544,6 +592,8 @@ class ProspectiveComparisonTest(unittest.TestCase):
         lane, receipt, runtime, artifacts, _, _ = self.numeric_probe_fixture()
         receipt["schema"] = "portable-binary64-probe-receipt/2"
         receipt["status"] = "PASSED_BOUND_PRODUCER"
+        receipt["files"] = {}
+        (lane / "numeric-probe").mkdir()
         (lane / "numeric-probe-receipt.json").write_text(json.dumps(receipt))
         with self.assertRaisesRegex(Exception, "numeric producer receipt schema"):
             verify_numeric_probe(lane, "commit", "source", "trace", artifacts, runtime)
