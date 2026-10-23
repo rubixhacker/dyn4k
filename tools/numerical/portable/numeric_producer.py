@@ -30,6 +30,8 @@ ROOT = Path(__file__).resolve().parents[3]
 PORTABLE = Path(__file__).resolve().parent
 WRAPPER = "tools/numerical/portable/src/jvmTest/kotlin/portable/NumericProbeMatrixTest.kt"
 WRAPPER_SHA256 = "6e9d5a3436f2d10f0a40606a21b8cafafb548f8911e993725b2fda97f12a260a"
+OBSERVER = "tools/numerical/portable/class_witness/NumericClassWitness.java"
+OBSERVER_SHA256 = "493d57d0635c6c5b519b6009250df0d82d0d97e0b065aa80160fe053b20d8983"
 KEYS = {"schema", "candidate_commit", "source_sha256", "fixture_source_sha256",
         "trace_sha256", "primary_receipt_sha256", "geometry_case_sha256", "artifact_sha256",
         "runtime", "selected_test", "probe", "files", "proof"}
@@ -363,6 +365,9 @@ def _source(raw, commit, expected_sha):
         entry = archive.extractfile(WRAPPER)
         require(entry is not None and sha(entry.read()) == WRAPPER_SHA256,
                 "numeric producer reviewed wrapper source differs")
+        observer = archive.extractfile(OBSERVER)
+        require(observer is not None and sha(observer.read()) == OBSERVER_SHA256,
+                "numeric producer reviewed observer source differs")
     return source
 
 
@@ -466,6 +471,16 @@ def verify_startup_log(raw, worker, startup, agent=None, witness=None,
             require(flags.count(expected) == 1, "worker observed output option differs")
 
 
+def verify_witness_loaders(definitions, loaded, helper):
+    critical = {"portable/NumericProbeMatrixTest", "portable/PortableMatrixTest",
+                "portable/NumericalRecorder"}
+    names = {row["name"] for row in definitions}
+    require(critical <= names and names == set(loaded) and
+            any(name.startswith("org/dyn4j/") for name in names) and helper and
+            all(row["loader"] == "system" for row in definitions),
+            "class witness focused worker loader relationship differs")
+
+
 def _witness(raw, source, metadata, traces, worker, payload, artifact, class_root,
              classpath_entries, executable, scratch):
     agent_path = Path(metadata["agent_path"])
@@ -477,8 +492,7 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
             metadata["agent_sha256"] == sha(raw["class-witness-agent.jar"]),
             "class witness captured path or JAR differs")
     with tarfile.open(fileobj=io.BytesIO(source), mode="r:") as archive:
-        entry = archive.extractfile(
-            "tools/numerical/portable/class_witness/NumericClassWitness.java")
+        entry = archive.extractfile(OBSERVER)
         require(entry is not None, "class witness committed source is absent")
         java_source = entry.read()
     compiler = Path(executable).parents[1]
@@ -488,7 +502,8 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
                           scratch / "witness-compile")
     require(rebuilt == raw["class-witness-agent.jar"],
             "class witness complete JAR differs from committed source")
-    input_proof = verify_stable_input(traces, str(agent_path), metadata["agent_identity"], worker)
+    input_proof = verify_stable_input(traces, str(agent_path), metadata["agent_identity"],
+                                      worker, rebuilt)
     output_proof = verify_transport(traces, str(witness_path), raw["class-witness.log"],
                                     mirror_identity=metadata["witness_identity"],
                                     shared_writers=True)
@@ -529,6 +544,7 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
         helpers = {name.removesuffix(".class") for name in jar.namelist()
                    if name.endswith(".class")}
     require(set(helper) == helpers, "class witness helper class inventory differs")
+    verify_witness_loaders(result["definitions"], loaded, helper)
     for entry in classpath_entries:
         path = Path(entry["path"])
         if path.is_dir():

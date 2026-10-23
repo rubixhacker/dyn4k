@@ -8,6 +8,7 @@ import json
 import io
 import zipfile
 import struct
+import tarfile
 import xml.etree.ElementTree as ET
 from copy import deepcopy
 from pathlib import Path
@@ -75,23 +76,147 @@ class TransportTest(unittest.TestCase):
             b'1.130000 close(4</private/agent.jar>) = 0\n'
             b'1.200000 +++ exited with 0 +++\n')}
         identity = {"device_major": 0, "device_minor": 1, "inode": 44, "size": 3}
-        self.assertEqual(verify_stable_input(trace, path, identity, "100")["reads"], 1)
+        self.assertEqual(verify_stable_input(trace, path, identity, "100", b"JAR")["reads"], 1)
         path_stat = trace["100"].replace(
             b'1.110000 fstat(4</private/agent.jar>, {st_mode=S_IFREG|0644, st_size=3, st_dev=makedev(0, 1), st_ino=44}) = 0\n',
             b'').replace(
                 b'1.120000 read(4</private/agent.jar>, "JAR", 3) = 3\n',
                 b'1.120000 read(4</private/agent.jar>, "JAR", 3) = 3\n'
                 b'1.125000 statx(AT_FDCWD, "/private/agent.jar", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mode=S_IFREG|0644, stx_ino=44, stx_size=3, stx_dev_major=0, stx_dev_minor=1}) = 0\n')
-        self.assertEqual(verify_stable_input({"100": path_stat}, path, identity, "100")["identity_mode"],
+        self.assertEqual(verify_stable_input({"100": path_stat}, path, identity, "100", b"JAR")["identity_mode"],
                          "path")
         with self.assertRaises(Rejected):
             verify_stable_input({"100": trace["100"].replace(b'"JAR", 3', b'"JAR", 3')
-                                 .replace(b'O_RDONLY', b'O_RDWR')}, path, identity, "100")
+                                 .replace(b'O_RDONLY', b'O_RDWR')}, path, identity, "100", b"JAR")
         with self.assertRaises(Rejected):
-            verify_stable_input(trace, path, {**identity, "inode": 45}, "100")
+            verify_stable_input(trace, path, {**identity, "inode": 45}, "100", b"JAR")
         with self.assertRaises(Unbound):
             verify_stable_input({"100": trace["100"].replace(b'1.120000 read(4</private/agent.jar>, "JAR", 3) = 3\n', b'')},
-                                path, identity, "100")
+                                path, identity, "100", b"JAR")
+
+    def test_agent_input_rejects_bad_second_open_and_failed_consumption(self):
+        path = "/private/agent.jar"
+        identity = {"device_major": 0, "device_minor": 1, "inode": 44, "size": 3}
+        header = ('1.000000 execve("/jdk/bin/java", ["java", '
+                  '"worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0) = 0')
+        open_one = '1.100000 openat(AT_FDCWD, "/private/agent.jar", O_RDONLY) = 4</private/agent.jar>'
+        stat_one = ('1.110000 fstat(4</private/agent.jar>, '
+                    '{st_mode=S_IFREG|0644, st_size=3, st_dev=makedev(0, 1), st_ino=44}) = 0')
+        read_one = '1.120000 read(4</private/agent.jar>, "JAR", 3) = 3'
+        open_two = '1.140000 openat(AT_FDCWD, "/private/agent.jar", O_RDONLY) = 5</private/agent.jar>'
+        path_stat = ('1.145000 statx(AT_FDCWD, "/private/agent.jar", AT_STATX_SYNC_AS_STAT, '
+                     'STATX_ALL, {stx_mode=S_IFREG|0644, stx_ino=44, stx_size=3, '
+                     'stx_dev_major=0, stx_dev_minor=1}) = 0')
+        def replay(lines):
+            return verify_stable_input({"100": ("\n".join(lines +
+                ['1.200000 +++ exited with 0 +++']) + "\n").encode()},
+                path, identity, "100", b"JAR")
+        with self.assertRaises(Rejected):
+            replay([header, open_one, stat_one, read_one,
+                    '1.130000 close(4</private/agent.jar>) = 0', open_two,
+                    '1.150000 read(5</private/agent.jar>, "BAD", 3) = 3', path_stat])
+        for bad in ('read(4</private/agent.jar>, "JAR", 3) = -1 EIO (Input/output error)',
+                    'read(4</private/agent.jar>, "", 3) = 0'):
+            with self.subTest(bad=bad), self.assertRaises(Unbound):
+                replay([header, open_one, stat_one, '1.120000 ' + bad])
+        with self.assertRaises(Rejected):
+            replay([open_one, stat_one, read_one,
+                    header.replace('1.000000', '1.150000')])
+        self.assertEqual(replay([header, open_one, stat_one,
+                                '1.115000 read(4</private/agent.jar>, "", 3) = -1 EIO (Input/output error)',
+                                read_one])["reads"], 1)
+
+    def test_agent_input_checks_seek_offsets_and_mapping_bounds(self):
+        path = "/private/agent.jar"
+        identity = {"device_major": 0, "device_minor": 1, "inode": 44, "size": 6}
+        lines = [
+            '1.000000 execve("/jdk/bin/java", ["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0) = 0',
+            '1.100000 openat(AT_FDCWD, "/private/agent.jar", O_RDONLY) = 4</private/agent.jar>',
+            '1.110000 fstat(4</private/agent.jar>, {st_mode=S_IFREG|0644, st_size=6, st_dev=makedev(0, 1), st_ino=44}) = 0',
+            '1.120000 lseek(4</private/agent.jar>, 3, SEEK_SET) = 3',
+            '1.130000 read(4</private/agent.jar>, "456", 3) = 3',
+            '1.140000 mmap(NULL, 3, PROT_READ, MAP_SHARED, 4</private/agent.jar>, 0) = 0x1000',
+            '1.200000 +++ exited with 0 +++',
+        ]
+        def replay(rows):
+            return verify_stable_input({"100": ("\n".join(rows) + "\n").encode()},
+                                       path, identity, "100", b"123456")
+        proof = replay(lines)
+        self.assertEqual((proof["read_buffers"], proof["read_only_maps"]), (1, 1))
+        end_seek = lines[:3] + [lines[3].replace('3, SEEK_SET', '-3, SEEK_END')] + lines[4:]
+        self.assertEqual(replay(end_seek)["reads"], 1)
+        contradictory = lines[:3] + [lines[3].replace('= 3', '= 0'),
+                                     lines[4].replace('"456"', '"123"')] + lines[5:]
+        with self.assertRaises(Rejected):
+            replay(contradictory)
+        failed_map = lines[5].replace('1.140000', '1.135000').replace(
+            '= 0x1000', '= -1 EINVAL (Invalid argument)')
+        self.assertEqual(replay(lines[:5] + [failed_map] + lines[5:])["read_only_maps"], 1)
+        with self.assertRaises(Unbound):
+            replay(lines[:3] + [failed_map, lines[-1]])
+        with self.assertRaises(Unbound):
+            replay(lines[:3] + [lines[5], lines[-1]])
+        with self.assertRaises(Unbound):
+            replay(lines[:3] + [
+                '1.115000 lseek(4</private/agent.jar>, 0, SEEK_DATA) = 0'] + lines[3:])
+        for index, changed in ((4, lines[4].replace('"456"', '"BAD"')),
+                               (5, lines[5].replace('MAP_SHARED', 'MAP_PRIVATE|MAP_ANONYMOUS')),
+                               (5, lines[5].replace(', 0)', ', 4096)'))):
+            with self.subTest(changed=changed), self.assertRaises(Rejected):
+                replay(lines[:index] + [changed] + lines[index + 1:])
+
+    def test_agent_input_identity_must_be_in_executed_worker_phase(self):
+        path = "/private/agent.jar"
+        identity = {"device_major": 0, "device_minor": 1, "inode": 44, "size": 3}
+        stat = ('statx(AT_FDCWD, "/private/agent.jar", AT_STATX_SYNC_AS_STAT, '
+                'STATX_ALL, {stx_mode=S_IFREG|0644, stx_ino=44, stx_size=3, '
+                'stx_dev_major=0, stx_dev_minor=1}) = 0')
+        rows = [
+            '1.000000 execve("/jdk/bin/java", ["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0) = 0',
+            '1.100000 openat(AT_FDCWD, "/private/agent.jar", O_RDONLY) = 4</private/agent.jar>',
+            '1.120000 read(4</private/agent.jar>, "JAR", 3) = 3',
+            '1.200000 +++ exited with 0 +++',
+        ]
+        def replay(events):
+            return verify_stable_input({"100": ("\n".join(events) + "\n").encode()},
+                                       path, identity, "100", b"JAR")
+        with self.assertRaises(Unbound):
+            replay(['0.900000 ' + stat, *rows])
+        with self.assertRaises(Rejected):
+            replay([*rows, '1.300000 ' + stat])
+        self.assertEqual(replay(rows[:-1] + ['1.130000 ' + stat, rows[-1]])["reads"], 1)
+
+    def test_agent_input_alias_close_and_reuse(self):
+        path = "/private/agent.jar"
+        identity = {"device_major": 0, "device_minor": 1, "inode": 44, "size": 6}
+        rows = [
+            '1.000000 execve("/jdk/bin/java", ["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0) = 0',
+            '1.100000 openat(AT_FDCWD, "/private/agent.jar", O_RDONLY) = 4</private/agent.jar>',
+            '1.110000 fstat(4</private/agent.jar>, {st_mode=S_IFREG|0644, st_size=6, st_dev=makedev(0, 1), st_ino=44}) = 0',
+            '1.120000 dup(4</private/agent.jar>) = 5</private/agent.jar>',
+            '1.130000 close(4</private/agent.jar>) = 0',
+            '1.140000 read(5</private/agent.jar>, "123", 3) = 3',
+            '1.200000 +++ exited with 0 +++',
+        ]
+        def replay(events):
+            return verify_stable_input({"100": ("\n".join(events) + "\n").encode()},
+                                       path, identity, "100", b"123456")
+        self.assertEqual(replay(rows)["reads"], 1)
+        reused = rows[:5] + [
+            '1.135000 openat(AT_FDCWD, "/other.jar", O_RDONLY) = 5</other.jar>', *rows[5:]]
+        with self.assertRaises(Unbound):
+            replay(reused)
+        parent = rows[:4] + [
+            '1.125000 clone(flags=CLONE_THREAD|CLONE_FILES) = 101',
+            rows[4], rows[-1]]
+        child = ['1.140000 read(5</private/agent.jar>, "123", 3) = 3',
+                 '1.190000 +++ exited with 0 +++']
+        traces = {"100": ("\n".join(parent) + "\n").encode(),
+                  "101": ("\n".join(child) + "\n").encode()}
+        self.assertEqual(verify_stable_input(traces, path, identity, "100", b"123456")["reads"], 1)
+        traces["101"] = traces["101"].replace(b"1.140000 read", b"1.130000 read")
+        with self.assertRaises(Unbound):
+            verify_stable_input(traces, path, identity, "100", b"123456")
 
     def trace(self, read=True):
         calls = [
@@ -344,6 +469,20 @@ class OutputTest(unittest.TestCase):
 
 
 class StartupTest(unittest.TestCase):
+    def test_public_replay_requires_reviewed_loader_relationship(self):
+        from numeric_producer import verify_witness_loaders
+        names = ["portable/NumericProbeMatrixTest", "portable/PortableMatrixTest",
+                 "portable/NumericalRecorder", "org/dyn4j/geometry/Geometry"]
+        definitions = [{"name": name, "loader": "system"} for name in names]
+        loaded = {name: "file:/checked" for name in names}
+        helper = {"dyn4k/witness/NumericClassWitness": "file:/agent.jar"}
+        verify_witness_loaders(definitions, loaded, helper)
+        for index in range(len(names)):
+            changed = deepcopy(definitions)
+            changed[index]["loader"] = "L12345"
+            with self.subTest(name=names[index]), self.assertRaisesRegex(Rejected, "loader"):
+                verify_witness_loaders(changed, loaded, helper)
+
     def test_witness_worker_requires_one_agent_and_guard_flags(self):
         from numeric_producer import verify_startup_log
         def raw(flags):
@@ -377,6 +516,28 @@ class StartupTest(unittest.TestCase):
 
 
 class ArchiveTest(unittest.TestCase):
+    def test_public_source_replay_rejects_changed_committed_observer(self):
+        from numeric_producer import _source, sha, WRAPPER, PORTABLE
+        wrapper = (PORTABLE / "src/jvmTest/kotlin/portable/NumericProbeMatrixTest.kt").read_bytes()
+        observer = (PORTABLE / "class_witness/NumericClassWitness.java").read_bytes()
+        changed = observer.replace(b"return null;", b"return classfileBuffer;")
+        self.assertNotEqual(changed, observer)
+        def archive(java):
+            output = io.BytesIO()
+            with tarfile.open(fileobj=output, mode="w") as stream:
+                for name, value in ((WRAPPER, wrapper),
+                                    ("tools/numerical/portable/class_witness/NumericClassWitness.java", java)):
+                    entry = tarfile.TarInfo(name)
+                    entry.size = len(value)
+                    stream.addfile(entry, io.BytesIO(value))
+            return output.getvalue()
+        good, bad = archive(observer), archive(changed)
+        with patch("actual_arithmetic._source_archive", return_value=good):
+            self.assertEqual(_source({"source.tar": good}, "candidate", sha(good)), good)
+        with patch("actual_arithmetic._source_archive", return_value=bad), \
+             self.assertRaisesRegex(Rejected, "reviewed.*observer|reviewed.*witness"):
+            _source({"source.tar": bad}, "candidate", sha(bad))
+
     def test_sidecar_runtime_must_be_independent_and_match_full_lane(self):
         from numeric_producer import verify_sidecar_identity
         with tempfile.TemporaryDirectory() as directory:

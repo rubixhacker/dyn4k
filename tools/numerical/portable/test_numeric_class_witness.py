@@ -95,7 +95,7 @@ class ClassWitnessTest(unittest.TestCase):
             witness_path.unlink()
             traced = subprocess.run([tracer, "-ff", "-ttt", "-yy", "-e",
                                      "abbrev=!fstat,newfstatat,statx", "-s", "131072",
-                                     "-e", "trace=process,open,openat,openat2,close,read,pread64,"
+                                     "-e", "trace=process,open,openat,openat2,close,read,pread64,lseek,"
                                      "fstat,newfstatat,statx,write,mmap,rename,unlink,truncate",
                                      "-o", str(root / "trace"), *command],
                                     capture_output=True, check=False, timeout=30)
@@ -109,7 +109,8 @@ class ClassWitnessTest(unittest.TestCase):
                         "device_minor": os.minor(status.st_dev),
                         "inode": status.st_ino, "size": status.st_size}
             try:
-                input_proof = verify_stable_input(traces, str(agent), identity, worker)
+                input_proof = verify_stable_input(traces, str(agent), identity, worker,
+                                                  agent.read_bytes())
             except Exception as error:
                 count = sum(str(agent) in line for data in traces.values()
                             for line in data.decode().splitlines())

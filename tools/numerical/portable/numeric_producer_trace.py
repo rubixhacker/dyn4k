@@ -83,28 +83,51 @@ def _buffer(call, vector=False):
     return value, int(match[3]) if match[3] else None
 
 
-def verify_stable_input(traces, path, expected_identity, worker):
+def verify_stable_input(traces, path, expected_identity, worker, jar):
     events = _events(traces, (path,))
     groups = {}
     descriptors = {}
-    observed = set()
     path_identity = False
-    reads = 0
+    worker_started = False
+    worker_finished = False
+    opened = []
     for _, tid, _, call in events:
         groups.setdefault(tid, tid)
         descriptors.setdefault(tid, {})
+        if tid == worker and call.startswith(("execve(", "execveat(")) and call.endswith(" = 0"):
+            worker_started = True
+        if tid == worker and call.startswith(("+++ exited with ", "+++ killed by ")):
+            worker_finished = True
+        if worker_finished and path in call:
+            raise Rejected("agent input access followed worker exit")
         child = re.match(r"(?:clone|clone3|fork|vfork)\(.*\) = ([1-9][0-9]*)$", call)
         if child:
             groups[child[1]] = groups[tid] if "CLONE_THREAD" in call else child[1]
             descriptors[child[1]] = (descriptors[tid] if "CLONE_FILES" in call
                                      else dict(descriptors[tid]))
         opening = re.fullmatch(r'open(?:at|at2)?\((.*?)\) = ' + FD, call)
-        if opening and opening[3] == path:
-            if (('"' + path + '"') not in opening[1] or groups[tid] != worker or
-                    "O_WRONLY" in opening[1] or "O_RDWR" in opening[1] or
-                    "O_CREAT" in opening[1] or "O_TRUNC" in opening[1]):
-                raise Rejected("agent input provider or open mode differs")
-            descriptors[tid][opening[2]] = {"verified": False, "reads": 0}
+        if opening:
+            args, fd, opened_path = opening.groups()
+            descriptors[tid].pop(fd, None)
+            if opened_path == path:
+                if (('"' + path + '"') not in args or groups[tid] != worker or
+                        not worker_started or worker_finished or "O_RDONLY" not in args or
+                        any(flag in args for flag in ("O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC"))):
+                    raise Rejected("agent input provider or open mode differs")
+                item = {"verified": False, "position": 0, "reads": 0, "maps": 0,
+                        "pending_maps": []}
+                descriptors[tid][fd] = item
+                opened.append(item)
+        duplicate = re.fullmatch(r'(?:dup|dup2|dup3|fcntl)\(' + FD + r'(.*?)\) = ' + FD, call)
+        if duplicate:
+            old, old_path, args, new, new_path = duplicate.groups()
+            if not call.startswith("fcntl(") or "F_DUPFD" in args:
+                if old in descriptors[tid]:
+                    if old_path != path or new_path != path:
+                        raise Rejected("agent input alias path differs")
+                    descriptors[tid][new] = descriptors[tid][old]
+                else:
+                    descriptors[tid].pop(new, None)
         if path not in call:
             continue
         statx_path = re.fullmatch(r'statx\(AT_FDCWD(?:<[^>]+>)?, "' +
@@ -114,7 +137,8 @@ def verify_stable_input(traces, path, expected_identity, worker):
             minor = re.search(r'stx_dev_minor=([0-9]+)', call)
             inode = re.search(r'stx_ino=([0-9]+)', call)
             size = re.search(r'stx_size=([0-9]+)', call)
-            if (groups[tid] != worker or not all((major, minor, inode, size)) or
+            if (groups[tid] != worker or not worker_started or worker_finished or
+                    not all((major, minor, inode, size)) or
                     "stx_mode=S_IFREG" not in call):
                 raise Unbound("agent input path identity unavailable")
             actual = {"device_major": int(major[1]), "device_minor": int(minor[1]),
@@ -147,23 +171,94 @@ def verify_stable_input(traces, path, expected_identity, worker):
             if actual != expected_identity:
                 raise Rejected("agent input file identity differs")
             descriptors[tid][identity[1]]["verified"] = True
-            observed.add((tid, identity[1]))
-        transfer = re.match(r'(?:read|pread64|readv|preadv)\(' + FD + r',', call)
-        mapped = re.match(r'mmap\(.*' + FD + r', [0-9]+\) = ', call)
-        descriptor = transfer or mapped
-        if descriptor and descriptor[1] in descriptors[tid]:
-            if groups[tid] != worker:
-                raise Rejected("agent input read occurred outside worker")
-            descriptors[tid][descriptor[1]]["reads"] += 1
-            reads += 1
+        seeking = re.match(r'lseek\(' + FD + r',', call)
+        if seeking and seeking[2] == path:
+            if seeking[1] not in descriptors[tid]:
+                raise Unbound("agent input seek descriptor is unavailable")
+            seek = re.fullmatch(r'lseek\(' + FD +
+                                r', (-?[0-9]+), SEEK_(SET|CUR|END)\) = (-?[0-9]+)', call)
+            if seek is None:
+                if not re.search(r'\) = -[0-9]+(?: |$)', call):
+                    raise Unbound("agent input seek mode or offset is unsupported")
+            elif int(seek[5]) >= 0:
+                current = descriptors[tid][seek[1]]["position"]
+                requested = int(seek[3])
+                expected = (requested if seek[4] == "SET" else
+                            current + requested if seek[4] == "CUR" else
+                            len(jar) + requested)
+                if int(seek[5]) != expected:
+                    raise Rejected("agent input seek result differs")
+                descriptors[tid][seek[1]]["position"] = expected
+        transfer = re.match(r'(read|pread64|readv|preadv)\(' + FD + r',', call)
+        if transfer and transfer[3] == path:
+            operation, fd, observed_path = transfer.groups()
+            item = descriptors[tid].get(fd)
+            if item is None or observed_path != path:
+                raise Unbound("agent input read descriptor is unavailable")
+            if groups[tid] != worker or not worker_started:
+                continue
+            result = re.search(r'\) = (-?[0-9]+)(?: |$)', call)
+            if result is None:
+                raise Unbound("agent input read result is unavailable")
+            count = int(result[1])
+            if count > 0:
+                complete = re.fullmatch(r'(?:read|pread64|readv|preadv)\(' + FD +
+                                        r', (.*)\) = ([0-9]+)', call)
+                if complete is None:
+                    raise Unbound("agent input returned bytes are unavailable")
+                value, offset = _buffer(complete[3], operation.endswith("v"))
+                if len(value) != count:
+                    raise Unbound("agent input returned byte count differs")
+                position = offset if operation.startswith("pread") else item["position"]
+                if position is None or position < 0 or jar[position:position + count] != value:
+                    raise Rejected("agent input returned bytes or offset differ")
+                item["reads"] += 1
+                if not operation.startswith("pread"):
+                    item["position"] += count
+        mapped = re.match(r'mmap\(.*' + FD + r',', call)
+        if mapped and mapped[2] == path:
+            item = descriptors[tid].get(mapped[1])
+            if item is None or mapped[2] != path:
+                raise Unbound("agent input mapping descriptor is unavailable")
+            if groups[tid] != worker or not worker_started:
+                continue
+            if re.search(r'\) = -[0-9]+(?: |$)', call):
+                continue
+            mapping = re.fullmatch(r'mmap\([^,]+, ([0-9]+), (PROT_[A-Z|]+), '
+                                   r'(MAP_[A-Z_|]+), ' + FD + r', (0x[0-9a-f]+|[0-9]+)\) = 0x[0-9a-f]+',
+                                   call)
+            if mapping is None:
+                raise Unbound("agent input mapping proof is unsupported")
+            length, protection, flags, offset = mapping[1], mapping[2], mapping[3], mapping[6]
+            start = int(offset, 0)
+            if (protection != "PROT_READ" or flags != "MAP_SHARED" or
+                    int(length) <= 0 or start < 0 or start + int(length) > len(jar)):
+                raise Rejected("agent input mapping mode or bounds differ")
+            item["pending_maps"].append((start, int(length)))
         closed = re.fullmatch(r'close\(' + FD + r'\) = 0', call)
         if closed:
-            item = descriptors[tid].get(closed[1])
             descriptors[tid].pop(closed[1], None)
-    if not (observed or path_identity) or not reads:
+        if call.startswith("close_range(") and descriptors[tid]:
+            raise Unbound("agent input close range is unsupported")
+    if len(jar) != expected_identity["size"]:
+        raise Rejected("agent input rebuilt JAR size differs")
+    if not worker_started or not worker_finished:
+        raise Unbound("agent input worker execution or completion is unavailable")
+    for item in opened:
+        if item["reads"] or item["pending_maps"]:
+            if not (item["verified"] or path_identity):
+                raise Unbound("agent input open identity is unavailable")
+            if item["pending_maps"] and not item["reads"]:
+                raise Unbound("agent input mapping lacks checked read bytes")
+            item["maps"] = len(item["pending_maps"])
+    read_buffers = sum(item["reads"] for item in opened)
+    read_only_maps = sum(item["maps"] for item in opened)
+    if not read_buffers:
         raise Unbound("agent input read and stable identity unavailable")
-    return {"reads": reads, "identity": expected_identity,
-            "identity_mode": "descriptor" if observed else "path"}
+    return {"reads": read_buffers, "read_buffers": read_buffers,
+            "read_only_maps": read_only_maps, "identity": expected_identity,
+            "identity_mode": "descriptor" if all(item["verified"] for item in opened
+                                                  if item["reads"] or item["maps"]) else "path"}
 
 
 def verify_transport(traces, destination, mirror, response_path=None, response=None, *,
