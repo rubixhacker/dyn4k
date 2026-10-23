@@ -316,6 +316,15 @@ P2_EXECUTABLE_LOCAL_DEPENDENCIES = {
     "tools/numerical/portable/build.gradle.kts":
         "fac77dd6282f67dd8593885a73f880d0bab6156eda93391a28cdbafb800fbdc3",
 }
+PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES = {
+    **{f"tools/numerical/portable/{name}": P2_ROTATION_PREMISE_PRODUCERS[name]
+       for name in ("capture_actual.py", "actual_arithmetic.py", "rotation_oracle.py")},
+    **{path: P2_EXECUTABLE_LOCAL_DEPENDENCIES[path] for path in (
+        "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py",
+        "tools/numerical/portable/boolean_rotation_jdi/source_guard.py",
+        "tools/numerical/portable/boolean_rotation_jdi/witness.py",
+        "tools/numerical/portable/boolean_rotation_jdi/loaded_code.py")},
+}
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS = {
     **APPROVED_P2_PRODUCERS,
@@ -822,7 +831,10 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
         if hashlib.sha256(committed).hexdigest() != expected:
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
-    for relative, expected in APPROVED_PROSPECTIVE_EXECUTABLE_SHARED.items():
+    executable_dependencies = (PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES
+                               if executable_window else {})
+    for relative, expected in (APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
+                               executable_dependencies).items():
         local = Path(__file__).resolve().parents[2] / relative
         try:
             local_sha256 = hashlib.sha256(local.read_bytes()).hexdigest()
@@ -850,7 +862,8 @@ def _prospective_checker_binding(repository, candidate_sha):
         raise ValueError(f"prospective policy/checker blob differs: {catalog}")
     return ({f"{source_dir}/{name}": value for name, value in approved.items()} |
             {catalog: catalog_sha256} |
-            (APPROVED_PROSPECTIVE_EXECUTABLE_SHARED if executable_window else {}))
+            (APPROVED_PROSPECTIVE_EXECUTABLE_SHARED if executable_window else {}) |
+            executable_dependencies)
 
 
 def _missing_numerical_subgates(repository):
@@ -1446,12 +1459,12 @@ PORTABLE_REPLAY_MODULES = (
     "receipt", "compare", "numeric_producer", "numeric_producer_trace",
     "numeric_class_witness", "pulley_jdi_v2", "pulley_jdi_v1",
     "pulley_jdi_inputs_v2", "run", "frozen_weld_pulley", "exact_consistency",
-    "physical")
-P2_LOCAL_REPLAY_MODULES = (
-    "actual_arithmetic", "baseline_capture", "rotation_oracle",
+    "physical", "capture_actual", "actual_arithmetic", "rotation_oracle",
     "boolean_rotation_jdi", "boolean_rotation_jdi.jdi_bridge",
     "boolean_rotation_jdi.source_guard", "boolean_rotation_jdi.witness",
     "boolean_rotation_jdi.loaded_code")
+P2_LOCAL_REPLAY_MODULES = (
+    "baseline_capture",)
 
 
 def _verify_p2_host(root, bridge, sidecar, repository, candidate_sha,
