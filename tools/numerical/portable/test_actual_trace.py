@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 import zipfile
 
-from actual_trace import checked_projection, TraceRejected
+from actual_trace import checked_projection, TraceRejected, trace_exposes_environment
 from boolean_rotation_jdi.jdi_bridge import verify_jdi_file_writes
 
 
@@ -16,6 +16,19 @@ def archived(rows):
 
 
 class ActualTraceTest(unittest.TestCase):
+    def test_privacy_decoder_rejects_escaped_pairs_and_keys(self):
+        for token in (b'DYN4K_CAPTURE_ENV_SENTINEL\\x3dportable-capture-check',
+                      b'OLLAMA_\\x41PI_KEY'):
+            raw = b'1.000001 write(4, "' + token + b'", 55) = 55\n'
+            with self.subTest(token=token):
+                self.assertTrue(trace_exposes_environment(raw))
+        self.assertFalse(trace_exposes_environment(
+            b'1.000001 write(4, "portable-capture-check", 22) = 22\n'))
+        with self.assertRaisesRegex(TraceRejected, "exposed the environment"):
+            checked_projection(archived({"trace.41":
+                b'1.000001 write(4, "OLLAMA_\\x41PI_KEY", 14) = 14\n'
+                b'1.000002 +++ exited with 0 +++\n'}))
+
     def test_rich_trace_is_checked_before_legacy_projection(self):
         trace = (
             b'1.000001 execve("/jdk/java", ["java"], 0x7f) = 0\n'

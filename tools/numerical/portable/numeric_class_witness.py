@@ -22,7 +22,8 @@ def _sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
-def build_agent(source: bytes, jdk: Path, output: Path, scratch: Path) -> bytes:
+def build_agent(source: bytes, jdk: Path, output: Path, scratch: Path,
+                environment=None) -> bytes:
     jdk, output, scratch = Path(jdk), Path(output), Path(scratch)
     if scratch.exists() or not source or not (jdk / "bin/javac").is_file():
         raise Rejected("class witness compiler input differs")
@@ -31,7 +32,7 @@ def build_agent(source: bytes, jdk: Path, output: Path, scratch: Path) -> bytes:
     source_path.write_bytes(source)
     classes = scratch / "classes"
     classes.mkdir()
-    environment = os.environ.copy()
+    environment = os.environ.copy() if environment is None else dict(environment)
     environment.pop("OLLAMA_API_KEY", None)
     process = subprocess.run([str(jdk / "bin/javac"), "--release", "8", "-encoding", "UTF-8",
                               "-d", str(classes), str(source_path)], capture_output=True,

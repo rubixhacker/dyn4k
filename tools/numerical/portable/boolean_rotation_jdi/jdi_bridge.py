@@ -155,7 +155,7 @@ def _require_jdk21_javac(javac, environment):
         raise EvidenceRejected("selected JDI compiler is not JDK 21")
 
 
-def compile_helper(source, temporary_root):
+def compile_helper(source, temporary_root, environment=None, jdk_home=None):
     temporary_root = Path(temporary_root).resolve()
     if (not temporary_root.is_relative_to(Path.home().resolve()) or
             type(source) is not bytes or not source):
@@ -166,11 +166,12 @@ def compile_helper(source, temporary_root):
     classes.mkdir()
     java = workspace / "RotationJdiProbe.java"
     java.write_bytes(source)
-    jdk = Path(os.environ.get("DYN4K_JDI_JDK_HOME", str(JDK21)))
-    environment = os.environ.copy()
+    jdk = Path(jdk_home if jdk_home is not None else
+               os.environ.get("DYN4K_JDI_JDK_HOME", str(JDK21)))
+    environment = os.environ.copy() if environment is None else dict(environment)
     environment.pop("OLLAMA_API_KEY", None)
     environment["JAVA_HOME"] = str(jdk)
-    supplied_tmp = Path(os.environ.get("TMPDIR", ""))
+    supplied_tmp = Path(environment.get("TMPDIR", ""))
     selected_tmp = supplied_tmp if supplied_tmp.is_absolute() and (
         supplied_tmp.resolve().is_relative_to(Path.home().resolve()) and
         len(os.fsencode(str(supplied_tmp))) <= 40) else temporary_root

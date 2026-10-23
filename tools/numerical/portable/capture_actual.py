@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import pwd
 import re
 import shutil
 import signal
@@ -21,7 +22,9 @@ from actual_arithmetic import (CaptureRejected, assess_focused_wheel,
                                _FOCUSED_BOOLEAN_METHOD,
                                _FOCUSED_BOOLEAN_REFERENCE_SHA256)
 from boolean_rotation_jdi import jdi_bridge
-from actual_trace import checked_projection, rich_trace_arguments
+from actual_trace import (ENVIRONMENT_SENTINEL as TRACE_ENVIRONMENT_SENTINEL,
+                          TraceRejected, checked_projection, rich_trace_arguments,
+                          trace_exposes_environment)
 from numeric_class_witness import build_agent
 from numeric_producer import captured_file_identity
 
@@ -31,7 +34,7 @@ PORTABLE = Path(__file__).resolve().parent
 JDK21 = Path("/tmp/dyn4k-tools/jdk21")
 STAGED_JAR = (ROOT / "build/staging-repository/io/github/rubixhacker/"
               "dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar")
-ENVIRONMENT_SENTINEL = "DYN4K_CAPTURE_ENV_SENTINEL=portable-capture-check"
+ENVIRONMENT_SENTINEL = TRACE_ENVIRONMENT_SENTINEL.decode("ascii")
 GENERATED_ROOTS = (
     ".gradle", ".kotlin", "build",
     "dyn4k-core/.gradle", "dyn4k-core/.kotlin", "dyn4k-core/build",
@@ -62,6 +65,25 @@ def trace_syscalls(method, helper=False, version6=False):
     if method in ("captureWheelActive", "captureRotationPremises"):
         return "trace=execve,clone,clone3,write,writev,sendto,sendmsg"
     return "trace=execve"
+
+
+def gradle_test_command(tracer, target_class, method, class_load_pattern,
+                        *, jdi_port=None, agent=None, witness_path=None,
+                        mirror_path=None):
+    command = [*tracer, str(ROOT / "gradlew"),
+               "jvmTest", "--tests", f"{target_class}.{method}",
+               f"-PportableRepository={ROOT / 'build/staging-repository'}",
+               f"-PportableWorkerClassLoadLog={class_load_pattern}",
+               "--rerun-tasks", "--no-daemon", "--console=plain", "--offline", "--info",
+               "-Pkotlin.compiler.execution.strategy=in-process"]
+    if jdi_port is not None:
+        command.extend((f"-PportableBooleanJdiPort={jdi_port}",
+                        f"-PportableBooleanJdiMethod={method}",
+                        f"-PportableClassWitnessAgent={agent}",
+                        f"-PportableClassWitnessOutput=boolean:{witness_path}",
+                        f"-PportableBooleanMirror={mirror_path}",
+                        "--max-workers=1"))
+    return command
 
 
 def executed_process_lines(pid, raw, method, version6=False):
@@ -211,7 +233,36 @@ def run_bounded_process(command, cwd, environment, output_path, budget, active,
     return process.returncode
 
 
-def child_environment():
+def child_environment(focused=False):
+    if focused:
+        home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+        name = os.environ.get("TMPDIR")
+        if name is None:
+            raise CaptureRejected("focused temporary root is not short and private")
+        temporary = Path(name)
+        try:
+            valid = (temporary.is_absolute() and len(os.fsencode(name)) <= 40 and
+                     temporary.resolve().is_relative_to(home) and
+                     temporary.stat().st_uid == os.getuid() and
+                     temporary.stat().st_mode & 0o777 == 0o700)
+        except OSError:
+            valid = False
+        if not valid:
+            raise CaptureRejected("focused temporary root is not short and private")
+        identity = pwd.getpwuid(os.getuid()).pw_name
+        environment = {"TMPDIR": name, "JAVA_HOME": str(JDK21),
+                       "ANDROID_HOME": "/var/home/stewart/Android/Sdk",
+                       "GRADLE_USER_HOME": str(home / ".gradle"),
+                       "PATH": f"{JDK21 / 'bin'}:/usr/local/bin:/usr/bin:/bin",
+                       "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
+                       "USER": identity, "LOGNAME": identity,
+                       "PYTHONDONTWRITEBYTECODE": "1",
+                       "DYN4K_CAPTURE_ENV_SENTINEL":
+                           ENVIRONMENT_SENTINEL.split("=", 1)[1]}
+        for key in ("HOME", "CODEX_HOME"):
+            if key in os.environ:
+                environment[key] = os.environ[key]
+        return environment
     environment = os.environ.copy()
     environment.pop("OLLAMA_API_KEY", None)
     return environment
@@ -237,9 +288,16 @@ def reject_environment_trace(trace_path):
 def private_trace_or_reject(trace_path, private, budget, scope):
     trace_path = Path(trace_path)
     raw = trace_path.read_bytes()
-    if ENVIRONMENT_SENTINEL.encode() not in raw and b"OLLAMA_API_KEY" not in raw:
-        return raw
+    try:
+        if not trace_exposes_environment(raw):
+            return raw
+    except TraceRejected:
+        reason = "trace privacy decoding failed"
+    else:
+        reason = None
     error = CaptureRejected(f"{scope} trace exposed the environment")
+    if reason is not None:
+        error.add_note(reason)
     if private is not None:
         destination = Path(private) / trace_path.name
         try:
@@ -252,24 +310,26 @@ def private_trace_or_reject(trace_path, private, budget, scope):
     raise error
 
 
-def git(*args):
+def git(*args, focused=False):
     return subprocess.run(("git", *args), cwd=ROOT, check=True,
-                          capture_output=True, env=child_environment()).stdout
+                          capture_output=True, env=child_environment(focused)).stdout
 
 
-def clean_source():
+def clean_source(focused=False):
     if git("--no-replace-objects", "status", "--porcelain",
-           "--untracked-files=all").strip():
+           "--untracked-files=all", focused=focused).strip():
         raise CaptureRejected("target source is not clean")
     ignored = git("--no-replace-objects", "ls-files", "--others", "--ignored",
-                  "--exclude-standard", "--full-name", "-z").split(b"\0")
+                  "--exclude-standard", "--full-name", "-z",
+                  focused=focused).split(b"\0")
     for name in ignored:
         if not name:
             continue
         relative = os.fsdecode(name)
         if not any(relative.startswith(root + "/") for root in GENERATED_ROOTS):
             raise CaptureRejected("ignored file outside exact generated roots")
-    return git("--no-replace-objects", "rev-parse", "HEAD").decode().strip()
+    return git("--no-replace-objects", "rev-parse", "HEAD",
+               focused=focused).decode().strip()
 
 
 def archive_file_names(method, worker_log, worker_argument_log=None, version6=False):
@@ -341,7 +401,10 @@ def verify_archive_inventory(output, method, worker_log, worker_argument_log=Non
                     raise CaptureRejected("archive member differs")
                 for name in archive.namelist():
                     raw = archive.read(name)
-                    if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
+                    if ((version6 and archive_name.endswith("traces.zip") and
+                         trace_exposes_environment(raw)) or
+                            ENVIRONMENT_SENTINEL.encode() in raw or
+                            b"OLLAMA_API_KEY" in raw):
                         raise CaptureRejected("archive exposed the environment")
         except (OSError, zipfile.BadZipFile, RuntimeError, KeyError) as error:
             raise CaptureRejected("worker write archive could not be scanned") from error
@@ -359,7 +422,10 @@ def run_capture(method, output, reference_case=None):
         raise CaptureRejected("focused JDI output root is not home-backed")
     if output.exists():
         raise CaptureRejected("capture output already exists")
-    commit = clean_source()
+    focused = method == _FOCUSED_BOOLEAN_METHOD
+    if focused:
+        child_environment(focused=True)
+    commit = clean_source(focused=focused)
     temporary_root = Path(os.environ.get("TMPDIR", Path.home() / ".cache/dyn4k-capture")).resolve()
     if not temporary_root.is_relative_to(Path.home().resolve()):
         raise CaptureRejected("capture temporary root is not home-backed")
@@ -416,7 +482,7 @@ def _run_capture(method, output, reference_case, commit, temporary,
             raise CaptureRejected("focused Boolean indexed reference differs")
         (output / "reference-case.jsonl").write_bytes(reference)
         check_budget()
-    environment = child_environment()
+    environment = child_environment(focused=method == _FOCUSED_BOOLEAN_METHOD)
     if method == _FOCUSED_BOOLEAN_METHOD:
         for name in ("_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "JAVA_OPTS",
                      "GRADLE_OPTS", "ORG_GRADLE_JAVA_HOME"):
@@ -425,7 +491,7 @@ def _run_capture(method, output, reference_case, commit, temporary,
     private_tmpdir = Path(os.environ["TMPDIR"]) if method == _FOCUSED_BOOLEAN_METHOD else temporary
     environment["TMPDIR"] = str(private_tmpdir)
     environment["JAVA_TOOL_OPTIONS"] = f"-Djava.io.tmpdir={private_tmpdir}"
-    environment["DYN4K_CAPTURE_ENV_SENTINEL"] = "portable-capture-check"
+    environment["DYN4K_CAPTURE_ENV_SENTINEL"] = ENVIRONMENT_SENTINEL.split("=", 1)[1]
     if not (JDK21 / "bin/java").is_file():
         raise CaptureRejected("pinned JDK21 is unavailable")
     source_command = ("git", "--no-replace-objects", "-c", "core.autocrlf=false",
@@ -492,7 +558,7 @@ def _run_capture(method, output, reference_case, commit, temporary,
         helper_argument_path = temporary / "jdi-helper-arguments.log"
         jdi_classes, helper_zip = jdi_bridge.compile_helper(
             (PORTABLE / "boolean_rotation_jdi/RotationJdiProbe.java").read_bytes(),
-            temporary)
+            temporary, environment=environment, jdk_home=JDK21)
         (output / "jdi-helper-classes.zip").write_bytes(helper_zip)
         with zipfile.ZipFile(io.BytesIO(helper_zip)) as compiled_helper:
             helper_class_before = {name: captured_file_identity(jdi_classes / name)
@@ -501,7 +567,8 @@ def _run_capture(method, output, reference_case, commit, temporary,
         witness_path = output / "class-witness.log"
         mirror_path = output / "mirror.log"
         build_agent((PORTABLE / "class_witness/NumericClassWitness.java").read_bytes(),
-                    JDK21, agent, temporary / "boolean-agent-compile")
+                    JDK21, agent, temporary / "boolean-agent-compile",
+                    environment=environment)
         agent_before = captured_file_identity(agent)
         check_budget()
     if method in ("captureWheelActive", "captureRotationPremises",
@@ -517,19 +584,10 @@ def _run_capture(method, output, reference_case, commit, temporary,
     target_class = target_test_class(method, version6)
     xml = (PORTABLE / "build/test-results/jvmTest" /
            f"TEST-{target_class}.xml")
-    command = [*tracer, str(ROOT / "gradlew"),
-               "jvmTest", "--tests", f"{target_class}.{method}",
-               f"-PportableRepository={ROOT / 'build/staging-repository'}",
-               f"-PportableWorkerClassLoadLog={class_load_pattern}",
-               "--rerun-tasks", "--no-daemon", "--console=plain", "--offline", "--info",
-               "-Pkotlin.compiler.execution.strategy=in-process"]
-    if method == _FOCUSED_BOOLEAN_METHOD:
-        command.extend((f"-PportableBooleanJdiPort={jdi_port}",
-                        f"-PportableBooleanJdiMethod={method}"))
-        command.extend((f"-PportableClassWitnessAgent={agent}",
-                        f"-PportableClassWitnessOutput=boolean:{witness_path}",
-                        f"-PportableBooleanMirror={mirror_path}",
-                        "--max-workers=1"))
+    command = gradle_test_command(
+        tracer, target_class, method, class_load_pattern,
+        jdi_port=jdi_port, agent=agent, witness_path=witness_path,
+        mirror_path=mirror_path)
     worker_arguments = output / "worker-classpath.txt"
     response_before = None
     response_source = None

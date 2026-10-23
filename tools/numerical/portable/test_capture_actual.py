@@ -12,10 +12,89 @@ from unittest.mock import patch
 
 import capture_actual
 import baseline_capture
+import numeric_class_witness
 from actual_arithmetic import CaptureRejected
 
 
 class CaptureSourceGuardTest(unittest.TestCase):
+    def test_focused_child_environment_excludes_inherited_options_and_secrets(self):
+        owned_tmp = os.environ["TMPDIR"]
+        seed = {"TMPDIR": owned_tmp, "HOME": "", "CODEX_HOME": "",
+                "OLLAMA_API_KEY": "fake-test-secret", "FAKE_SECRET": "fake-test-secret",
+                "JAVA_TOOL_OPTIONS": "-Dfake.secret=fake-test-secret",
+                "GRADLE_OPTS": "-Dfake.secret=fake-test-secret",
+                "HTTPS_PROXY": "http://fake.invalid"}
+        with patch.dict(os.environ, seed, clear=True):
+            focused = capture_actual.child_environment(focused=True)
+            legacy = capture_actual.child_environment()
+        self.assertEqual(focused["HOME"], "")
+        self.assertEqual(focused["CODEX_HOME"], "")
+        self.assertEqual(focused["TMPDIR"], owned_tmp)
+        self.assertEqual(focused["JAVA_HOME"], str(capture_actual.JDK21))
+        self.assertEqual(focused["ANDROID_HOME"], "/var/home/stewart/Android/Sdk")
+        self.assertTrue(focused["GRADLE_USER_HOME"].endswith("/.gradle"))
+        self.assertEqual(focused["DYN4K_CAPTURE_ENV_SENTINEL"],
+                         "portable-capture-check")
+        self.assertTrue(focused["PATH"].startswith(str(capture_actual.JDK21 / "bin")))
+        for name in ("OLLAMA_API_KEY", "FAKE_SECRET", "JAVA_TOOL_OPTIONS",
+                     "GRADLE_OPTS", "HTTPS_PROXY"):
+            self.assertNotIn(name, focused)
+        self.assertIn("FAKE_SECRET", legacy)
+        self.assertNotIn("OLLAMA_API_KEY", legacy)
+        with patch.dict(os.environ, {"TMPDIR": owned_tmp}, clear=True):
+            absent = capture_actual.child_environment(focused=True)
+        self.assertNotIn("HOME", absent)
+        self.assertNotIn("CODEX_HOME", absent)
+
+    def test_focused_compilers_receive_selected_environment(self):
+        jdk = self.root / "jdk"
+        (jdk / "bin").mkdir(parents=True)
+        (jdk / "bin/javac").write_bytes(b"compiler")
+        environment = capture_actual.child_environment(focused=True)
+        environment["JAVA_HOME"] = str(jdk)
+        environment.pop("OLLAMA_API_KEY", None)
+        calls = []
+
+        def compiled(command, **kwargs):
+            calls.append(kwargs["env"])
+            classes = Path(command[command.index("-d") + 1])
+            if "--release" in command:
+                output = classes / "dyn4k/witness/NumericClassWitness.class"
+                output.parent.mkdir(parents=True)
+            else:
+                output = classes / "RotationJdiProbe.class"
+            output.write_bytes(b"compiled")
+            return SimpleNamespace(returncode=0)
+
+        with patch.object(numeric_class_witness.subprocess, "run",
+                          side_effect=compiled):
+            numeric_class_witness.build_agent(b"class NumericClassWitness {}", jdk,
+                self.root / "agent.jar", self.root / "agent-compile",
+                environment=environment)
+        with patch.object(capture_actual.jdi_bridge, "_require_jdk21_javac"), \
+                patch.object(capture_actual.jdi_bridge.subprocess, "run",
+                             side_effect=compiled):
+            capture_actual.jdi_bridge.compile_helper(
+                b"class RotationJdiProbe {}", self.root,
+                environment=environment, jdk_home=jdk)
+        self.assertEqual(len(calls), 2)
+        for selected in calls:
+            self.assertEqual(selected, environment)
+            self.assertNotIn("OLLAMA_API_KEY", selected)
+
+    def test_small_gradle_launch_uses_capture_argument_constructor(self):
+        command = capture_actual.gradle_test_command(
+            ["strace", *capture_actual.trace_syscalls(
+                "captureRevoluteLimitsFalse", version6=True), "-o", "trace"],
+            "portable.RotationCaptureConcurrencyTest",
+            "engineExposesNoMutableDiagnosticListener", "class-load-%p.log")
+        self.assertEqual(command[0], "strace")
+        self.assertIn("--tests", command)
+        self.assertIn("portable.RotationCaptureConcurrencyTest."
+                      "engineExposesNoMutableDiagnosticListener", command)
+        self.assertIn("--offline", command)
+        self.assertNotIn("-PportableBooleanJdiPort=None", command)
+
     def test_jvm_fixture_preserves_approved_baseline_source(self):
         self.assertEqual(baseline_capture.fixture_source_sha256(),
                          "dd104a7e018b9d0bd77c9af14e929699d68f29fa4ac8179a5bd7d98bdc87d9ce")
@@ -214,6 +293,19 @@ class CaptureSourceGuardTest(unittest.TestCase):
             capture_actual.private_trace_or_reject(trace, private, None,
                                                    "JDI helper")
         self.assertFalse(trace.exists())
+        self.assertEqual((private / trace.name).stat().st_mode & 0o777, 0o600)
+
+    def test_escaped_private_trace_is_rejected_and_counted(self):
+        private = self.root / "private"
+        private.mkdir(mode=0o700)
+        trace = self.root / "worker-write-trace.42"
+        raw = (b'1.000001 write(4, "DYN4K_CAPTURE_ENV_SENTINEL\\x3dportable-capture-check", 55) = 55\n')
+        trace.write_bytes(raw)
+        budget = capture_actual.CaptureBudget(self.root / "eligible", self.root,
+                                             (), private=private)
+        with self.assertRaisesRegex(CaptureRejected, "exposed the environment"):
+            capture_actual.private_trace_or_reject(trace, private, budget, "worker")
+        self.assertEqual((private / trace.name).read_bytes(), raw)
         self.assertEqual((private / trace.name).stat().st_mode & 0o777, 0o600)
 
     def test_private_trace_rejection_preserves_error_on_move_failure(self):

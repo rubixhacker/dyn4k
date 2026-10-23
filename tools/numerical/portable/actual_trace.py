@@ -6,7 +6,7 @@ import zipfile
 from decimal import Decimal, InvalidOperation
 
 from numeric_producer import SYSCALLS, trace_arguments
-from numeric_producer_trace import _events
+from numeric_producer_trace import _events, quoted
 from receipt import Rejected
 
 
@@ -26,6 +26,34 @@ ALLOWED = set(SYSCALLS.split(",")) - {"process"} | set(SOCKET_SYSCALLS) | set(PR
 FD_TOKEN = re.compile(r"([0-9]+)<([^<>\r\n]+)>")
 CALL = re.compile(r"([a-z][a-z0-9_]*)\(")
 MAX_READER_BYTES = 128 * 1024 * 1024
+ENVIRONMENT_SENTINEL = b"DYN4K_CAPTURE_ENV_SENTINEL=portable-capture-check"
+FORBIDDEN_ENVIRONMENT_KEY = b"OLLAMA_API_KEY"
+QUOTED_BYTES = re.compile(rb'"(?:[^"\\]|\\.)*"')
+
+
+def trace_exposes_environment(raw):
+    if type(raw) is not bytes:
+        raise TraceRejected("trace privacy input differs")
+    if ENVIRONMENT_SENTINEL in raw or FORBIDDEN_ENVIRONMENT_KEY in raw:
+        return True
+    if b"\\" not in raw:
+        return False
+    for line in raw.splitlines():
+        if b"\\" not in line:
+            continue
+        fragments = []
+        for token in QUOTED_BYTES.finditer(line):
+            try:
+                decoded = quoted(token.group().decode("ascii", errors="backslashreplace"))
+            except Rejected as error:
+                raise TraceRejected("trace privacy string is malformed") from error
+            if ENVIRONMENT_SENTINEL in decoded or FORBIDDEN_ENVIRONMENT_KEY in decoded:
+                return True
+            fragments.append(decoded)
+        combined = b"".join(fragments)
+        if ENVIRONMENT_SENTINEL in combined or FORBIDDEN_ENVIRONMENT_KEY in combined:
+            return True
+    return False
 
 
 def normalize_rich_traces(traces):
@@ -344,6 +372,8 @@ def checked_projection(raw, protected=(), *, strict_outputs=()):
                     any(stat.S_ISLNK(member.external_attr >> 16) for member in members)):
                 raise TraceRejected("rich trace member inventory differs")
             traces = {name.removeprefix("trace."): archive.read(name) for name in names}
+        if any(trace_exposes_environment(data) for data in traces.values()):
+            raise TraceRejected("rich trace exposed the environment")
         normalized, aborted = normalize_rich_traces(traces)
         events = _events(normalized, tuple(protected))
         _validate_calls(events, set(protected), set(strict_outputs))

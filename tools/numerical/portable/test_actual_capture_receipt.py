@@ -14,7 +14,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import actual_arithmetic as actual
-from actual_capture_receipt import verify_boolean_startup
+from actual_capture_receipt import (FILE_NAMES, FocusedRejected,
+                                    load_version6_archive, verify_boolean_startup)
 from capture_actual import ENVIRONMENT_SENTINEL, reject_environment_trace
 from actual_arithmetic import (CaptureRejected, _AUDITED_ENGINE_CLASSES,
                                _FIXTURE_CLASSES, _ROOT, _STAGED_JAR,
@@ -998,6 +999,20 @@ class ClasspathProviderTest(unittest.TestCase):
 
 
 class EnvironmentSentinelTest(unittest.TestCase):
+    def test_public_v6_loader_rejects_escaped_private_trace_bytes(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory)
+            for name in FILE_NAMES.values():
+                (root / name).write_bytes(b"safe")
+            (root / "worker-class-load-42.log").write_bytes(b"safe")
+            (root / "worker-arguments-42.log").write_bytes(b"safe")
+            (root / "receipt.json").write_text(
+                json.dumps({"schema": "portable-arithmetic-capture-receipt/6"}))
+            (root / "gradle.log").write_bytes(
+                b'1.000001 write(4, "OLLAMA_\\x41PI_KEY", 14) = 14\n')
+            with self.assertRaisesRegex(FocusedRejected, "exposed the environment"):
+                load_version6_archive(root)
+
     def test_normal_execve_trace_passes(self):
         with tempfile.TemporaryDirectory() as directory:
             trace = Path(directory) / "execve.log"

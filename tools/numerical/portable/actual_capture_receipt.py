@@ -14,7 +14,8 @@ from actual_arithmetic import (CaptureRejected, _FOCUSED_BOOLEAN_CASE,
                                _FOCUSED_BOOLEAN_METHOD, _PINNED_JAVA,
                                _STAGED_JAR, _unique_object, make_capture_receipt)
 from actual_trace import (TraceRejected, _validate_calls, checked_projection,
-                          normalize_rich_traces, rich_trace_arguments)
+                          normalize_rich_traces, rich_trace_arguments,
+                          trace_exposes_environment)
 from boolean_rotation_jdi import (jdi_bridge, source_guard as jdi_source_guard,
                                   witness as jdi_witness)
 from numeric_class_witness import build_agent, read_witness
@@ -112,7 +113,15 @@ def load_version6_archive(root):
             name for name in variable if name.startswith("worker-class-load-"))).read_bytes()
         files["worker_arguments"] = (root / next(
             name for name in variable if name.startswith("worker-arguments-"))).read_bytes()
-        receipt = decoded((root / "receipt.json").read_bytes())
+        receipt_bytes = (root / "receipt.json").read_bytes()
+        for key, raw in files.items():
+            if key not in {"source", "worker_write_traces", "jdi_helper_traces",
+                           "all_process_traces"}:
+                require(not trace_exposes_environment(raw),
+                        "focused archive exposed the environment")
+        require(not trace_exposes_environment(receipt_bytes),
+                "focused receipt exposed the environment")
+        receipt = decoded(receipt_bytes)
         require(type(receipt) is dict and receipt.get("schema") == SCHEMA,
                 "focused receipt version differs")
         return receipt, files
@@ -645,6 +654,8 @@ def make_version6_receipt(files, commit, runtime_executable=_PINNED_JAVA):
         "class_load_path", "argument_path", "helper_argument_path")} | \
         set(class_paths) | set(output_paths)
     raw_traces = _trace_map(files["all_process_traces"])
+    require(not any(trace_exposes_environment(raw) for raw in raw_traces.values()),
+            "complete process traces exposed the environment")
     traces, aborted = normalize_rich_traces(raw_traces)
     events = _events(traces, protected)
     _validate_calls(events, protected)
