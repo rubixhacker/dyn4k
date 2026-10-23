@@ -912,11 +912,11 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("observer failure suppressed", "python3 -B -m unittest -v test_numeric_class_witness",
              "python3 -B -m unittest -v test_numeric_class_witness || true"),
             ("explicit JDK input omitted", "DYN4K_CLASS_WITNESS_JDK_HOME=\"$JAVA_HOME_21_X64\" ", ""),
-            ("HOME reset to scratch", "          export TMPDIR=\"$evidence/tmp\"\n",
-             "          export TMPDIR=\"$evidence/tmp\"\n"
-             "          export HOME=\"$evidence/home\"\n"),
-            ("scratch home directory created", "          mkdir -p \"$evidence/tmp\"\n",
-             "          mkdir -p \"$evidence/home\" \"$evidence/tmp\"\n"),
+            ("HOME reset to scratch", "          export TMPDIR=\"$HOME/d4tmp\"\n",
+             "          export TMPDIR=\"$HOME/d4tmp\"\n"
+             "          export HOME=\"$RUNNER_TEMP/home\"\n"),
+            ("scratch home directory created", "          mkdir -p \"$TMPDIR\"\n",
+             "          mkdir -p \"$RUNNER_TEMP/home\" \"$TMPDIR\"\n"),
             ("Java temp directory override omitted",
              "          export JAVA_TOOL_OPTIONS=\"-XX:-UsePerfData -Djava.io.tmpdir=$TMPDIR\"\n",
              "          export JAVA_TOOL_OPTIONS=\"-XX:-UsePerfData\"\n"),
