@@ -84,6 +84,7 @@ PROSPECTIVE_CHECKER_REVISION = "82e8a46448d4d6107e69de28cfa9df183292baf3"
 PROSPECTIVE_REPRESENTED_CHECKER_REVISION = "2bd0d70f36b521949641a5404bdb3fa5890f61d3"
 PROSPECTIVE_NUMERIC_PROBE_CHECKER_REVISION = "375812a97de8cb3e439fc2a204e029de1a6de338"
 PROSPECTIVE_INVENTORY_FIX_CHECKER_REVISION = "df316d8900f850d22f9c933f6aac8250b1e10ed1"
+PROSPECTIVE_EXECUTABLE_CHECKER_REVISION = "fbaee1b16de2ff0633e2981e69cf59044b61c745"
 PROSPECTIVE_BRIDGE_CHECKER_REVISION = "6040b40265975b9091db430d79269cb5ea3d9868"
 PROSPECTIVE_ASSEMBLED_CHECKER_REVISION = "b22ea2ddeb6c68242e688e9c9aa3214c4a8b495b"
 APPROVED_PROSPECTIVE_CHECKERS = {
@@ -109,7 +110,15 @@ APPROVED_PROSPECTIVE_INVENTORY_FIX_CHECKERS = {
     **APPROVED_PROSPECTIVE_NUMERIC_PROBE_CHECKERS,
     "prospective_compare.py": "ff7a428ff4fc39ad7ef1e77b605c1ffd39ef138bdc62599e416a4a0b9e80ae83",
 }
-APPROVED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_INVENTORY_FIX_CHECKERS)
+APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS = {
+    **APPROVED_PROSPECTIVE_INVENTORY_FIX_CHECKERS,
+    "prospective_compare.py": "cdbbb5c4c06648136a65e8a5b2a85d0a25402334e7f119eb311c71190a5bac4e",
+    "numeric_producer.py": "3c05fc393199b8857e9b1d0eef671dcccf7f5dd349ce220d2bcc0fce79fa15e3",
+    "numeric_producer_trace.py": "709624e776157e9fd01ba8f71390439cd00ee65f7bc0c752014d9e7aa20bb968",
+    "numeric_class_witness.py": "8d54d52552a998e7b14668e1c16d169526b5208ef0201c50671af1204cd8b826",
+    "class_witness/NumericClassWitness.java": "493d57d0635c6c5b519b6009250df0d82d0d97e0b065aa80160fe053b20d8983",
+}
+APPROVED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS)
 APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS = {
     **APPROVED_PROSPECTIVE_CHECKERS,
     "prospective_compare.py": "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f",
@@ -285,6 +294,11 @@ P2_JDK21_JDI_DEPENDENCIES = {
     **P2_CORRECTED_JDI_DEPENDENCIES,
     "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
         "bffde8be5655e2a47dea2bd97734d15fc4d46112d032ac432b646c17ab3d611b",
+}
+P2_EXECUTABLE_LOCAL_DEPENDENCIES = {
+    **P2_JDK21_JDI_DEPENDENCIES,
+    "tools/numerical/portable/build.gradle.kts":
+        "fac77dd6282f67dd8593885a73f880d0bab6156eda93391a28cdbafb800fbdc3",
 }
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS = {
@@ -745,7 +759,9 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError("prospective checker revision ancestry is unavailable")
         return checked.returncode == 0
 
-    if descends_from(PROSPECTIVE_INVENTORY_FIX_CHECKER_REVISION):
+    if descends_from(PROSPECTIVE_EXECUTABLE_CHECKER_REVISION):
+        approved = APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS
+    elif descends_from(PROSPECTIVE_INVENTORY_FIX_CHECKER_REVISION):
         approved = APPROVED_PROSPECTIVE_INVENTORY_FIX_CHECKERS
     elif descends_from(PROSPECTIVE_NUMERIC_PROBE_CHECKER_REVISION):
         approved = APPROVED_PROSPECTIVE_NUMERIC_PROBE_CHECKERS
@@ -771,11 +787,21 @@ def _prospective_checker_binding(repository, candidate_sha):
     for filename, current in APPROVED_PROSPECTIVE_LOCAL_CHECKERS.items():
         relative = f"{source_dir}/{filename}"
         local = Path(__file__).resolve().parents[2] / relative
-        committed = subprocess.check_output(
-            ["git", "--no-replace-objects", "-C", str(repository), "show",
-             f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
-        if (hashlib.sha256(local.read_bytes()).hexdigest() != current
-                or hashlib.sha256(committed).hexdigest() != approved[filename]):
+        try:
+            local_sha256 = hashlib.sha256(local.read_bytes()).hexdigest()
+        except OSError as error:
+            raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
+        if local_sha256 != current:
+            raise ValueError(f"prospective policy/checker blob differs: {relative}")
+    for filename, expected in approved.items():
+        relative = f"{source_dir}/{filename}"
+        try:
+            committed = subprocess.check_output(
+                ["git", "--no-replace-objects", "-C", str(repository), "show",
+                 f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as error:
+            raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
+        if hashlib.sha256(committed).hexdigest() != expected:
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
     catalog = f"{source_dir}/prospective_policy_catalog.json"
     committed = subprocess.check_output(
@@ -921,28 +947,32 @@ def _p2_producer_binding(repository, candidate_sha):
                 or hashlib.sha256(committed).hexdigest() != approved[name]):
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     if jdk21_jdi:
-        _source_binding(repository, candidate_sha, P2_JDK21_JDI_DEPENDENCIES,
-                        "JDK 21 JDI producer")
+        dependencies = (P2_EXECUTABLE_LOCAL_DEPENDENCIES
+                        if descends_from(PROSPECTIVE_EXECUTABLE_CHECKER_REVISION)
+                        else P2_JDK21_JDI_DEPENDENCIES)
+        _source_binding(repository, candidate_sha, dependencies,
+                        "JDK 21 JDI producer",
+                        local_approved=P2_EXECUTABLE_LOCAL_DEPENDENCIES)
     elif corrected_jdi:
         _source_binding(repository, candidate_sha, P2_CORRECTED_JDI_DEPENDENCIES,
                         "corrected JDI producer",
-                        local_approved=P2_JDK21_JDI_DEPENDENCIES)
+                        local_approved=P2_EXECUTABLE_LOCAL_DEPENDENCIES)
     elif bounded_jdi:
         _source_binding(repository, candidate_sha, P2_BOUNDED_JDI_DEPENDENCIES,
                         "bounded JDI producer",
-                        local_approved=P2_JDK21_JDI_DEPENDENCIES)
+                        local_approved=P2_EXECUTABLE_LOCAL_DEPENDENCIES)
     elif rotation_premise:
         _source_binding(repository, candidate_sha, P2_ROTATION_PREMISE_DEPENDENCIES,
                         "rotation premise producer",
-                        local_approved=P2_JDK21_JDI_DEPENDENCIES)
+                        local_approved=P2_EXECUTABLE_LOCAL_DEPENDENCIES)
     elif boolean_jdi_final:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_FINAL_DEPENDENCIES,
                         "Boolean JDI final producer",
-                        local_approved=P2_JDK21_JDI_DEPENDENCIES)
+                        local_approved=P2_EXECUTABLE_LOCAL_DEPENDENCIES)
     elif boolean_jdi:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_DEPENDENCIES,
                         "Boolean JDI producer",
-                        local_approved=P2_JDK21_JDI_DEPENDENCIES)
+                        local_approved=P2_EXECUTABLE_LOCAL_DEPENDENCIES)
     return dict(approved)
 
 
@@ -1387,7 +1417,8 @@ def _verify_p2_host(root, bridge, sidecar, repository, candidate_sha,
     previous = sys.dont_write_bytecode
     modules = ("prospective_compare", "actual_arithmetic", "baseline_capture", "run",
                "cases", "orthogonality", "reference_diagnostic", "receipt",
-               "rotation_oracle")
+               "rotation_oracle", "numeric_producer", "numeric_producer_trace",
+               "numeric_class_witness")
     prior = {name: sys.modules.pop(name, None) for name in modules}
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(portable))
@@ -1523,11 +1554,13 @@ def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
                 raise ValueError(f"prospective exported checker differs: {relative}")
         package_path = str(Path(temporary) / portable)
         names = ("prospective_compare", "cases", "orthogonality", "reference_diagnostic",
-                 "receipt", "compare")
+                 "receipt", "compare", "numeric_producer", "numeric_producer_trace",
+                 "numeric_class_witness")
         prior = {name: sys.modules.get(name) for name in names}
         previous_bytecode = sys.dont_write_bytecode
         for name in names:
             sys.modules.pop(name, None)
+        sys.dont_write_bytecode = True
         sys.path.insert(0, package_path)
         try:
             import prospective_compare
