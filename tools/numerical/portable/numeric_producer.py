@@ -244,33 +244,42 @@ def verify_call_edge(raw):
 def inventory(directory):
     directory = Path(directory)
     require(directory.is_dir() and not directory.is_symlink(), "raw directory is absent or linked")
-    result, total = {}, 0
+    result, ordinary, total = {}, 0, 0
     for path in sorted(directory.rglob("*")):
         require(not path.is_symlink(), "raw evidence is linked")
         if path.is_dir():
             continue
         require(path.is_file(), "raw evidence is not regular")
         size = path.stat().st_size
-        total += size
         relative = path.relative_to(directory).as_posix()
-        limit = MAX_TRACE_MEMBER if re.fullmatch(r"process/trace\.[1-9][0-9]*", relative) else MAX_MEMBER
-        require(size <= limit and total <= MAX_CAPTURE_TOTAL and len(result) < MAX_MEMBERS,
-                "raw evidence budget exceeded")
+        ordinary, total = _raw_budget(relative, size, ordinary, total)
+        require(len(result) < MAX_MEMBERS, "raw evidence budget exceeded")
         result[path.relative_to(directory).as_posix()] = {"size": size, "sha256": digest(path)}
     return result
+
+
+def _raw_budget(name, size, ordinary, total):
+    trace = re.fullmatch(r"process/trace\.[1-9][0-9]*", name) is not None
+    ordinary += 0 if trace else size
+    total += size
+    require(size <= (MAX_TRACE_MEMBER if trace else MAX_MEMBER) and
+            ordinary <= MAX_TOTAL and total <= MAX_CAPTURE_TOTAL,
+            "raw evidence budget exceeded")
+    return ordinary, total
 
 
 def load_raw(directory, expected):
     require(isinstance(expected, dict) and expected and len(expected) <= MAX_MEMBERS,
             "raw inventory is malformed")
+    ordinary, total = 0, 0
     for name, entry in expected.items():
         require(type(name) is str and not Path(name).is_absolute() and
                 ".." not in Path(name).parts and isinstance(entry, dict) and
                 set(entry) == {"size", "sha256"} and type(entry["size"]) is int and
-                0 <= entry["size"] <= (MAX_TRACE_MEMBER if re.fullmatch(
-                    r"process/trace\.[1-9][0-9]*", name) else MAX_MEMBER) and
+                0 <= entry["size"] and
                 re.fullmatch(r"[0-9a-f]{64}", str(entry["sha256"])),
                 "raw member declaration is malformed")
+        ordinary, total = _raw_budget(name, entry["size"], ordinary, total)
     require(inventory(directory) == expected, "raw inventory or digest differs")
     require({path.relative_to(directory).as_posix() for path in Path(directory).rglob("*")
              if path.is_dir()} == {"process"}, "raw directory set differs")

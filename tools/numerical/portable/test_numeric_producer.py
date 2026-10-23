@@ -437,6 +437,31 @@ class ArchiveTest(unittest.TestCase):
                 with self.assertRaisesRegex(Rejected, "raw evidence budget exceeded"):
                     inventory(root)
 
+    def test_ordinary_raw_total_keeps_512_mib_limit(self):
+        from numeric_producer import inventory, load_raw, MAX_TOTAL, MAX_TRACE_MEMBER
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index in range(5):
+                with (root / f"ordinary-{index}.log").open("wb") as stream:
+                    stream.truncate(120 * 1024 * 1024)
+            with patch("numeric_producer.digest", return_value="0" * 64), \
+                    self.assertRaisesRegex(Rejected, "raw evidence budget exceeded"):
+                inventory(root)
+            declared = {f"ordinary-{index}.log": {"size": 120 * 1024 * 1024,
+                                                   "sha256": "0" * 64} for index in range(5)}
+            with patch("numeric_producer.inventory", side_effect=AssertionError("raw read began")), \
+                    self.assertRaisesRegex(Rejected, "raw evidence budget exceeded"):
+                load_raw(root, declared)
+            for index in range(5):
+                (root / f"ordinary-{index}.log").unlink()
+            process = root / "process"
+            process.mkdir()
+            for index in range(3):
+                with (process / f"trace.{index + 1}").open("wb") as stream:
+                    stream.truncate(MAX_TRACE_MEMBER)
+            with patch("numeric_producer.digest", return_value="0" * 64):
+                self.assertGreater(sum(item["size"] for item in inventory(root).values()), MAX_TOTAL)
+
 
 class CompiledPayloadTest(unittest.TestCase):
     def compiled(self, calls=1):
