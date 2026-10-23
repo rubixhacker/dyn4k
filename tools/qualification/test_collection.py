@@ -1,4 +1,5 @@
 import hashlib
+import importlib.util
 import json
 import re
 import subprocess
@@ -11,10 +12,13 @@ from unittest import mock
 
 import collection
 import independent_gates
-from tools.compatibility import test_qualification_workflow as workflow_contract
 
 
 ROOT = Path(__file__).resolve().parents[2]
+workflow_contract_spec = importlib.util.spec_from_file_location(
+    "qualification_workflow_contract", ROOT / "tools/compatibility/test_qualification_workflow.py")
+workflow_contract = importlib.util.module_from_spec(workflow_contract_spec)
+workflow_contract_spec.loader.exec_module(workflow_contract)
 HEAD = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
                                text=True).strip()
 
