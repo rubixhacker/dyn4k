@@ -330,6 +330,11 @@ def node_observation_problems(repository, evidence_root, binding, started, finis
     if binding.get("schema") != 2:
         return ["unknown common corpus binding schema"]
     repository, evidence_root = Path(repository).resolve(), Path(evidence_root).resolve()
+    recorded_root = binding.get("capture_root")
+    if (not isinstance(recorded_root, str) or not os.path.isabs(recorded_root)
+            or os.path.normpath(recorded_root) != recorded_root):
+        return ["Node capture source root is absent or invalid"]
+    capture_root = Path(recorded_root)
     observations = binding.get("node_observations")
     if not isinstance(observations, list):
         return ["actual Node process observations are absent"]
@@ -347,7 +352,6 @@ def node_observation_problems(repository, evidence_root, binding, started, finis
     if not directory.is_dir() or directory.is_symlink():
         return [*problems, "Node observation raw directory is absent or linked"]
     seen_groups, seen_processes, expected_files = set(), set(), set()
-    observed_root = None
     for row in observations:
         try:
             group_id = row["group_id"]
@@ -365,10 +369,8 @@ def node_observation_problems(repository, evidence_root, binding, started, finis
                 raise ValueError("stale Node process observation")
             if row["task"] != node_task(group_id):
                 raise ValueError("Node task differs from group")
-            capture_root = node_capture_root(row)
-            if observed_root is not None and capture_root != observed_root:
-                raise ValueError("Node test processes used different capture roots")
-            observed_root = capture_root
+            if node_capture_root(row) != capture_root:
+                raise ValueError("Node command differs from recorded capture root")
             selection = node_group_for_argv(capture_root, row["argv"])
             if selection is None or selection[0] != group_id:
                 raise ValueError("Node command differs from selected group")
@@ -1520,7 +1522,8 @@ def main():
             for path in paths} for group_id, paths in report_paths.items()}
         for row in node_observations:
             row["report_sha256"] = canonical_digest(bound_reports[row["group_id"]])
-        binding = {"schema": 2, "candidate_sha": args.candidate_sha,
+        binding = {"schema": 2, "capture_root": str(repository),
+                   "candidate_sha": args.candidate_sha,
                    "manifest_sha256": canonical_digest(manifest),
                    "source_tree_sha256": manifest["source_tree_sha256"],
                    "started_ns": started, "finished_ns": finished,

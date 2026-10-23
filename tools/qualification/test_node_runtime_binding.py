@@ -177,6 +177,7 @@ class LiveNodeObservationTest(unittest.TestCase):
                 row["report_sha256"] = full_corpus.canonical_digest(
                     reports[row["group_id"]])
             binding = {"schema": 2, "observation_platform": "linux",
+                       "capture_root": str(repository.resolve()),
                        "node_probe_sha256": full_corpus.digest(probe.read_bytes()),
                        "node_observation_dir": str(observations),
                        "gradle_pid": parent_pid, "gradle_start_ticks": parent_start,
@@ -205,12 +206,16 @@ class LiveNodeObservationTest(unittest.TestCase):
                                 shutil.copy2(repository / relative, target)
                 self.assertEqual([], full_corpus.node_observation_problems(
                     candidate, evidence, binding, started_ns, finished_ns))
+                wrong_recorded_root = copy.deepcopy(binding)
+                wrong_recorded_root["capture_root"] = str(candidate)
+                self.assertTrue(full_corpus.node_observation_problems(
+                    candidate, evidence, wrong_recorded_root, started_ns, finished_ns))
                 wrong_root = copy.deepcopy(binding)
                 wasm_row = next(row for row in wrong_root["node_observations"]
                                 if row["group_id"] == "core-wasmJsNode")
                 wasm_row["argv"] = [part.replace(str(repository), str(candidate))
                                     for part in wasm_row["argv"]]
-                self.assertTrue(any("different capture roots" in problem for problem in
+                self.assertTrue(any("recorded capture root" in problem for problem in
                                     full_corpus.node_observation_problems(
                                         candidate, evidence, wrong_root,
                                         started_ns, finished_ns)))
@@ -236,6 +241,7 @@ class LiveNodeObservationTest(unittest.TestCase):
                 self.assertTrue(full_corpus.node_observation_problems(
                     candidate, evidence, binding, started_ns, finished_ns))
             mutants = (
+                ("missing capture root", lambda value: value.pop("capture_root")),
                 ("missing", lambda value: value["node_observations"].pop()),
                 ("duplicate", lambda value: value["node_observations"].append(
                     copy.deepcopy(value["node_observations"][0]))),
