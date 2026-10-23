@@ -32,7 +32,10 @@ class CandidateJvmP2Control(unittest.TestCase):
         (cls.root / f"{name}.stdout.raw").write_text(result.stdout)
         (cls.root / f"{name}.stderr.raw").write_text(result.stderr)
         (cls.root / f"{name}.result.json").write_text(json.dumps(
-            {"command": command, "exit_code": result.returncode}, indent=2) + "\n")
+            {"command": command, "exit_code": result.returncode,
+             "environment": {key: cls.env.get(key) for key in
+                             ("JAVA_HOME", "TMPDIR", "GRADLE_OPTS", "JAVA_TOOL_OPTIONS",
+                              "ANDROID_HOME", "ANDROID_SDK_ROOT")}}, indent=2) + "\n")
         if result.returncode:
             raise AssertionError(f"{name} failed: {result.stderr[-2000:]}")
 
@@ -46,9 +49,16 @@ class CandidateJvmP2Control(unittest.TestCase):
                      "_JAVA_OPTIONS", "CLASSPATH", "ANDROID_HOME",
                      "ANDROID_SDK_ROOT", "GRADLE_OPTS"):
             cls.env.pop(name, None)
+        selected_sdk = os.environ.get("DYN4K_ANDROID_SDK_PATH")
+        if selected_sdk is not None:
+            sdk = Path(selected_sdk).resolve(strict=True)
+            if not (sdk / "platforms").is_dir() or not (sdk / "build-tools").is_dir():
+                raise AssertionError(f"selected Android SDK is incomplete: {sdk}")
+            cls.env.update(ANDROID_HOME=str(sdk), ANDROID_SDK_ROOT=str(sdk))
         cls.env.update(JAVA_HOME=str(JDK), TMPDIR=str(tmp),
                        PATH=f"{JDK / 'bin'}:{os.environ['PATH']}",
-                       GRADLE_OPTS=f"-Djava.io.tmpdir={tmp}",
+                       GRADLE_OPTS=(f"-Djava.io.tmpdir={tmp} "
+                                    "-Dorg.gradle.workers.max=1"),
                        JAVA_TOOL_OPTIONS=f"-XX:-UsePerfData -Djava.io.tmpdir={tmp}")
         classes = cls.root / "classes"
         cls.prepare_empty_directory(classes)
@@ -59,12 +69,12 @@ class CandidateJvmP2Control(unittest.TestCase):
         cls.harness = cls.root / "sustained-harness.jar"
         cls.build("harness-jar", [str(JDK / "bin/jar"), "--create", "--file",
                                   str(cls.harness), "-C", str(classes), "."])
-        cls.build("stage", [str(GRADLE), "--offline", "--no-daemon",
+        cls.build("stage", [str(GRADLE), "--offline", "--no-daemon", "--max-workers=1",
                             ":dyn4k-core:publishJvmPublicationToStagingRepository",
                             ":dyn4k:publishJvmPublicationToStagingRepository",
                             ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
                             ":dyn4k:publishKotlinMultiplatformPublicationToStagingRepository"])
-        cls.build("consumer", [str(GRADLE), "--offline", "--no-daemon", "-p",
+        cls.build("consumer", [str(GRADLE), "--offline", "--no-daemon", "--max-workers=1", "-p",
                                "consumers/performance", "-I",
                                str(SOURCE / "direct.init.gradle"),
                                f"-PsustainedHarnessJar={cls.harness}",
@@ -88,7 +98,8 @@ class CandidateJvmP2Control(unittest.TestCase):
         files = {name: folder / name for name in
                  ("provider.json", "clock-origin.json", "warmup-clock.csv",
                   "memory-v2.jsonl", "allocation-v2.jsonl", "plateau-v2.jsonl",
-                  "steps.csv", "stderr.raw", "process-result.json")}
+                  "steps.csv", "stdout.raw", "stderr.raw", "command.json",
+                  "process-result.json")}
         nonce = f"p2-{route}-{mode}{'-disabled' if disabled_gc else ''}"
         env = self.env.copy()
         env.update(DYN4K_PROVIDER_JSON=str(files["provider.json"]),
@@ -118,7 +129,10 @@ class CandidateJvmP2Control(unittest.TestCase):
         files["command.json"].write_text(json.dumps(command, indent=2) + "\n")
         files["process-result.json"].write_text(json.dumps(
             {"command": command, "exit_code": result.returncode,
-             "nonce": nonce, "source_commit": env["DYN4K_SOURCE_COMMIT"]}, indent=2) + "\n")
+             "nonce": nonce, "source_commit": env["DYN4K_SOURCE_COMMIT"],
+             "environment": {key: env.get(key) for key in
+                             ("JAVA_HOME", "TMPDIR", "JAVA_TOOL_OPTIONS",
+                              "ANDROID_HOME", "ANDROID_SDK_ROOT")}}, indent=2) + "\n")
         return result, files, nonce
 
     def test_control_root_rejects_unrelated_nonempty_directory(self):

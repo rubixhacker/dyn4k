@@ -153,7 +153,8 @@ class SustainedJvmMemoryTest(unittest.TestCase):
         prepare_empty_directory(folder)
         outputs = {name: folder / name for name in
                    ("provider.json", "clock-origin.json", "warmup-clock.csv", "memory-v2.jsonl",
-                    "allocation-v2.jsonl", "plateau-v2.jsonl", "steps.csv", "stderr.raw",
+                    "allocation-v2.jsonl", "plateau-v2.jsonl", "steps.csv", "stdout.raw",
+                    "stderr.raw", "command.json",
                     "process-result.json")}
         env = os.environ.copy()
         for key in ("OLLAMA_API_KEY", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS",

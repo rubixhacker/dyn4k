@@ -18,6 +18,38 @@ SOURCE = Path(__file__).with_name("reference_study_producer.py")
 JDK = Path("/tmp/dyn4k-tools/jdk21")
 GRADLE = Path("/tmp/dyn4k-tools/gradle-9.5.0/bin/gradle")
 BASELINE = Path("/tmp/dyn4k-performance-dyn4j-6.0.0.jar")
+HISTORICAL_ARCHIVE_ENV = "DYN4K_HISTORICAL_REFERENCE_ARCHIVE"
+DEFAULT_HISTORICAL_ARCHIVE = Path(
+    "dyn4k-evidence/session-control/reference-study-real-producer-34914323/archive")
+
+
+def historical_protocol_path(environment, home):
+    selected_archive = environment.get(HISTORICAL_ARCHIVE_ENV)
+    archive = (Path(selected_archive).expanduser() if selected_archive is not None else
+               home / DEFAULT_HISTORICAL_ARCHIVE)
+    protocol_path = archive / "protocol.json"
+    if protocol_path.is_file():
+        return protocol_path
+    if selected_archive is not None:
+        raise FileNotFoundError(f"selected historical archive has no protocol.json: {protocol_path}")
+    return None
+
+
+class HistoricalArchiveSelectionTest(unittest.TestCase):
+    def test_explicit_archive_is_selected_and_missing_selection_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            self.assertIsNone(historical_protocol_path({}, home))
+            archive = home / "selected"
+            archive.mkdir()
+            protocol = archive / "protocol.json"
+            protocol.write_text("{}\n")
+            self.assertEqual(protocol,
+                             historical_protocol_path(
+                                 {HISTORICAL_ARCHIVE_ENV: str(archive)}, home))
+            protocol.unlink()
+            with self.assertRaisesRegex(FileNotFoundError, "selected historical archive"):
+                historical_protocol_path({HISTORICAL_ARCHIVE_ENV: str(archive)}, home)
 
 
 class ReferenceStudyProducerTest(unittest.TestCase):
@@ -225,8 +257,11 @@ class ReferenceStudyProducerTest(unittest.TestCase):
     def test_historical_349_context_hash_rejected_without_mutation(self):
         from reference_study import load_unique_json, validate_protocol
 
-        historical = Path.home() / "dyn4k-evidence/session-control/reference-study-real-producer-34914323/archive"
-        protocol_path = historical / "protocol.json"
+        protocol_path = historical_protocol_path(os.environ, Path.home())
+        if protocol_path is None:
+            self.skipTest(
+                f"historical archive unavailable: {Path.home() / DEFAULT_HISTORICAL_ARCHIVE / 'protocol.json'}")
+        historical = protocol_path.parent
         before = hashlib.sha256(protocol_path.read_bytes()).hexdigest()
         self.assertEqual(before,
                          "1c51d8c517d85a1a8c9dabfffd9fb30b043655378a04f9fa1e7f4a6f8f7ce60a")
