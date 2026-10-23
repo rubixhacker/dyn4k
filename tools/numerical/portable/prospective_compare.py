@@ -1,6 +1,7 @@
 import hashlib
 import json
 import math
+import os
 import re
 import xml.etree.ElementTree as ET
 from copy import deepcopy
@@ -933,7 +934,7 @@ def _numeric_sidecar_schema(lane):
     if (not receipt_path.is_file() or receipt_path.is_symlink() or
             receipt_path.stat().st_size > 1024 * 1024):
         raise Rejected("numeric probe receipt is not a bounded regular file")
-    from numeric_producer import decode
+    from numeric_producer import MAX_MEMBERS, decode
     receipt = decode(receipt_path.read_bytes())
     schema = receipt.get("schema") if isinstance(receipt, dict) else None
     if schema == "portable-binary64-probe-receipt/1":
@@ -943,13 +944,35 @@ def _numeric_sidecar_schema(lane):
         if lane.name != "jvm" or not raw_path.is_dir() or raw_path.is_symlink():
             raise Rejected("numeric probe schema 2 directory differs")
         files = receipt.get("files")
-        entries = list(raw_path.rglob("*"))
-        if not isinstance(files, dict) or any(path.is_symlink() or not (
-                path.is_file() or path.is_dir()) for path in entries):
+        if (not isinstance(files, dict) or len(files) > MAX_MEMBERS or
+                any(type(name) is not str for name in files)):
             raise Rejected("numeric probe raw sidecar data is invalid")
-        actual = {path.relative_to(raw_path).as_posix() for path in entries
-                  if path.is_file()}
-        if actual != set(files):
+        actual_files, actual_dirs = set(), set()
+        pending = [raw_path]
+        members = 0
+        while pending:
+            with os.scandir(pending.pop()) as entries:
+                for entry in entries:
+                    members += 1
+                    if members > MAX_MEMBERS + 1:
+                        raise Rejected("numeric probe raw sidecar member budget exceeded")
+                    if entry.is_symlink():
+                        raise Rejected("numeric probe raw sidecar data is invalid")
+                    path = Path(entry.path)
+                    name = path.relative_to(raw_path).as_posix()
+                    if entry.is_dir(follow_symlinks=False):
+                        if name != "process":
+                            raise Rejected("numeric probe raw sidecar directory differs")
+                        actual_dirs.add(name)
+                        pending.append(path)
+                    elif entry.is_file(follow_symlinks=False):
+                        if len(actual_files) >= MAX_MEMBERS:
+                            raise Rejected("numeric probe raw sidecar member budget exceeded")
+                        actual_files.add(name)
+                    else:
+                        raise Rejected("numeric probe raw sidecar data is invalid")
+        expected_dirs = {"process"} if any(name.startswith("process/") for name in files) else set()
+        if actual_files != set(files) or actual_dirs != expected_dirs:
             raise Rejected("numeric probe raw sidecar data differs from receipt")
     else:
         raise Rejected("numeric probe receipt schema differs")
@@ -977,12 +1000,13 @@ def verify_candidate_inventory(lane, expected_ids, hosts):
         if path.name not in {"receipt.json", "numeric-probe-receipt.json"}:
             raise Rejected("candidate receipt set differs")
     for producer in root.iterdir():
-        if producer != lane and producer.is_dir() and (
+        if producer.name not in hosts and producer.is_dir() and (
                 (producer / "numeric-probe").exists() or
                 (producer / "numeric-probe").is_symlink()):
-            if producer.name not in hosts:
-                raise Rejected("numeric probe has an undeclared producer")
-            _numeric_sidecar_schema(producer)
+            raise Rejected("numeric probe has an undeclared producer")
+    for host in hosts:
+        if host != lane.name:
+            _numeric_sidecar_schema(root / host)
 
 
 def verify_arithmetic_captures(root, lane, commit, source_sha256, artifact_sha256):

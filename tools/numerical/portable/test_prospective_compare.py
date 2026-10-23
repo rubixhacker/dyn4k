@@ -409,6 +409,72 @@ class ProspectiveComparisonTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
             verify_candidate_inventory(lane, {"one"}, {"jvm"})
 
+    def test_declared_sibling_receipt_requires_its_raw_directory(self):
+        lane = self.root / "linux-x64"
+        (lane / "cases").mkdir(parents=True)
+        (lane / "cases" / "one.jsonl").write_text("case\n")
+        (lane / "receipt.json").write_text("{}\n")
+        sibling = self.root / "jvm"
+        sibling.mkdir()
+        receipt = sibling / "numeric-probe-receipt.json"
+        receipt.write_text(json.dumps({"schema": "portable-binary64-probe-receipt/1"}))
+        verify_candidate_inventory(lane, {"one"}, {"linux-x64", "jvm"})
+        receipt.write_text(json.dumps({"schema": "portable-binary64-probe-receipt/2",
+                                       "files": {}}))
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_candidate_inventory(lane, {"one"}, {"linux-x64", "jvm"})
+
+    def test_numeric_sidecar_inventory_rejects_extra_empty_directory(self):
+        lane = self.root / "jvm"
+        (lane / "cases").mkdir(parents=True)
+        (lane / "cases" / "one.jsonl").write_text("case\n")
+        (lane / "receipt.json").write_text("{}\n")
+        (lane / "numeric-probe-receipt.json").write_text(json.dumps({
+            "schema": "portable-binary64-probe-receipt/2", "files": {}}))
+        sidecar = lane / "numeric-probe"
+        sidecar.mkdir()
+        verify_candidate_inventory(lane, {"one"}, {"jvm"})
+        (sidecar / "extra").mkdir()
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_candidate_inventory(lane, {"one"}, {"jvm"})
+        (sidecar / "extra").rmdir()
+        process = sidecar / "process"
+        process.mkdir()
+        trace = process / "trace.1"
+        trace.write_bytes(b"trace")
+        (lane / "numeric-probe-receipt.json").write_text(json.dumps({
+            "schema": "portable-binary64-probe-receipt/2",
+            "files": {"process/trace.1": {"size": 5, "sha256": digest(trace)}}}))
+        verify_candidate_inventory(lane, {"one"}, {"jvm"})
+        (process / "extra").mkdir()
+        with self.assertRaisesRegex(Exception, "numeric.*probe|sidecar"):
+            verify_candidate_inventory(lane, {"one"}, {"jvm"})
+
+    def test_numeric_sidecar_inventory_limits_members_during_walk(self):
+        from numeric_producer import MAX_MEMBERS
+
+        lane = self.root / "jvm"
+        (lane / "cases").mkdir(parents=True)
+        (lane / "cases" / "one.jsonl").write_text("case\n")
+        (lane / "receipt.json").write_text("{}\n")
+        (lane / "numeric-probe-receipt.json").write_text(json.dumps({
+            "schema": "portable-binary64-probe-receipt/2", "files": {}}))
+        sidecar = lane / "numeric-probe"
+        sidecar.mkdir()
+        for index in range(MAX_MEMBERS + 1):
+            (sidecar / f"extra-{index}").touch()
+        original_iterdir = Path.iterdir
+
+        def bounded_iterdir(path):
+            if path == sidecar:
+                raise AssertionError("materialized directory entries")
+            return original_iterdir(path)
+
+        with patch.object(Path, "rglob", side_effect=AssertionError("unbounded walk")), \
+                patch.object(Path, "iterdir", bounded_iterdir):
+            with self.assertRaisesRegex(Exception, "numeric.*budget"):
+                verify_candidate_inventory(lane, {"one"}, {"jvm"})
+
     def numeric_probe_fixture(self):
         lane = self.root / "jvm"
         (lane / "xml").mkdir(parents=True)
