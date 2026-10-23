@@ -1276,7 +1276,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     independent_gates._p2_producer_binding(ROOT, current)
 
     def test_output_provenance_window_binds_complete_source_and_rejects_partial_wrapper(self):
-        revision = independent_gates.OUTPUT_REVIEW_REMEDY_SOURCE_REVISION
+        revision = independent_gates.SHARED_WRITER_SOURCE_REVISION
         checker = independent_gates._prospective_checker_binding(ROOT, revision)
         producer = independent_gates._p2_producer_binding(ROOT, revision)
         self.assertEqual(producer,
@@ -1298,7 +1298,8 @@ class IndependentGateSeamTests(unittest.TestCase):
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
         for incomplete in (independent_gates.FAILED_OUTPUT_WRAPPER_SOURCE_REVISION,
                            independent_gates.OUTPUT_PROVENANCE_SOURCE_REVISION,
-                           "ccd7188bd78a5e2667219d9338bc323d25fac839"):
+                           "ccd7188bd78a5e2667219d9338bc323d25fac839",
+                           independent_gates.OUTPUT_REVIEW_REMEDY_SOURCE_REVISION):
             with self.subTest(incomplete=incomplete):
                 with self.assertRaisesRegex(ValueError, "incomplete output source"):
                     independent_gates._prospective_checker_binding(ROOT, incomplete)
