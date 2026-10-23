@@ -21,6 +21,8 @@ else:
 JDK21 = Path("/tmp/dyn4k-tools/jdk21")
 JSPAWNHELPER = JDK21 / "lib/jspawnhelper"
 JSPAWNHELPER_SHA256 = "e3101d3a580c9ae6e973acbf2e861855e93ebceb0bbd8e5fa3ddf6abbf6fd63d"
+GRADLE_FORK_OPTION = ("-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8 "
+                      "-Djdk.lang.Process.launchMechanism=FORK")
 BODY_METHOD = "integratePosition$lambda$0"
 JOINT_METHOD = "solvePositionConstraints"
 
@@ -536,6 +538,72 @@ def verify_worker_launch_v6(events, worker_pid, *, focused=True,
                 any('"' + path + '"' in call for path in protected_paths)):
             raise EvidenceRejected("JDI version 6 launcher supplied protected evidence")
     return java_at, java_index
+
+
+def verify_gradle_fork_parent_v6(events, worker_pid, root_pid):
+    from numeric_producer_trace import successful_execve
+
+    if type(worker_pid) is not int or type(root_pid) is not int or min(
+            worker_pid, root_pid) <= 0 or worker_pid == root_pid:
+        raise EvidenceRejected("JDI version 6 Gradle ancestry differs")
+    births = {}
+    first = {}
+    records = {}
+    for stamp, tid, index, call in events:
+        owner = int(tid)
+        first.setdefault(owner, stamp)
+        records.setdefault(owner, []).append((stamp, index, call))
+        if not call.startswith(("clone(", "clone3(", "fork(", "vfork(")):
+            continue
+        child = re.search(r"\) = ([1-9][0-9]*)$", call)
+        if child is None:
+            continue
+        created = int(child[1])
+        if created in births:
+            raise EvidenceRejected("JDI version 6 Gradle child is ambiguous")
+        births[created] = (owner, stamp, index)
+    lineage = []
+    current = worker_pid
+    while current != root_pid:
+        if current in lineage or current not in births or current not in first:
+            raise EvidenceRejected("JDI version 6 Gradle ancestry differs")
+        lineage.append(current)
+        parent, created_at, _ = births[current]
+        if created_at > first[current] or parent not in records:
+            raise EvidenceRejected("JDI version 6 Gradle child preceded creation")
+        current = parent
+    lineage.append(root_pid)
+    daemons = []
+    for owner in lineage:
+        executions = [(stamp, index, successful_execve(call))
+                      for stamp, index, call in records[owner]
+                      if call.startswith(("execve(", "execveat(")) and
+                      call.endswith(" = 0")]
+        for position, (stamp, index, program) in enumerate(executions):
+            if program is None or program[0] != str(JDK21 / "bin/java") or not any(
+                    "org.gradle.launcher.daemon.bootstrap.GradleDaemon" in value
+                    for value in program[1]):
+                continue
+            if (position != len(executions) - 1 or
+                    [item[2][0] if item[2] else None for item in executions[:-1]]
+                    not in ([], [str(JSPAWNHELPER)]) or
+                    program[1].count("-Djdk.lang.Process.launchMechanism=FORK") != 1):
+                raise EvidenceRejected("JDI version 6 Gradle daemon image differs")
+            if owner == worker_pid or owner == root_pid:
+                raise EvidenceRejected("JDI version 6 Gradle daemon ancestry differs")
+            child = lineage[lineage.index(owner) - 1]
+            _, created_at, created_index = births[child]
+            if stamp > created_at or (stamp == created_at and index >= created_index):
+                raise EvidenceRejected("JDI version 6 Gradle daemon started too late")
+            daemons.append(owner)
+    if len(daemons) != 1:
+        raise EvidenceRejected("JDI version 6 Gradle daemon ancestry differs")
+    for owner in lineage[1:lineage.index(daemons[0])]:
+        if any(successful_execve(call) is not None
+               for _, _, call in records[owner]
+               if call.startswith(("execve(", "execveat(")) and call.endswith(" = 0")):
+            raise EvidenceRejected("JDI version 6 worker parent image changed")
+    return daemons[0]
 
 
 def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,

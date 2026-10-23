@@ -1,5 +1,6 @@
 import io
 import hashlib
+from decimal import Decimal
 import os
 from pathlib import Path
 import shutil
@@ -67,6 +68,36 @@ HELPER_SOCKET_TRACE = (
 
 
 class JdiBridgeTest(unittest.TestCase):
+    def test_version6_fork_parent_binds_daemon_and_thread_ancestry(self):
+        events = [
+            (Decimal("1.0"), "10", 0, 'execve("/project/gradlew", ["gradlew"], 0x1) = 0'),
+            (Decimal("1.1"), "10", 1, 'clone(0) = 11'),
+            (Decimal("1.2"), "11", 0, 'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+             '["java", "-Djdk.lang.Process.launchMechanism=FORK", '
+             '"org.gradle.launcher.daemon.bootstrap.GradleDaemon"], 0x1) = 0'),
+            (Decimal("1.3"), "11", 1, 'clone(CLONE_THREAD|CLONE_FILES) = 12'),
+            (Decimal("1.4"), "12", 0, 'clone(0) = 13'),
+            (Decimal("1.4"), "13", 0, 'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+             '["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], '
+             '0x1) = 0'),
+        ]
+        self.assertEqual(jdi_bridge.verify_gradle_fork_parent_v6(events, 13, 10), 11)
+        for label, altered in (
+                ("missing option", [(s, t, i, c.replace(
+                    "-Djdk.lang.Process.launchMechanism=FORK", "-Dother=FORK"))
+                    for s, t, i, c in events]),
+                ("wrong parent", [(s, t, i, c.replace("GradleDaemon", "OtherMain"))
+                    for s, t, i, c in events]),
+                ("child before birth", events[:-1] + [(Decimal("1.399999"), *events[-1][1:])]),
+                ("disconnected", events[:4] + [(events[4][0], "12", 0, "clone(0) = 14"),
+                    events[5]]),
+                ("intermediate image", events[:4] + [
+                    (Decimal("1.35"), "12", 0,
+                     'execve("/other", ["other"], 0x1) = 0'),
+                    (Decimal("1.4"), "12", 1, 'clone(0) = 13'), events[5]])):
+            with self.subTest(label=label), self.assertRaises(jdi_bridge.EvidenceRejected):
+                jdi_bridge.verify_gradle_fork_parent_v6(altered, 13, 10)
+
     def test_version6_raw_transport_requires_live_accept_peer_and_exchange(self):
         worker = (
             b'1.000001 execve("/tmp/dyn4k-tools/jdk21/bin/java", '

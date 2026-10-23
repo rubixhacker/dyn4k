@@ -1,4 +1,5 @@
 import os
+import hashlib
 import signal
 import subprocess
 import tempfile
@@ -177,6 +178,65 @@ class CaptureSourceGuardTest(unittest.TestCase):
         with patch.object(capture_actual.time, "monotonic", return_value=budget.deadline + 1):
             with self.assertRaisesRegex(CaptureRejected, "timed out"):
                 budget.check()
+
+    def test_rejected_trace_moves_to_private_counted_root(self):
+        output = self.root / "eligible"
+        scratch = self.root / "scratch"
+        private = self.root / "private"
+        for root in (output, scratch, private):
+            root.mkdir()
+        raw = b'1.000 read(4, "DYN4K_CAPTURE_ENV_SENTINEL=portable-capture-check", 55) = 55\n'
+        trace = scratch / "worker-write-trace.42"
+        trace.write_bytes(raw)
+        budget = capture_actual.CaptureBudget(output, scratch, (),
+                                             private=private, limit_bytes=len(raw) + 1)
+        with self.assertRaisesRegex(CaptureRejected, "exposed the environment"):
+            capture_actual.private_trace_or_reject(trace, private, budget, "worker")
+        retained = private / trace.name
+        self.assertFalse(trace.exists())
+        self.assertEqual(retained.read_bytes(), raw)
+        self.assertEqual(retained.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(hashlib.sha256(retained.read_bytes()).hexdigest(),
+                         hashlib.sha256(raw).hexdigest())
+        self.assertEqual(budget.check(), len(raw))
+        self.assertFalse(any(output.iterdir()))
+
+    def test_private_trace_rejection_preserves_error_on_move_failure(self):
+        scratch = self.root / "scratch"
+        private = self.root / "private"
+        scratch.mkdir()
+        private.mkdir()
+        trace = scratch / "worker-write-trace.42"
+        trace.write_bytes(capture_actual.ENVIRONMENT_SENTINEL.encode())
+        with patch.object(capture_actual.os, "replace", side_effect=OSError("move failed")):
+            with self.assertRaisesRegex(CaptureRejected, "exposed the environment"):
+                capture_actual.private_trace_or_reject(trace, private, None, "worker")
+        self.assertTrue(trace.exists())
+
+    def test_focused_capture_keeps_rejected_bytes_outside_archive(self):
+        output = self.root / "focused"
+        payload = capture_actual.ENVIRONMENT_SENTINEL.encode()
+
+        def reject(method, eligible, reference, commit, temporary, budget, active, private):
+            eligible.mkdir()
+            trace = temporary / "worker-write-trace.42"
+            trace.write_bytes(payload)
+            budget.check()
+            capture_actual.private_trace_or_reject(trace, private, budget, "worker write")
+
+        with patch.object(capture_actual, "clean_source", return_value="reviewed"), \
+                patch.object(capture_actual, "_run_capture", side_effect=reject), \
+                patch.dict(os.environ, {"TMPDIR": os.environ["TMPDIR"]}):
+            with self.assertRaisesRegex(CaptureRejected, "exposed the environment"):
+                capture_actual.run_capture("captureRevoluteLimitsFalse", output,
+                                           self.root / "reference.jsonl")
+        private = self.root / "focused.private-unverified"
+        self.assertEqual((private / "worker-write-trace.42").read_bytes(), payload)
+        self.assertEqual((private / "UNVERIFIED.json").stat().st_mode & 0o777,
+                         0o600)
+        self.assertEqual(private.stat().st_mode & 0o777, 0o700)
+        self.assertFalse(any(output.iterdir()))
+        self.assertFalse(any(self.root.glob("dyn4k-actual-*")))
 
     def test_bounded_stage_stops_process_on_budget_failure(self):
         budget = SimpleNamespace(check=lambda: (_ for _ in ()).throw(

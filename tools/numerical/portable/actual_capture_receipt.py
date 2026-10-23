@@ -400,6 +400,7 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
             TEST_CLASS + "." + _FOCUSED_BOOLEAN_METHOD and
             all(command.count(flag) == 1 for flag in (
                 "--rerun-tasks", "--no-daemon", "--offline", "--max-workers=1")) and
+            command.count(jdi_bridge.GRADLE_FORK_OPTION) == 1 and
             all(command.count(option) == 1 for option in (
                 "-PportableClassWitnessAgent=" + metadata["agent_path"],
                 "-PportableClassWitnessOutput=boolean:" + metadata["witness_path"],
@@ -420,6 +421,8 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
             require(root_pid is None, "focused traced invocation is ambiguous")
             root_pid = tid
     require(root_pid is not None, "focused traced invocation differs")
+    jdi_bridge.verify_gradle_fork_parent_v6(
+        events, int(selected[0]), int(root_pid))
     with zipfile.ZipFile(io.BytesIO(files["worker_write_traces"])) as archive:
         for name in archive.namelist():
             require(raw_traces.get(name[6:]) == archive.read(name),

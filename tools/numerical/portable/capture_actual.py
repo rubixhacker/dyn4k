@@ -148,9 +148,10 @@ def _file_sizes(*roots):
 
 class CaptureBudget:
     def __init__(self, output, temporary, generated_roots, *,
-                 limit_bytes=1800 * 1024 * 1024, seconds=1200):
+                 private=None, limit_bytes=1800 * 1024 * 1024, seconds=1200):
         self.output = Path(output)
         self.temporary = Path(temporary)
+        self.private = Path(private) if private is not None else None
         self.generated_roots = tuple(Path(root) for root in generated_roots)
         self.initial = _file_sizes(*self.generated_roots)
         self.limit_bytes = limit_bytes
@@ -162,7 +163,10 @@ class CaptureBudget:
         generated = _file_sizes(*self.generated_roots)
         growth = sum(max(size - self.initial.get(path, 0), 0)
                      for path, size in generated.items())
-        total = sum(_file_sizes(self.output, self.temporary).values()) + growth
+        roots = (self.output, self.temporary)
+        if self.private is not None:
+            roots += (self.private,)
+        total = sum(_file_sizes(*roots).values()) + growth
         if total + extra_bytes >= self.limit_bytes:
             raise CaptureRejected("new capture output exceeded the bounded budget")
         return total
@@ -228,6 +232,24 @@ def reject_environment_trace(trace_path):
     if contains_sentinel:
         trace_path.unlink()
         raise CaptureRejected("process trace exposed the environment")
+
+
+def private_trace_or_reject(trace_path, private, budget, scope):
+    trace_path = Path(trace_path)
+    raw = trace_path.read_bytes()
+    if ENVIRONMENT_SENTINEL.encode() not in raw and b"OLLAMA_API_KEY" not in raw:
+        return raw
+    error = CaptureRejected(f"{scope} trace exposed the environment")
+    if private is not None:
+        destination = Path(private) / trace_path.name
+        try:
+            if destination.exists() or trace_path.is_symlink():
+                raise OSError("private trace destination differs")
+            os.replace(trace_path, destination)
+            destination.chmod(0o600)
+        except OSError:
+            error.add_note("private trace retention failed")
+    raise error
 
 
 def git(*args):
@@ -348,6 +370,16 @@ def run_capture(method, output, reference_case=None):
             temporary_root.stat().st_uid != os.getuid() or
             temporary_root.stat().st_mode & 0o777 != 0o700):
         raise CaptureRejected("focused temporary root is not short and private")
+    private = None
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        private = output.with_name(output.name + ".private-unverified")
+        if private.exists():
+            raise CaptureRejected("private diagnostic output already exists")
+        private.mkdir(mode=0o700)
+        marker = private / "UNVERIFIED.json"
+        marker.write_text(json.dumps({"status": "UNVERIFIED",
+                                      "eligible_for_replay": False}, sort_keys=True) + "\n")
+        marker.chmod(0o600)
     with tempfile.TemporaryDirectory(prefix="dyn4k-actual-", dir=temporary_root) as scratch:
         if method != _FOCUSED_BOOLEAN_METHOD:
             return _run_capture(method, output, reference_case, commit, Path(scratch))
@@ -358,17 +390,17 @@ def run_capture(method, output, reference_case=None):
             "tools/numerical/portable/.kotlin"))
         active = []
         with capture_watchdog(1200):
-            budget = CaptureBudget(output, Path(scratch), generated)
+            budget = CaptureBudget(output, Path(scratch), generated, private=private)
             try:
                 return _run_capture(method, output, reference_case, commit,
-                                    Path(scratch), budget, active)
+                                    Path(scratch), budget, active, private)
             finally:
                 for process in active:
                     stop_capture_process(process)
 
 
 def _run_capture(method, output, reference_case, commit, temporary,
-                 budget=None, active=None):
+                 budget=None, active=None, private=None):
     output.mkdir(parents=True)
 
     def check_budget(extra_bytes=0):
@@ -385,6 +417,10 @@ def _run_capture(method, output, reference_case, commit, temporary,
         (output / "reference-case.jsonl").write_bytes(reference)
         check_budget()
     environment = child_environment()
+    if method == _FOCUSED_BOOLEAN_METHOD:
+        for name in ("_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "JAVA_OPTS",
+                     "GRADLE_OPTS", "ORG_GRADLE_JAVA_HOME"):
+            environment.pop(name, None)
     environment["JAVA_HOME"] = str(JDK21)
     private_tmpdir = Path(os.environ["TMPDIR"]) if method == _FOCUSED_BOOLEAN_METHOD else temporary
     environment["TMPDIR"] = str(private_tmpdir)
@@ -492,7 +528,7 @@ def _run_capture(method, output, reference_case, commit, temporary,
         command.extend((f"-PportableClassWitnessAgent={agent}",
                         f"-PportableClassWitnessOutput=boolean:{witness_path}",
                         f"-PportableBooleanMirror={mirror_path}",
-                        "--max-workers=1"))
+                        "--max-workers=1", jdi_bridge.GRADLE_FORK_OPTION))
     worker_arguments = output / "worker-classpath.txt"
     response_before = None
     response_source = None
@@ -598,7 +634,8 @@ def _run_capture(method, output, reference_case, commit, temporary,
         workers = []
         for path in trace_files:
             check_budget()
-            raw = path.read_bytes()
+            raw = (private_trace_or_reject(path, private, budget, "worker write")
+                   if version6 else path.read_bytes())
             pid = path.name.removeprefix("worker-write-trace.")
             if not pid.isdecimal():
                 raise CaptureRejected("worker write trace PID differs")
@@ -629,7 +666,8 @@ def _run_capture(method, output, reference_case, commit, temporary,
         with zipfile.ZipFile(output / "worker-write-traces.zip", "x") as archive:
             for pid in sorted(descendants, key=int):
                 raw = raw_traces[pid]
-                if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
+                if not version6 and (ENVIRONMENT_SENTINEL.encode() in raw or
+                                     b"OLLAMA_API_KEY" in raw):
                     raise CaptureRejected("worker write trace exposed the environment")
                 check_budget(len(raw))
                 archive.writestr("trace." + pid, raw)
@@ -653,9 +691,7 @@ def _run_capture(method, output, reference_case, commit, temporary,
                 pid = path.name.removeprefix("jdi-helper-trace.")
                 if not pid.isdecimal() or path.is_symlink():
                     raise CaptureRejected("JDI helper trace PID differs")
-                raw = path.read_bytes()
-                if ENVIRONMENT_SENTINEL.encode() in raw or b"OLLAMA_API_KEY" in raw:
-                    raise CaptureRejected("JDI helper trace exposed the environment")
+                raw = private_trace_or_reject(path, private, budget, "JDI helper")
                 if any((f' execve("{JDK21 / "bin/java"}"' in line if version6 else
                         line.startswith(f'execve("{JDK21 / "bin/java"}"')) and
                        line.endswith(" = 0") for line in raw.decode().splitlines()):
