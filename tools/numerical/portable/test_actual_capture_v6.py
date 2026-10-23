@@ -278,6 +278,15 @@ class FocusedReplayTest(unittest.TestCase):
             late_traces = {"41": shared_parent, "42": child, "43": after_close}
             actual_output_v6.prove_socket_writers(
                 late_traces, _events(late_traces, ()), "41", ("41", "59"))
+        reused = child.replace(
+            b'1.000008 +++ exited',
+            b'1.0000071 socket(AF_INET, SOCK_STREAM, IPPROTO_TCP) = '
+            b'56<TCP:[new]>\n1.0000072 write(56<TCP:[new->remote]>, '
+            b'"x", 1) = 1\n1.000008 +++ exited')
+        with self.assertRaisesRegex(Rejected, "socket provider differs"):
+            reused_traces = {"41": parent, "42": reused}
+            actual_output_v6.prove_socket_writers(
+                reused_traces, _events(reused_traces, ()), "41", ("41", "59"))
         def projected(extra_payload=b"x", include_extra=True):
             output = io.BytesIO()
             with zipfile.ZipFile(output, "w") as archive:
