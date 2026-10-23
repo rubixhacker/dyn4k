@@ -1311,7 +1311,9 @@ class IndependentGateSeamTests(unittest.TestCase):
                            "e10a67d2051e0437236ca7c85d9e8f7bd43177b3",
                            independent_gates.OBSERVER_OPERANDS_SOURCE_REVISION,
                            "35c8cbb6973c35922d9a7f9d3374cc13601ad557",
-                           "96f21809f68d963c000b114420ab8044a9cf7e03"):
+                           "96f21809f68d963c000b114420ab8044a9cf7e03",
+                           "a162cd345e54732863d7719e3f81bd53546f5cbc",
+                           "b5315e17499aca02fc5fdc11515e92062923062f"):
             with self.subTest(incomplete=incomplete):
                 with self.assertRaisesRegex(ValueError, "incomplete output source"):
                     independent_gates._prospective_checker_binding(ROOT, incomplete)
