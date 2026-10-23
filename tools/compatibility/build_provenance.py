@@ -26,6 +26,16 @@ def java_home() -> Path:
     return Path(selected).resolve()
 
 
+def jdk21_version(java: Path, rejection: str) -> str:
+    lines = subprocess.run([str(java), "-version"], capture_output=True,
+                           text=True, check=True).stderr.splitlines()
+    if (len(lines) < 3 or not lines[-3].startswith('openjdk version "21.')
+            or not lines[-2].startswith("OpenJDK Runtime Environment ")
+            or not lines[-1].startswith("OpenJDK 64-Bit Server VM ")):
+        raise ValueError(rejection)
+    return lines[-3]
+
+
 def identity(root: Path, revision: str, artifact: Path) -> dict:
     root = root.resolve()
     artifact = artifact.resolve()
@@ -36,15 +46,13 @@ def identity(root: Path, revision: str, artifact: Path) -> dict:
     java = java_home() / "bin/java"
     if not java.is_file():
         raise ValueError("pinned JDK 21 executable is unavailable")
-    version = subprocess.run([str(java), "-version"], capture_output=True, text=True, check=True).stderr
-    if not version.startswith('openjdk version "21.'):
-        raise ValueError("source rebuild requires JDK 21")
+    version = jdk21_version(java, "source rebuild requires JDK 21")
     return {"schema_version": 1, "revision": revision,
             "source_tree": git(root, "--no-replace-objects", "rev-parse", f"{revision}^{{tree}}"),
             "artifact": ARTIFACT, "artifact_sha256": digest(artifact),
             "gradle_wrapper_sha256": digest(root / "gradlew"),
             "java": str(java), "java_sha256": digest(java),
-            "java_version": version.splitlines()[0], "command": COMMAND}
+            "java_version": version, "command": COMMAND}
 
 
 def check_identity(receipt: dict, root: Path, artifact: Path) -> str | None:
@@ -107,16 +115,13 @@ def identity_variant(root: Path, revision: str, artifact: Path, variant: str) ->
     java = java_home() / "bin/java"
     if not java.is_file():
         raise ValueError("pinned JDK 21 executable is unavailable")
-    version = subprocess.run([str(java), "-version"], capture_output=True,
-                             text=True, check=True).stderr
-    if not version.startswith('openjdk version "21.'):
-        raise ValueError("Android source rebuild requires JDK 21")
+    version = jdk21_version(java, "Android source rebuild requires JDK 21")
     return {"schema_version": 1, "variant": "android", "revision": revision,
             "source_tree": git(root, "--no-replace-objects", "rev-parse", f"{revision}^{{tree}}"),
             "artifact": ANDROID_ARTIFACT, "artifact_sha256": digest(artifact),
             "gradle_wrapper_sha256": digest(root / "gradlew"),
             "java": str(java), "java_sha256": digest(java),
-            "java_version": version.splitlines()[0], "command": ANDROID_COMMAND}
+            "java_version": version, "command": ANDROID_COMMAND}
 
 
 def probe_variant(root: Path, revision: str, artifact: Path, variant: str) -> dict:
