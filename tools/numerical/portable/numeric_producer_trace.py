@@ -80,15 +80,18 @@ def _buffer(call, vector=False):
 
 
 def verify_transport(traces, destination, mirror, response_path=None, response=None, *,
-                     exclusive=True, ordered=True):
+                     exclusive=True, ordered=True, mirror_identity=None):
     events = _events(traces, (destination, response_path))
     workers = []
     parents, groups, tables, exits = {}, {}, {}, {}
     outputs, writers, response_reads, identities = [], set(), [], set()
     opened = False
+    final_mirror_identity = None
+    final_mirror_stat_index = -1
+    last_mirror_write_index = -1
     worker = None
     worker_argv = None
-    for _, tid, _, call in events:
+    for event_index, (_, tid, _, call) in enumerate(events):
         tables.setdefault(tid, {})
         groups.setdefault(tid, tid)
         if call.startswith(("execve(", "execveat(")) and call.endswith(" = 0"):
@@ -147,12 +150,19 @@ def verify_transport(traces, destination, mirror, response_path=None, response=N
             if not dev or not ino or not size or "S_IFREG" not in identity[3]:
                 raise Unbound("descriptor file identity unavailable")
             descriptor["identity"] = (dev[1], ino[1], int(size[1]))
+            if descriptor["path"] == destination:
+                final_mirror_identity = descriptor["identity"]
+                final_mirror_stat_index = event_index
         seek_descriptor = re.match(r'lseek\(([0-9]+)(?:<([^>]+)>)?,', call)
         if seek_descriptor and (seek_descriptor[2] == destination or
                 tables[tid].get(seek_descriptor[1], {}).get("path") == destination):
             raise Rejected("mirror seek invalidates sequential output proof")
-        seek = re.fullmatch(r'lseek\(' + FD + r', ([0-9]+), SEEK_SET\) = ([0-9]+)', call)
-        if seek and seek[1] in tables[tid]:
+        if response_path is not None and call.startswith("lseek(") and seek_descriptor and (
+                seek_descriptor[2] == response_path or
+                tables[tid].get(seek_descriptor[1], {}).get("path") == response_path):
+            seek = re.fullmatch(r'lseek\(' + FD + r', ([0-9]+), SEEK_SET\) = ([0-9]+)', call)
+            if seek is None:
+                raise Unbound("response seek mode or offset is unsupported")
             if seek[3] != seek[4]:
                 raise Rejected("response seek differs")
             tables[tid][seek[1]]["position"] = int(seek[3])
@@ -185,6 +195,7 @@ def verify_transport(traces, destination, mirror, response_path=None, response=N
             elif operation.startswith("write") and path == destination:
                 writers.add((tid, fd))
                 outputs.append(value)
+                last_mirror_write_index = event_index
             else:
                 raise Rejected("unexpected transfer to protected file")
         closed = re.fullmatch(r'close\(' + FD + r'\) = 0', call)
@@ -223,6 +234,15 @@ def verify_transport(traces, destination, mirror, response_path=None, response=N
     if (b"".join(outputs) != mirror if ordered else
             sorted(b"".join(outputs).splitlines()) != sorted(mirror.splitlines())):
         raise Rejected("mirror output bytes differ")
+    if mirror_identity is not None:
+        if final_mirror_identity is None or final_mirror_stat_index <= last_mirror_write_index:
+            raise Unbound("mirror file identity unavailable after final write")
+        dev, inode, size = final_mirror_identity
+        major, minor = (int(part.strip()) for part in dev.split(","))
+        observed = {"device_major": major, "device_minor": minor,
+                    "inode": int(inode), "size": size}
+        if observed != mirror_identity or size != len(mirror):
+            raise Rejected("mirror file identity differs")
     chain, current = [], worker
     while current in parents:
         current = parents[current]

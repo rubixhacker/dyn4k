@@ -1,3 +1,4 @@
+import hashlib
 import unittest
 import tempfile
 import json
@@ -7,6 +8,7 @@ import struct
 import xml.etree.ElementTree as ET
 from copy import deepcopy
 from pathlib import Path
+from unittest.mock import patch
 
 from numeric_producer_trace import verify_transport, Unbound
 from receipt import Rejected
@@ -116,6 +118,50 @@ class TransportTest(unittest.TestCase):
                                          "/work/mirror.log", b"hello\n", "/work/args.txt", b"-cp\n/a\n")
                 self.assertEqual(proof["worker_exit"], 0)
 
+    def test_backward_response_seek_does_not_count_repeated_bytes_twice(self):
+        trace = self.trace()["100"].replace(
+            b'st_size=7', b'st_size=6').replace(
+            b'read(3</work/args.txt>, "-cp\\n/a\\n", 4096) = 7',
+            b'read(3</work/args.txt>, "abc", 3) = 3\n'
+            b'1.125000 lseek(3</work/args.txt>, -3, SEEK_CUR) = 0\n'
+            b'1.126000 read(3</work/args.txt>, "abc", 3) = 3')
+        with self.assertRaisesRegex(Unbound, "response.*seek|response.*incomplete"):
+            verify_transport({"100": trace}, "/work/mirror.log", b"hello\n",
+                             "/work/args.txt", b"abcabc")
+
+    def test_mirror_identity_must_match_original_captured_file(self):
+        from numeric_producer import captured_file_identity
+        with tempfile.TemporaryDirectory() as directory:
+            original = Path(directory) / "original.log"
+            archived = Path(directory) / "archived.log"
+            original.write_bytes(b"hello\n")
+            archived.write_bytes(original.read_bytes())
+            original_identity = captured_file_identity(original)
+            self.assertNotEqual(original_identity["inode"], captured_file_identity(archived)["inode"])
+            stat_call = ("1.215000 fstat(4</work/mirror.log>, "
+                         "{st_dev=makedev(%d, %d), st_ino=%d, st_mode=S_IFREG|0600, st_size=6, ...}) = 0\n" %
+                         (original_identity["device_major"], original_identity["device_minor"],
+                          original_identity["inode"])).encode()
+            relocated_trace = self.trace()["100"].replace(b'1.220000 close', stat_call + b'1.220000 close')
+            verify_transport({"100": relocated_trace}, "/work/mirror.log", archived.read_bytes(),
+                             "/work/args.txt", b"-cp\n/a\n", mirror_identity=original_identity)
+        trace = self.trace()["100"].replace(
+            b'1.220000 close',
+            b'1.215000 fstat(4</work/mirror.log>, '
+            b'{st_dev=makedev(0, 1), st_ino=13, st_mode=S_IFREG|0600, st_size=6, ...}) = 0\n'
+            b'1.220000 close')
+        expected = {"device_major": 0, "device_minor": 1, "inode": 13, "size": 6}
+        proof = verify_transport({"100": trace}, "/work/mirror.log", b"hello\n",
+                                 "/work/args.txt", b"-cp\n/a\n", mirror_identity=expected)
+        self.assertEqual(proof["mirror_sha256"], hashlib.sha256(b"hello\n").hexdigest())
+        with self.assertRaisesRegex(Rejected, "mirror file identity differs"):
+            verify_transport({"100": trace}, "/work/mirror.log", b"hello\n",
+                             "/work/args.txt", b"-cp\n/a\n",
+                             mirror_identity={**expected, "inode": 14})
+        with self.assertRaisesRegex(Unbound, "mirror file identity unavailable"):
+            verify_transport(self.trace(), "/work/mirror.log", b"hello\n",
+                             "/work/args.txt", b"-cp\n/a\n", mirror_identity=expected)
+
 
 class OutputTest(unittest.TestCase):
     def fixture(self):
@@ -201,6 +247,52 @@ class StartupTest(unittest.TestCase):
 
 
 class ArchiveTest(unittest.TestCase):
+    def test_sidecar_runtime_must_be_independent_and_match_full_lane(self):
+        from numeric_producer import verify_sidecar_identity
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "target.jar"
+            artifact.write_bytes(b"target")
+            runtime = {"host": "jvm", "os": "linux", "machine": "x86_64",
+                       "executable": "/jdk/bin/java", "executable_sha256": "java-hash",
+                       "version": 'openjdk version "21.0.0"',
+                       "dependency_sha256": hashlib.sha256(b"target").hexdigest()}
+            verify_sidecar_identity(dict(runtime), runtime, artifact)
+            for field in runtime:
+                with self.subTest(field=field), self.assertRaisesRegex(Rejected, "sidecar runtime identity"):
+                    verify_sidecar_identity({**runtime, field: "different"}, runtime, artifact)
+            with self.assertRaisesRegex(Rejected, "sidecar runtime identity"):
+                verify_sidecar_identity({}, runtime, artifact)
+
+    def test_public_schema_two_cannot_pass_without_loaded_class_bytes(self):
+        from numeric_producer import verify, encoded, sha, FIXTURE, CLASS, METHOD, SCHEMA, PROOF_KEYS
+        from run import declared_cases, method_case_ids
+        with tempfile.TemporaryDirectory() as directory:
+            lane = Path(directory) / "jvm"
+            (lane / "cases").mkdir(parents=True)
+            for case in declared_cases():
+                (lane / "cases" / (case["id"] + ".jsonl")).write_bytes(b"case\n")
+            (lane / "receipt.json").write_bytes(b"{}")
+            artifact = Path(directory) / "target.jar"
+            artifact.write_bytes(b"artifact")
+            runtime = {"method_executions": 15}
+            proof = {key: "synthetic" for key in PROOF_KEYS}
+            receipt = {"schema": SCHEMA, "candidate_commit": "commit", "source_sha256": "source",
+                       "fixture_source_sha256": FIXTURE, "trace_sha256": "trace",
+                       "primary_receipt_sha256": sha(b"{}"),
+                       "geometry_case_sha256": {case: sha(b"case\n") for case in method_case_ids(METHOD)},
+                       "artifact_sha256": {"target": sha(b"artifact")}, "runtime": runtime,
+                       "selected_test": {"class": CLASS, "method": METHOD, "task": "jvmTest", "host": "jvm"},
+                       "probe": {}, "files": {"synthetic": {"size": 1, "sha256": "0" * 64}},
+                       "proof": proof}
+            (lane / "numeric-probe-receipt.json").write_bytes(encoded(receipt))
+            with patch("numeric_producer.load_raw", return_value={}), \
+                    patch("numeric_producer._proof", return_value=proof), \
+                    patch("numeric_producer.inventory", return_value=receipt["files"]):
+                result = verify(lane, "commit", "source", "trace", {"target": artifact},
+                                runtime, scratch=Path(directory) / "rebuild")
+            self.assertEqual(result["status"], "UNPASSED_UNBOUND_PRODUCER")
+            self.assertIn("loaded class bytes", result["reason"])
+
     def test_strict_raw_inventory_rejects_resealed_extra_members_and_digest_changes(self):
         from numeric_producer import REQUIRED, inventory, load_raw
         with tempfile.TemporaryDirectory() as directory:

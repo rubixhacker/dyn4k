@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import platform
 from pathlib import Path
 import re
 import shlex
@@ -27,7 +28,7 @@ FIXTURE = "dd104a7e018b9d0bd77c9af14e929699d68f29fa4ac8179a5bd7d98bdc87d9ce"
 ROOT = Path(__file__).resolve().parents[3]
 PORTABLE = Path(__file__).resolve().parent
 WRAPPER = "tools/numerical/portable/src/jvmTest/kotlin/portable/NumericProbeMatrixTest.kt"
-WRAPPER_SHA256 = "73ef3161078a81a5aff522e8aada22ac4d9784804b4aa780ac9e45102f4fc81f"
+WRAPPER_SHA256 = "6e9d5a3436f2d10f0a40606a21b8cafafb548f8911e993725b2fda97f12a260a"
 KEYS = {"schema", "candidate_commit", "source_sha256", "fixture_source_sha256",
         "trace_sha256", "primary_receipt_sha256", "geometry_case_sha256", "artifact_sha256",
         "runtime", "selected_test", "probe", "files", "proof"}
@@ -64,6 +65,23 @@ def encoded(value):
 def require(condition, reason):
     if not condition:
         raise Rejected(reason)
+
+
+def captured_file_identity(path):
+    status = Path(path).stat()
+    return {"device_major": os.major(status.st_dev),
+            "device_minor": os.minor(status.st_dev),
+            "inode": status.st_ino, "size": status.st_size}
+
+
+def verify_sidecar_identity(sidecar, lane, artifact):
+    fields = {"host", "os", "machine", "executable", "executable_sha256",
+              "version", "dependency_sha256"}
+    require(isinstance(sidecar, dict) and set(sidecar) == fields and
+            all(type(sidecar[field]) is str and sidecar[field] for field in fields) and
+            all(sidecar[field] == lane.get(field) for field in fields) and
+            sidecar["host"] == "jvm" and sidecar["dependency_sha256"] == digest(artifact),
+            "sidecar runtime identity differs from full lane")
 
 
 def verify_output(mirror, xml, cases):
@@ -410,18 +428,26 @@ def _proof(raw, receipt, cases, artifacts, scratch):
     require(isinstance(metadata, dict) and set(metadata) == {
         "command", "tracer", "tracer_version", "trace_arguments", "exit", "mirror", "class_root",
         "arguments_log", "class_load_log", "seconds", "bytes", "members", "compiled_before_sha256",
-        "compiled_after_sha256"}, "trace command schema differs")
+        "compiled_after_sha256", "mirror_identity", "sidecar_runtime"},
+            "trace command schema differs")
     require(type(metadata["exit"]) is int and metadata["exit"] == 0 and
             metadata["seconds"] == 900 and metadata["bytes"] == MAX_TOTAL and
             metadata["members"] == MAX_MEMBERS and
             metadata["compiled_before_sha256"] == metadata["compiled_after_sha256"] ==
             sha(raw["compiled-classes.zip"]), "capture exit, budget, or compiled payload differs")
+    mirror_identity = metadata["mirror_identity"]
+    require(isinstance(mirror_identity, dict) and set(mirror_identity) ==
+            {"device_major", "device_minor", "inode", "size"} and
+            all(type(value) is int and value >= 0 for value in mirror_identity.values()) and
+            mirror_identity["size"] == len(raw["mirror.log"]),
+            "original captured mirror identity is malformed")
     traces = {name.split(".")[-1]: data for name, data in raw.items() if name.startswith("process/")}
     executable, argv, startup, response_path, response = _startup(traces, raw)
     runtime = receipt["runtime"]
     require(executable == runtime.get("executable") and Path(executable).is_file() and
             digest(executable) == runtime.get("executable_sha256"), "worker runtime executable differs")
-    proof = verify_transport(traces, metadata["mirror"], raw["mirror.log"], response_path, response)
+    proof = verify_transport(traces, metadata["mirror"], raw["mirror.log"], response_path,
+                             response, mirror_identity=mirror_identity)
     require(proof["parent_pids"], "worker ancestry does not reach traced invocation")
     root = proof["parent_pids"][-1]
     require(any(line.endswith(" +++ exited with 0 +++") for line in traces[root].decode().splitlines()),
@@ -447,6 +473,10 @@ def _proof(raw, receipt, cases, artifacts, scratch):
     version = subprocess.CompletedProcess([], 0, raw["runtime-version.log"].decode(), "")
     require(_java_version_line(version) == runtime.get("version"),
             "sidecar runtime version differs from lane")
+    verify_sidecar_identity(metadata["sidecar_runtime"], runtime, artifacts["target"])
+    require(metadata["sidecar_runtime"]["executable"] == executable and
+            metadata["sidecar_runtime"]["executable_sha256"] == digest(executable),
+            "sidecar worker executable differs")
     require("BUILD SUCCESSFUL" in raw["gradle.log"].decode(), "Gradle success record is absent")
     class_root = Path(metadata["class_root"])
     require(class_root == PORTABLE / "build/classes/kotlin/jvm", "compiled provider root differs")
@@ -513,7 +543,8 @@ def verify(lane, commit, source_sha256, trace_sha256, artifacts, runtime, *, scr
         return {"status": "UNPASSED_UNBOUND_PRODUCER", "reason": str(error)}
     require(exact(proof, receipt["proof"]), "numeric producer recomputed proof differs")
     require(inventory(lane / "numeric-probe") == receipt["files"], "raw evidence changed during replay")
-    return {"status": "PASSED_BOUND_PRODUCER", "proof": proof}
+    return {"status": "UNPASSED_UNBOUND_PRODUCER",
+            "reason": "loaded class bytes are not witnessed during worker execution"}
 
 
 def capture(output, scratch):
@@ -621,13 +652,23 @@ def capture(output, scratch):
                             artifacts("jvm")["target"], class_root, worker)
     (output / "classpath-inventory.json").write_bytes(encoded(entries))
     bounded_command([executable, "-version"], ROOT, scratch, output / "runtime-version.log", 10)
+    from run import _java_version_line
+    version_output = (output / "runtime-version.log").read_text()
+    runtime_version = _java_version_line(subprocess.CompletedProcess([], 0, version_output, ""))
+    dependency = artifacts("jvm")["target"]
+    sidecar_runtime = {"host": "jvm", "os": platform.platform(),
+                       "machine": platform.machine(), "executable": executable,
+                       "executable_sha256": digest(executable), "version": runtime_version,
+                       "dependency_sha256": digest(dependency)}
     metadata = {"command": command, "tracer": tracer, "tracer_version": version,
                 "trace_arguments": trace_arguments, "exit": process.returncode,
                 "mirror": str(mirror), "class_root": str(class_root),
                 "arguments_log": str(argument_pattern).replace("%p", worker),
                 "class_load_log": str(class_pattern).replace("%p", worker),
                 "seconds": 900, "bytes": MAX_TOTAL, "members": MAX_MEMBERS,
-                "compiled_before_sha256": sha(before), "compiled_after_sha256": sha(after)}
+                "compiled_before_sha256": sha(before), "compiled_after_sha256": sha(after),
+                "mirror_identity": captured_file_identity(mirror),
+                "sidecar_runtime": sidecar_runtime}
     (output / "trace-command.json").write_bytes(encoded(metadata))
     load_raw(output, inventory(output))
     require(clean_identity() == (commit, source_sha), "source changed during capture")
@@ -649,6 +690,10 @@ def seal(captured, lane, baseline, attestation, scratch):
     cases = {case: (lane / "cases" / (case + ".jsonl")).read_bytes() for case in method_case_ids(METHOD)}
     files = inventory(captured)
     raw = load_raw(captured, files)
+    metadata = decode(raw["trace-command.json"])
+    require(isinstance(metadata, dict) and
+            metadata.get("mirror_identity") == captured_file_identity(captured / "mirror.log"),
+            "original captured mirror file identity differs")
     probe, _ = verify_output(raw["mirror.log"], raw["selected.xml"], cases)
     receipt = {"schema": SCHEMA, "candidate_commit": commit, "source_sha256": source_sha,
                "fixture_source_sha256": FIXTURE, "trace_sha256": primary["trace_sha256"],

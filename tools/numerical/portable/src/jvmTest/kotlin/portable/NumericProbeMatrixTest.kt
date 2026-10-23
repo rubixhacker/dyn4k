@@ -3,7 +3,8 @@ package portable
 import java.io.OutputStream
 import java.io.PrintStream
 import java.net.URLClassLoader
-import java.nio.file.Files
+import java.nio.channels.Channels
+import java.nio.channels.FileChannel
 import java.nio.file.LinkOption
 import java.nio.file.Paths
 import java.nio.file.StandardOpenOption
@@ -17,8 +18,9 @@ class NumericProbeMatrixTest {
         val path = Paths.get(requireNotNull(System.getProperty("portable.numericProbeMirror")))
         require(path.isAbsolute)
         val original = System.out
-        val file = Files.newOutputStream(path, StandardOpenOption.CREATE_NEW,
+        val channel = FileChannel.open(path, StandardOpenOption.CREATE_NEW,
             StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)
+        val file = Channels.newOutputStream(channel)
         val tee = PrintStream(object : OutputStream() {
             override fun write(value: Int) {
                 original.write(value)
@@ -45,8 +47,9 @@ class NumericProbeMatrixTest {
             try {
                 tee.flush()
                 check(!tee.checkError()) { "Numeric probe output failed" }
+                check(channel.size() > 0) { "Numeric probe output is empty" }
             } finally {
-                file.close()
+                channel.close()
             }
         }
     }
