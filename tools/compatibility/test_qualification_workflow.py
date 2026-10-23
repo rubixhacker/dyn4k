@@ -364,6 +364,11 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "python3 -B -m unittest tools.compatibility.test_qualification_workflow"),
                 ("name: Test hosted runner guard",
                  "PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners"),
+                ("name: Test declaration ledger contracts",
+                 "env -u OLLAMA_API_KEY -u DYN4K_BASELINE_SOURCE "
+                 "-u DYN4K_BASELINE_JAR -u DYN4K_BASELINE_SOURCES_JAR "
+                 "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/compatibility "
+                 "python3 -B -m unittest -v test_ledger"),
                 ("name: Verify pinned GNU MPFR runtime",
                  "env -u OLLAMA_API_KEY PYTHONPATH=tools/numerical/portable python3 -B -c "
                  "'from rotation_oracle import _MPFR; mpfr = _MPFR(); "
@@ -481,6 +486,26 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 self.assertEqual(1, source.count(old), name)
                 with self.assertRaises(AssertionError):
                     self.assert_source_checks_job_contract(source.replace(old, new, 1))
+
+    def test_declaration_ledger_runs_on_both_source_events_without_external_inputs(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assertEqual({"push", "pull_request"}, set(workflow_event_blocks(source)))
+        self.assert_source_checks_job_contract(source)
+        ledger_step = (
+            "      - name: Test declaration ledger contracts\n"
+            "        run: env -u OLLAMA_API_KEY -u DYN4K_BASELINE_SOURCE "
+            "-u DYN4K_BASELINE_JAR -u DYN4K_BASELINE_SOURCES_JAR "
+            "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/compatibility "
+            "python3 -B -m unittest -v test_ledger\n"
+        )
+        self.assertEqual(1, source.count(ledger_step))
+        with self.assertRaises(AssertionError):
+            self.assert_source_checks_job_contract(source.replace(ledger_step, "", 1))
+        disabled = ledger_step.replace(
+            "        run:", "        if: false\n        run:", 1
+        )
+        with self.assertRaises(AssertionError):
+            self.assert_source_checks_job_contract(source.replace(ledger_step, disabled, 1))
 
     def test_bounded_jdi_step_fails_when_required_jdk21_is_missing(self):
         source = SOURCE_CHECKS.read_text(encoding="utf-8")
@@ -791,6 +816,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "      - name: Reject hosted macOS routes",
              "      - name: Test qualification workflow contracts",
              "      - name: Test hosted runner guard",
+             "      - name: Test declaration ledger contracts",
              "      - name: Verify pinned GNU MPFR runtime",
              "      - name: Test source-only numerical regressions",
              "      - name: Test bounded JDI wait on JDK 21",
