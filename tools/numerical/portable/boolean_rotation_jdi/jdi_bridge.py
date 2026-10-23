@@ -587,7 +587,8 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
                 for bound_at, bound_tid, bound_index, bound_fd, token in binds
                 for _, listen_tid, listen_index, listened_fd in listens
                 if bound_fd == listened_fd == listener_fd and
-                (bound_tid != listen_tid or bound_index < listen_index)]
+                (bound_tid != listen_tid or bound_index < listen_index) and
+                (listen_tid != worker_thread or listen_index < accept_index)]
     if len(matching) != 1:
         raise EvidenceRejected("JDI version 6 selected listener differs")
     bound_at, bound_tid, bound_index, bound_token = matching[0]
@@ -692,27 +693,40 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
             not accept_index < worker_io["recvfrom"][2] < worker_io["sendto"][2] or
             not connect_index < helper_io["write"][2] < helper_io["read"][2]):
         raise EvidenceRejected("JDI version 6 accepted handshake differs")
-    def traffic(events, thread, fd, token, after_index, after_stamp, send, receive):
+    def traffic(events, process_threads, shared_threads, thread, fd, token,
+                after_index, after_stamp, send, receive):
         counts = {"send": 0, "receive": 0}
         last = after_stamp
+        later_entries = [(index, stamp) for stamp, tid, index, call in events
+                         if int(tid) == thread and index > after_index and
+                         re.match(r'[a-zA-Z_][a-zA-Z_0-9]*\(', call)]
+        phase_entry = min(later_entries)[1] if later_entries else None
         for stamp, tid, index, call in events:
-            if (int(tid) != thread or index <= after_index or
-                    "JDWP-Handshake" in call):
+            if "JDWP-Handshake" in call:
                 continue
             for direction, names in (("send", send), ("receive", receive)):
                 if (re.match(r'(?:' + "|".join(names) + r')\(' + fd + r'<' +
                              re.escape(token) + r'>,', call) and
                         re.search(r'\) = [1-9][0-9]*$', call)):
+                    if (int(tid) not in process_threads or
+                            int(tid) not in shared_threads or
+                            (int(tid) == thread and index <= after_index) or
+                            (int(tid) != thread and
+                             (phase_entry is None or stamp <= phase_entry))):
+                        raise EvidenceRejected(
+                            "JDI version 6 packet phase is unproved")
                     counts[direction] += 1
                     last = max(last, stamp)
         return counts, last
 
-    worker_packets, worker_last = traffic(worker_events, worker_thread,
+    worker_packets, worker_last = traffic(worker_events, worker_threads,
+                             worker_owners, worker_thread,
                              accepted_fd, accepted_token,
                              worker_io["sendto"][2], worker_io["sendto"][0],
                              ("sendto", "sendmsg", "write"),
                              ("recvfrom", "recvmsg", "read"))
-    helper_packets, helper_last = traffic(helper_events, helper_thread,
+    helper_packets, helper_last = traffic(helper_events, helper_threads,
+                             helper_owners, helper_thread,
                              helper_fd, helper_token,
                              helper_io["read"][2], helper_io["read"][0],
                              ("write", "sendto", "sendmsg"),

@@ -107,6 +107,68 @@ class JdiBridgeTest(unittest.TestCase):
                                           archive({"trace.456": helper}),
                                           40001, 123, 456, HELPER_ARGS)
         self.assertEqual(result["status"], "PROVED_JDI_RAW_EXCHANGE")
+        worker_packet = next(row for row in worker.splitlines(keepends=True)
+                             if row.startswith(b'1.000012 recvfrom'))
+        helper_packet = next(row for row in helper.splitlines(keepends=True)
+                             if row.startswith(b'1.000014 read'))
+        shared_clones = (b'1.000010 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|'
+                         b'CLONE_SIGHAND|CLONE_THREAD, exit_signal=0}, 88) = 124\n'
+                         b'1.0000101 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|'
+                         b'CLONE_SIGHAND|CLONE_THREAD, exit_signal=0}, 88) = 125\n')
+        worker_multi = worker.replace(worker_packet, b'').replace(
+            b'1.000013 sendto', shared_clones + b'1.000013 sendto')
+        helper_multi = helper.replace(helper_packet, b'').replace(
+            b'1.000011 write',
+            b'1.0000105 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|'
+            b'CLONE_SIGHAND|CLONE_THREAD, exit_signal=0}, 88) = 457\n'
+            b'1.000011 write')
+        worker_members = {
+            "trace.123": worker_multi,
+            "trace.124": worker_packet,
+            "trace.125": next(row for row in worker.splitlines(keepends=True)
+                              if row.startswith(b'1.000013 sendto')).replace(
+                                  b'1.000013', b'1.0000125', 1),
+        }
+        helper_members = {"trace.456": helper_multi,
+                          "trace.457": helper_packet}
+        multi = verify_jdi_transport_v6(archive(worker_members),
+                                        archive(helper_members),
+                                        40001, 123, 456, HELPER_ARGS)
+        self.assertEqual(multi["worker_packets"], {"send": 2, "receive": 1})
+        self.assertEqual(multi["helper_packets"], {"send": 1, "receive": 1})
+        no_phase_helper = helper.replace(
+            b'1.000011 write(7<TCP:[127.0.0.1:41000->127.0.0.1:40001]>, '
+            b'"request", 7) = 7\n', b'').replace(helper_packet, b'').replace(
+            b'1.0000072 write',
+            b'1.00000715 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|'
+            b'CLONE_SIGHAND|CLONE_THREAD, exit_signal=0}, 88) = 457\n'
+            b'1.00000716 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|'
+            b'CLONE_SIGHAND|CLONE_THREAD, exit_signal=0}, 88) = 458\n'
+            b'1.0000072 write')
+        no_phase_members = {
+            "trace.456": no_phase_helper,
+            "trace.457": helper_packet,
+            "trace.458": next(row for row in helper.splitlines(keepends=True)
+                              if row.startswith(b'1.000011 write')),
+        }
+        for label, workers, helpers in (
+                ("cross-thread phase tie",
+                 {**worker_members, "trace.124": worker_packet.replace(
+                     b'1.000012', b'1.000010', 1)}, helper_members),
+                ("no helper completion witness", worker_members,
+                 no_phase_members),
+                ("shared child closes socket",
+                 {**worker_members, "trace.124":
+                  b'1.0000115 close(10<TCP:[127.0.0.1:40001->127.0.0.1:41000]>) = 0\n'
+                  + worker_packet}, helper_members),
+                ("copied descriptor table",
+                 {**worker_members, "trace.123": worker_multi.replace(
+                     b'CLONE_FILES|', b'', 1)}, helper_members)):
+            with self.subTest(multithread=label):
+                with self.assertRaises(EvidenceRejected):
+                    verify_jdi_transport_v6(archive(workers), archive(helpers),
+                                            40001, 123, 456, HELPER_ARGS)
+
         valid_schedules = (
             ("blocking receives",
              worker.replace(b'1.000008 recvfrom', b'1.00000715 recvfrom'),
@@ -142,6 +204,8 @@ class JdiBridgeTest(unittest.TestCase):
         for label, changed_worker, changed_helper in (
                 ("worker listener order",
                  reverse_calls(worker, b'1.000002', b'1.000003'), helper),
+                ("worker accept before listen on one thread",
+                 reverse_calls(worker, b'1.000003', b'1.000005'), helper),
                 ("worker handshake order",
                  reverse_calls(worker, b'1.000008', b'1.000009'), helper),
                 ("helper handshake order",
