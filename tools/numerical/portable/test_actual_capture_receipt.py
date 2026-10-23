@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import actual_arithmetic as actual
+from actual_capture_receipt import verify_boolean_startup
 from capture_actual import ENVIRONMENT_SENTINEL, reject_environment_trace
 from actual_arithmetic import (CaptureRejected, _AUDITED_ENGINE_CLASSES,
                                _FIXTURE_CLASSES, _ROOT, _STAGED_JAR,
@@ -1038,6 +1039,37 @@ class EnvironmentSentinelTest(unittest.TestCase):
             with self.assertRaisesRegex(CaptureRejected, "process trace is missing"):
                 reject_environment_trace(trace)
             self.assertFalse(trace.exists())
+
+
+class FocusedForkStartupTest(unittest.TestCase):
+    def test_worker_effective_startup_requires_exact_fork_option(self):
+        home = str(Path.home() / "focused-startup-test")
+        metadata = {"agent_path": home + "/agent.jar",
+                    "witness_path": home + "/witness.log",
+                    "mirror_path": home + "/mirror.log"}
+        agent = "-javaagent:" + metadata["agent_path"] + "=boolean:" + metadata["witness_path"]
+        jdwp = ("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,"
+                "address=127.0.0.1:40001")
+        flags = [agent, jdwp, "-Djdk.lang.Process.launchMechanism=FORK",
+                 "-XX:+DisableAttachMechanism", "-Xshare:off",
+                 "-Dportable.booleanMirror=" + metadata["mirror_path"]]
+
+        def startup(options):
+            rows = ["VM Arguments:", "jvm_args: " + " ".join(options),
+                    "java_command: worker.org.gradle.process.internal.worker."
+                    "GradleWorkerMain fixture", "java_class_path (initial): /fixture",
+                    "Launcher Type: SUN_STANDARD"]
+            return "".join("[123][info][arguments] " + row + "\n"
+                           for row in rows).encode()
+
+        selected = ("123", "/tmp/dyn4k-tools/jdk21/bin/java",
+                    ("java", agent, jdwp))
+        self.assertEqual(verify_boolean_startup(startup(flags), selected,
+                                                metadata, 40001)["worker_agent"], agent)
+        for altered in (flags[:2] + flags[3:], flags + flags[2:3],
+                        [item.replace("=FORK", "=POSIX_SPAWN") for item in flags]):
+            with self.subTest(altered=altered), self.assertRaises(CaptureRejected):
+                verify_boolean_startup(startup(altered), selected, metadata, 40001)
 
 
 if __name__ == "__main__":

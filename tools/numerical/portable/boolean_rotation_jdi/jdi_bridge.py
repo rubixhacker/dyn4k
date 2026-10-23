@@ -21,8 +21,7 @@ else:
 JDK21 = Path("/tmp/dyn4k-tools/jdk21")
 JSPAWNHELPER = JDK21 / "lib/jspawnhelper"
 JSPAWNHELPER_SHA256 = "e3101d3a580c9ae6e973acbf2e861855e93ebceb0bbd8e5fa3ddf6abbf6fd63d"
-GRADLE_FORK_OPTION = ("-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8 "
-                      "-Djdk.lang.Process.launchMechanism=FORK")
+FORK_LAUNCH_OPTION = "-Djdk.lang.Process.launchMechanism=FORK"
 BODY_METHOD = "integratePosition$lambda$0"
 JOINT_METHOD = "solvePositionConstraints"
 
@@ -587,7 +586,7 @@ def verify_gradle_fork_parent_v6(events, worker_pid, root_pid):
             if (position != len(executions) - 1 or
                     [item[2][0] if item[2] else None for item in executions[:-1]]
                     not in ([], [str(JSPAWNHELPER)]) or
-                    program[1].count("-Djdk.lang.Process.launchMechanism=FORK") != 1):
+                    not program[1]):
                 raise EvidenceRejected("JDI version 6 Gradle daemon image differs")
             if owner == worker_pid or owner == root_pid:
                 raise EvidenceRejected("JDI version 6 Gradle daemon ancestry differs")

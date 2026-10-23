@@ -307,7 +307,8 @@ def verify_boolean_startup(raw, selected, metadata, port):
                       metadata["witness_path"])
     jdwp = ("-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,"
             f"address=127.0.0.1:{port}")
-    exact = {expected_agent, jdwp, "-XX:+DisableAttachMechanism", "-Xshare:off",
+    exact = {expected_agent, jdwp, jdi_bridge.FORK_LAUNCH_OPTION,
+             "-XX:+DisableAttachMechanism", "-Xshare:off",
              "-XX:-UsePerfData", "-Xmx512m", "-Dfile.encoding=UTF-8",
              "-Duser.country", "-Duser.language=en", "-Duser.variant", "-ea",
              "-Dportable.booleanMirror=" + metadata["mirror_path"]}
@@ -316,7 +317,8 @@ def verify_boolean_startup(raw, selected, metadata, port):
     require(len(flags) == len(set(flags)) and
             all(flag in exact or flag.startswith(prefixes) for flag in flags) and
             all(flags.count(flag) == 1 for flag in (
-                expected_agent, jdwp, "-XX:+DisableAttachMechanism", "-Xshare:off",
+                expected_agent, jdwp, jdi_bridge.FORK_LAUNCH_OPTION,
+                "-XX:+DisableAttachMechanism", "-Xshare:off",
                 "-Dportable.booleanMirror=" + metadata["mirror_path"])) and
             sum(flag.startswith("-javaagent") for flag in flags) == 1 and
             sum(flag.startswith("-agentlib") for flag in flags) == 1 and
@@ -400,7 +402,6 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
             TEST_CLASS + "." + _FOCUSED_BOOLEAN_METHOD and
             all(command.count(flag) == 1 for flag in (
                 "--rerun-tasks", "--no-daemon", "--offline", "--max-workers=1")) and
-            command.count(jdi_bridge.GRADLE_FORK_OPTION) == 1 and
             all(command.count(option) == 1 for option in (
                 "-PportableClassWitnessAgent=" + metadata["agent_path"],
                 "-PportableClassWitnessOutput=boolean:" + metadata["witness_path"],

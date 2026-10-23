@@ -483,6 +483,7 @@ def _run_capture(method, output, reference_case, commit, temporary,
     mirror_path = None
     if method == _FOCUSED_BOOLEAN_METHOD:
         environment["JAVA_TOOL_OPTIONS"] += (
+            " " + jdi_bridge.FORK_LAUNCH_OPTION +
             f" -Xlog:arguments=info:file={argument_pattern}:"
             "pid,level,tags:filecount=0")
         jdi_port = reserve_boolean_jdi_port()
@@ -528,7 +529,7 @@ def _run_capture(method, output, reference_case, commit, temporary,
         command.extend((f"-PportableClassWitnessAgent={agent}",
                         f"-PportableClassWitnessOutput=boolean:{witness_path}",
                         f"-PportableBooleanMirror={mirror_path}",
-                        "--max-workers=1", jdi_bridge.GRADLE_FORK_OPTION))
+                        "--max-workers=1"))
     worker_arguments = output / "worker-classpath.txt"
     response_before = None
     response_source = None
