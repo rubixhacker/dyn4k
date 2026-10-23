@@ -9,6 +9,17 @@ import compiler_modes
 
 
 class CompilerModesTest(unittest.TestCase):
+    def original_source_fixture(self, output):
+        source = output / "upstream"
+        tests = source / "src/test/java/fixture"
+        tests.mkdir(parents=True)
+        for index in range(199):
+            annotation = "@Test void caseUnderTest() {}" if index < 190 else ""
+            (tests / f"Original{index:03}.java").write_text(
+                f"package fixture; class Original{index:03} {{ {annotation} }}\n")
+        self.enterContext(patch.object(compiler_modes, "SOURCE", source))
+        return tests
+
     def test_public_native_replay_rejects_resealed_debug_compile_log(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -367,6 +378,7 @@ class CompilerModesTest(unittest.TestCase):
     def test_original_javac_replay_binds_all_199_sources_and_staged_jar(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
+            self.original_source_fixture(output)
             archive = output / "staged/core.jar"
             dependency = output / "dependency.jar"
             sources, _ = compiler_modes.original_classes()
@@ -404,6 +416,7 @@ class CompilerModesTest(unittest.TestCase):
     def test_original_javac_failure_retains_compile_record(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
+            self.original_source_fixture(output)
             log = output / "logs/compile-originals.log"
             failure = {"command": ["javac"], "exit_code": 1, "log": str(log)}
             receipt = {}
@@ -414,12 +427,28 @@ class CompilerModesTest(unittest.TestCase):
             self.assertEqual(199, receipt["original_compile"]["source_count"])
             self.assertEqual(failure, receipt["original_compile"]["process"])
 
+    def test_original_inventory_rejects_missing_source_and_test_class(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tests = self.original_source_fixture(Path(directory))
+            files, classes = compiler_modes.original_classes()
+            self.assertEqual((199, 190), (len(files), len(classes)))
+            source = tests / "Original000.java"
+            raw = source.read_bytes()
+            source.unlink()
+            with self.assertRaisesRegex(ValueError, "198 files, 189 classes"):
+                compiler_modes.original_classes()
+            source.write_text("package fixture; class Original000 {}\n")
+            with self.assertRaisesRegex(ValueError, "199 files, 189 classes"):
+                compiler_modes.original_classes()
+            source.write_bytes(raw)
+            self.assertEqual((199, 190), tuple(map(len, compiler_modes.original_classes())))
+
     def test_split_compile_capture_hashes_stdout_and_stderr(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             log = output / "compile.log"
             process = compiler_modes.execute(
-                [compiler_modes.sys.executable, "-c",
+                [compiler_modes.sys.executable, "-B", "-c",
                  "import sys;print('out');print('err', file=sys.stderr)"],
                 log, cwd=output, split_streams=True)
             self.assertEqual(("out" + os.linesep).encode(), log.with_suffix(".stdout").read_bytes())

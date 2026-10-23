@@ -22,7 +22,6 @@ import qualify
 LANE = "jvm:Java:minimum:no-optimize"
 ROOT = Path(__file__).resolve().parents[2]
 BROWSER_CANDIDATE = "2e3665ba110e18d9669f847eb714e31befa391ce"
-BROWSER_PRODUCER = Path("/var/home/stewart/Workspace/dyn4k-port-full-browser-112")
 BROWSER_ARCHIVES = {
     "js:Chromium:current:development": ("current-development-attempt3", "a7067184d035e40e844b3dbd537ad64e6bdd27a3c83117975d5adb51bbf84537"),
     "js:Chromium:current:production": ("current-production-final", "8a0a2987795dbce7d864fc03fc1e5642d61161935001a595f1f1b63cd1175a70"),
@@ -552,8 +551,10 @@ class IndependentAdapterTests(unittest.TestCase):
 
         tar_path = os.environ.get("DYN4K_RETAINED_FULL_JVM_ARCHIVE")
         publication = os.environ.get("DYN4K_JVM_MODE_PUBLICATION")
-        if not tar_path or not publication:
+        if tar_path is None and publication is None:
             self.skipTest("retained full JVM and mode archive paths were not supplied")
+        self.assertTrue(tar_path and publication,
+                        "both retained full JVM and mode archive paths are required")
         candidate = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
                                             text=True).strip()
         lane = os.environ.get("DYN4K_FULL_JVM_LANE", full_jvm_consumer.LANE)
@@ -955,7 +956,8 @@ class IndependentAdapterTests(unittest.TestCase):
                 self.assertEqual("VERIFIED", result["availability_audit_status"])
 
     def browser_signed_fixture(self, root, lanes, archive_override=None,
-                               repository=BROWSER_PRODUCER, candidate_sha=BROWSER_CANDIDATE):
+                               repository=ROOT, candidate_sha=BROWSER_CANDIDATE,
+                               archive_root=None):
         suite = independent_gates.load_approved_manifest(repository)
         runtime = f"{platform.system()} {platform.release()} {platform.machine()}"
         staged = {"candidate_sha": candidate_sha, "status": "PASSED",
@@ -973,7 +975,7 @@ class IndependentAdapterTests(unittest.TestCase):
             role, mode = lane.split(":")[2:]
             suffix, digest = BROWSER_ARCHIVES[lane]
             archive = (archive_override if archive_override is not None else
-                       Path("/var/home/stewart/dyn4k-evidence/session-control") /
+                       (archive_root or root) /
                        f"full-browser-f565-review-findings-sol-{suffix}")
             if archive_override is not None:
                 digest = independent_gates.archive_digest(archive)
@@ -1009,25 +1011,70 @@ class IndependentAdapterTests(unittest.TestCase):
                   "lanes": expected}
         return suite, candidate, staged, archive_map, signed
 
-    def historical_browser_verifier_matches(self):
+    def retained_browser_inputs(self):
+        names = ("DYN4K_RETAINED_BROWSER_PRODUCER", "DYN4K_RETAINED_BROWSER_ARCHIVES")
+        values = [os.environ.get(name) for name in names]
+        if all(value is None for value in values):
+            self.skipTest("optional retained browser producer and archives were not supplied")
+        self.assertTrue(all(values), "both retained browser input paths are required")
+        producer, archives = map(Path, values)
+        self.assertTrue(producer.is_dir(), "supplied browser producer is missing")
+        for suffix, digest in BROWSER_ARCHIVES.values():
+            archive = archives / f"full-browser-f565-review-findings-sol-{suffix}"
+            self.assertTrue(archive.is_dir(), f"supplied browser archive is missing: {archive}")
+            self.assertEqual(digest, independent_gates.archive_digest(archive))
+        return producer, archives
+
+    def test_supplied_browser_inputs_fail_when_partial_missing_or_invalid(self):
+        names = ("DYN4K_RETAINED_BROWSER_PRODUCER", "DYN4K_RETAINED_BROWSER_ARCHIVES")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for values in ({names[0]: str(root)}, {names[1]: str(root)},
+                           dict.fromkeys(names, ""),
+                           dict.fromkeys(names, str(root / "missing")),
+                           dict.fromkeys(names, str(root))):
+                with self.subTest(values=values), mock.patch.dict(os.environ):
+                    for name in names:
+                        os.environ.pop(name, None)
+                    os.environ.update(values)
+                    with self.assertRaises(AssertionError):
+                        self.retained_browser_inputs()
+            for suffix, _ in BROWSER_ARCHIVES.values():
+                archive = root / f"full-browser-f565-review-findings-sol-{suffix}"
+                archive.mkdir()
+                (archive / "receipt.json").write_text("{}")
+            with mock.patch.dict(os.environ, dict.fromkeys(names, str(root))):
+                with self.assertRaises(AssertionError):
+                    self.retained_browser_inputs()
+
+    def test_supplied_full_jvm_inputs_require_both_paths(self):
+        names = ("DYN4K_RETAINED_FULL_JVM_ARCHIVE", "DYN4K_JVM_MODE_PUBLICATION")
+        for supplied in names:
+            with self.subTest(supplied=supplied), mock.patch.dict(os.environ):
+                for name in names:
+                    os.environ.pop(name, None)
+                os.environ[supplied] = "missing-fixture-path"
+                with self.assertRaises(AssertionError):
+                    self.test_retained_full_jvm_archive_requires_signed_executable_hashes()
+
+    def historical_browser_verifier_matches(self, producer):
         import full_browser_consumer
 
         source = "tools/qualification/full_browser_consumer.py"
         return (Path(full_browser_consumer.__file__).read_bytes()
-                == full_browser_consumer.original(BROWSER_PRODUCER, BROWSER_CANDIDATE,
+                == full_browser_consumer.original(producer, BROWSER_CANDIDATE,
                                                   source))
 
     def test_signed_browser_dispatch_uses_real_generic_gate_for_all_four_routes(self):
         import full_browser_adapter
 
-        if not BROWSER_PRODUCER.is_dir():
-            self.skipTest("retained browser producer checkout is unavailable")
-        if not self.historical_browser_verifier_matches():
-            self.skipTest("historical browser replay requires its exact verifier source")
+        producer, archives = self.retained_browser_inputs()
+        self.assertTrue(self.historical_browser_verifier_matches(producer),
+                        "supplied historical browser requires its exact verifier source")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
-                root, BROWSER_ARCHIVES)
+                root, BROWSER_ARCHIVES, repository=producer, archive_root=archives)
             audit, signature, public, fingerprint = self.signed_inputs(root, signed)
             original = full_browser_adapter.verify_full_browser_staged_consumer
             with (mock.patch.object(qualify, "verify_audit_against_staging") as staging,
@@ -1035,10 +1082,10 @@ class IndependentAdapterTests(unittest.TestCase):
                                     "verify_full_browser_staged_consumer",
                                     side_effect=original) as replay):
                 verified = independent_adapter.verify_lanes(
-                    BROWSER_PRODUCER, BROWSER_CANDIDATE, suite, archive_map,
+                    producer, BROWSER_CANDIDATE, suite, archive_map,
                     audit, signature, public, fingerprint,
                     candidate_manifest=candidate, artifact_audit=staged)
-            staging.assert_called_once_with(staged, BROWSER_PRODUCER)
+            staging.assert_called_once_with(staged, producer)
             self.assertEqual(4, replay.call_count)
             for call in replay.call_args_list:
                 lane = call.args[2]
@@ -1052,21 +1099,20 @@ class IndependentAdapterTests(unittest.TestCase):
     def test_signed_browser_expectations_and_generic_failure_control_dispatch(self):
         import full_browser_adapter
 
-        if not BROWSER_PRODUCER.is_dir():
-            self.skipTest("retained browser producer checkout is unavailable")
-        if not self.historical_browser_verifier_matches():
-            self.skipTest("historical browser replay requires its exact verifier source")
+        producer, archives = self.retained_browser_inputs()
+        self.assertTrue(self.historical_browser_verifier_matches(producer),
+                        "supplied historical browser requires its exact verifier source")
         lane = "js:Chromium:current:development"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
-                root, [lane])
+                root, [lane], repository=producer, archive_root=archives)
 
             def check(audit_input, archive_map_path=archive_map):
                 audit, signature, public, fingerprint = self.signed_inputs(root, audit_input)
                 with mock.patch.object(qualify, "verify_audit_against_staging"):
                     return independent_adapter.verify_lanes(
-                        BROWSER_PRODUCER, BROWSER_CANDIDATE, suite, archive_map_path,
+                        producer, BROWSER_CANDIDATE, suite, archive_map_path,
                         audit, signature, public, fingerprint,
                         candidate_manifest=candidate, artifact_audit=staged)
 
@@ -1103,11 +1149,10 @@ class IndependentAdapterTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "differs from independent gate"):
                     check(signed)
 
-            resealed = Path("/var/home/stewart/dyn4k-evidence/session-control/"
-                            "full-browser-f565-review-findings-sol-control-resealed-selected")
+            resealed = archives / "full-browser-f565-review-findings-sol-control-resealed-selected"
             self.assertTrue(resealed.is_dir(), "retained resealed browser control is missing")
             _, _, _, bad_map, bad_signed = self.browser_signed_fixture(
-                root, [lane], archive_override=resealed)
+                root, [lane], archive_override=resealed, repository=producer)
             with mock.patch.object(full_browser_adapter,
                                    "verify_full_browser_staged_consumer",
                                    return_value={"status": "PASSED"}) as fabricated:
@@ -1118,28 +1163,36 @@ class IndependentAdapterTests(unittest.TestCase):
 
     def test_historical_browser_archive_rejects_newer_public_verifier(self):
         import full_browser_adapter
+        import full_browser_consumer
 
-        if not BROWSER_PRODUCER.is_dir():
-            self.skipTest("retained browser producer checkout is unavailable")
-        if self.historical_browser_verifier_matches():
-            self.skipTest("historical verifier matches this checkout")
         lane = "js:Chromium:current:development"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            archive = root / "historical-browser-fixture"
+            archive.mkdir()
+            (archive / "receipt.json").write_text(json.dumps({
+                "schema": 1, "candidate_sha": BROWSER_CANDIDATE,
+                "lane": lane, "status": "PASSED", "consumer_contract_sha256": "0" * 64,
+                "runtime_identity": f"{platform.system()} {platform.release()} {platform.machine()}",
+            }))
             suite, candidate, staged, archive_map, signed = self.browser_signed_fixture(
-                root, [lane])
+                root, [lane], archive_override=archive)
             audit, signature, public, fingerprint = self.signed_inputs(root, signed)
             with (mock.patch.object(qualify, "verify_audit_against_staging"),
+                  mock.patch.object(full_browser_consumer, "original",
+                                    return_value=b"historical verifier fixture\n") as original,
                   mock.patch.object(full_browser_adapter,
                                     "verify_full_browser_staged_consumer") as replay):
                 verified = independent_adapter.verify_lanes(
-                    BROWSER_PRODUCER, BROWSER_CANDIDATE, suite, archive_map,
+                    ROOT, BROWSER_CANDIDATE, suite, archive_map,
                     audit, signature, public, fingerprint,
                     candidate_manifest=candidate, artifact_audit=staged)
             gate = verified[lane]["verification"]["gates"]["staged-consumer"]
             self.assertEqual("FAILED", gate["status"])
             self.assertIn("public Chromium verifier differs from exact candidate",
                           gate["reason"])
+            original.assert_called_once_with(
+                ROOT, BROWSER_CANDIDATE, "tools/qualification/full_browser_consumer.py")
             replay.assert_not_called()
 
     def test_signed_schema3_chromium_adapter_handoff_and_wrong_module_map(self):

@@ -401,12 +401,58 @@ class FullCorpusGateTest(unittest.TestCase):
                 self.assertTrue(any("missing" in problem for problem in result["problems"]), area)
             core_path.write_bytes(original_xml)
 
+    def test_checkout_fixture_rejects_untracked_and_ignored_candidate_inputs(self):
+        subprocess.run(["git", "init", "--quiet", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Fixture",
+                        "-c", "user.email=fixture@example.invalid", "commit", "--quiet",
+                        "-m", "Candidate fixture"], check=True)
+        candidate = subprocess.check_output(
+            ["git", "-C", str(self.root), "rev-parse", "HEAD"], text=True).strip()
+        self.assertEqual([], full_corpus.candidate_checkout_problems(self.root, candidate))
+        for relative in (
+                "dyn4k-core/src/commonMain/kotlin/.pytest_cache/UntrackedCandidateCode.kt",
+                "dyn4k-core/src/commonMain/kotlin/org/dyn4j/UntrackedCandidateCode.kt",
+                "dyn4k-core/src/commonTest/kotlin/Extra.kt",
+                "dyn4k/src/commonMain/kotlin/Extra.kt", "buildSrc/src/main/kotlin/Extra.kt",
+                "gradle/extra.gradle.kts", "scripts/extra.py", "local.properties"):
+            with self.subTest(relative=relative):
+                source = self.root / relative
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text("candidate input\n")
+                for ignored in (False, True):
+                    (self.root / ".git/info/exclude").write_text(relative if ignored else "")
+                    problems = full_corpus.candidate_checkout_problems(self.root, candidate)
+                    self.assertTrue(any(relative in problem for problem in problems), problems)
+                source.unlink()
+                self.assertEqual([], full_corpus.candidate_checkout_problems(self.root, candidate))
+
+    def test_supplied_missing_empty_or_wrong_revision_upstream_is_not_skipped(self):
+        subprocess.run(["git", "init", "--quiet", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Fixture",
+                        "-c", "user.email=fixture@example.invalid", "commit", "--quiet",
+                        "--allow-empty", "-m", "Wrong upstream revision"], check=True)
+        for supplied in ("", str(self.root / "missing-upstream"), str(self.root)):
+            with self.subTest(supplied=supplied), mock.patch.dict(
+                    os.environ, {"DYN4K_UPSTREAM_SOURCE": supplied}):
+                with self.assertRaises((AssertionError, subprocess.CalledProcessError)):
+                    self.test_untracked_common_main_is_rejected_before_and_after_run_and_by_verify()
+
     def test_untracked_common_main_is_rejected_before_and_after_run_and_by_verify(self):
         repository = Path(__file__).resolve().parents[2]
+        if "DYN4K_UPSTREAM_SOURCE" not in os.environ:
+            self.skipTest("optional pinned corpus requires DYN4K_UPSTREAM_SOURCE")
+        self.assertTrue(os.environ["DYN4K_UPSTREAM_SOURCE"],
+                        "supplied upstream source path is empty")
         upstream = Path(os.environ["DYN4K_UPSTREAM_SOURCE"])
         revision = subprocess.check_output(["git", "-C", str(upstream), "rev-parse", "HEAD"],
                                            text=True).strip()
         self.assertEqual(full_corpus.ORIGINAL_REVISION, revision)
+        self.assertEqual("", subprocess.check_output(
+            ["git", "-C", str(upstream), "status", "--porcelain", "--untracked-files=all"],
+            text=True).strip(), "supplied upstream checkout is dirty or incomplete")
+        self.assertEqual(199, len(list((upstream / "src/test/java").rglob("*.java"))),
+                         "supplied upstream test inventory is incomplete")
         with tempfile.TemporaryDirectory(prefix="fc-", dir=repository.parent) as directory:
             clone = Path(directory) / "candidate"
             if os.name == "nt":
