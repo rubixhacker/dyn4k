@@ -68,3 +68,11 @@ jobs:
             PYTHONDONTWRITEBYTECODE=1 \
             PYTHONPATH=tools/numerical/portable/boolean_rotation_jdi \
             python3 -B -m unittest -v test_jdi_wait
+      - name: Test qualification manifest and publication contracts
+        run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/qualification python3 -B -m unittest -v test_full_suite_manifest test_publication
+      - name: Test independent qualification gate seams
+        run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/qualification python3 -B -m unittest -v test_independent_gates
+      - name: Check migration guide links and claims
+        run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 python3 -B docs/guide/check_links.py
+      - name: Test migration guide checks
+        run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=docs/guide python3 -B -m unittest -v test_checks

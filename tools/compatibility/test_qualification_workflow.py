@@ -237,6 +237,20 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "PYTHONDONTWRITEBYTECODE=1 "
                  "PYTHONPATH=tools/numerical/portable/boolean_rotation_jdi "
                  "python3 -B -m unittest -v test_jdi_wait"),
+                ("name: Test qualification manifest and publication contracts",
+                 "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
+                 "PYTHONPATH=tools/qualification python3 -B -m unittest -v "
+                 "test_full_suite_manifest test_publication"),
+                ("name: Test independent qualification gate seams",
+                 "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
+                 "PYTHONPATH=tools/qualification python3 -B -m unittest -v "
+                 "test_independent_gates"),
+                ("name: Check migration guide links and claims",
+                 "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
+                 "python3 -B docs/guide/check_links.py"),
+                ("name: Test migration guide checks",
+                 "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
+                 "PYTHONPATH=docs/guide python3 -B -m unittest -v test_checks"),
             ],
             step_contract,
         )
@@ -428,6 +442,26 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.assert_source_checks_job_contract(without_capture)
 
+    def test_added_source_ci_gates_are_required_with_deletion_controls(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assert_source_checks_job_contract(source)
+        mutations = (
+            ("39-test manifest and publication command",
+             "test_full_suite_manifest test_publication", "test_full_suite_manifest"),
+            ("independent-gates suite", "-m unittest -v test_independent_gates",
+             "-m unittest -v"),
+            ("guide link and claim check", "docs/guide/check_links.py",
+             "docs/guide/check_examples.py"),
+            ("five-test guide check suite", "-m unittest -v test_checks",
+             "-m unittest -v"),
+        )
+        for name, old, new in mutations:
+            with self.subTest(mutation=name):
+                self.assertEqual(1, source.count(old), name)
+                mutated = source.replace(old, new, 1)
+                with self.assertRaises(AssertionError):
+                    self.assert_source_checks_job_contract(mutated)
+
     def test_push_and_pull_request_do_not_schedule_qualification_jobs(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertEqual(["workflow_dispatch"], list(workflow_event_blocks(workflow)))
@@ -512,7 +546,11 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "      - name: Test hosted runner guard",
              "      - name: Verify pinned GNU MPFR runtime",
              "      - name: Test source-only numerical regressions",
-             "      - name: Test bounded JDI wait on JDK 21"],
+             "      - name: Test bounded JDI wait on JDK 21",
+             "      - name: Test qualification manifest and publication contracts",
+             "      - name: Test independent qualification gate seams",
+             "      - name: Check migration guide links and claims",
+             "      - name: Test migration guide checks"],
             step_names,
         )
         step = re.search(
