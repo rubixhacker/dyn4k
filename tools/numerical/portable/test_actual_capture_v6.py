@@ -165,6 +165,33 @@ class FocusedReplayTest(unittest.TestCase):
                 actual_output_v6.verify_observer(
                     packed([rows[0], added, *rows[1:]]), interpreter,
                     paths, identities, producer, producer)
+        prefix = (
+            f'1.000001 openat(AT_FDCWD, "{paths[0]}", O_RDONLY) = 7<{paths[0]}>',
+            f'1.000002 read(7<{paths[0]}>, "x", 1) = 1',
+            f'1.000003 close(7<{paths[0]}>) = 0')
+        with self.assertRaises(Rejected):
+            actual_output_v6.verify_observer(
+                packed([*prefix, *rows]), interpreter, paths, identities,
+                producer, producer)
+        with self.assertRaises(Rejected):
+            actual_output_v6.verify_observer(
+                packed([*(line.replace("1.00000", "2.00000") for line in prefix),
+                        *rows]), interpreter, paths, identities,
+                producer, producer)
+        unprotected = (
+            '1.000001 openat(AT_FDCWD, "/usr/lib/loader", O_RDONLY) = '
+            '7</usr/lib/loader>',
+            '1.000002 read(7</usr/lib/loader>, "x", 1) = 1',
+            '1.000003 close(7</usr/lib/loader>) = 0')
+        self.assertEqual(actual_output_v6.verify_observer(
+            packed([*unprotected, *rows]), interpreter, paths, identities,
+            producer, producer)["status"], "PROVED_V6_OUTPUT_OBSERVER")
+        mention = (f'1.000004 write(1<pipe:[8]>, '
+                   f'{json.dumps(paths[0])}, {len(paths[0])}) = {len(paths[0])}')
+        self.assertEqual(actual_output_v6.verify_observer(
+            packed([*unprotected, mention, *rows]), interpreter, paths,
+            identities, producer, producer)["status"],
+            "PROVED_V6_OUTPUT_OBSERVER")
 
     def test_version6_auxiliary_socket_requires_shared_live_object(self):
         payload = b"NUMERICAL_JSON {}\n"
@@ -202,6 +229,71 @@ class FocusedReplayTest(unittest.TestCase):
                     b'1.000007 close(56<TCP:[local->remote]>) = 0\n', b""))):
             with self.subTest(change=label), self.assertRaises(Rejected):
                 check(worker, writer)
+        for label, added in (
+                ("sendto", 'sendto(56<TCP:[local->remote]>, "x", 1, 0, '
+                 'NULL, 0) = 1'),
+                ("writev", 'writev(56<TCP:[local->remote]>, '
+                 '[{iov_base="x", iov_len=1}], 1) = 1'),
+                ("sendfile", 'sendfile(56<TCP:[local->remote]>, '
+                 '9<pipe:[7]>, NULL, 1) = 1'),
+                ("splice", 'splice(9<pipe:[7]>, NULL, '
+                 '56<TCP:[local->remote]>, NULL, 1, 0) = 1'),
+                ("copy_file_range", 'copy_file_range(9<pipe:[7]>, NULL, '
+                 '56<TCP:[local->remote]>, NULL, 1, 0) = 1'),
+                ("pwrite64", 'pwrite64(56<TCP:[local->remote]>, '
+                 '"x", 1, 0) = 1'),
+                ("pwritev", 'pwritev(56<TCP:[local->remote]>, '
+                 '[{iov_base="x", iov_len=1}], 1, 0) = 1'),
+                ("sendmsg", 'sendmsg(56<TCP:[local->remote]>, '
+                 '{msg_iov=[{iov_base="x", iov_len=1}]}, 0) = 1')):
+            with self.subTest(change=label), self.assertRaises(Rejected):
+                check(parent, child.replace(
+                    b'1.000007 close(',
+                    f'1.0000061 {added}\n1.000007 close('.encode()))
+        extra = ('1.0000061 write(56<TCP:[local->remote]>, "x", 1) = 1\n'
+                 '1.000008 +++ exited with 0 +++\n').encode()
+        copied_parent = parent.replace(
+            b'1.000003 socket(',
+            b'1.0000021 clone(flags=CLONE_VM) = 43\n'
+            b'1.000003 socket(')
+        with self.assertRaises(Rejected):
+            traces = {"41": copied_parent, "42": child, "43": extra}
+            from numeric_producer_trace import _events
+            actual_output_v6.prove_socket_writers(
+                traces, _events(traces, ()), "41", ("41", "59"))
+        shared_parent = parent.replace(
+            b'1.000003 socket(',
+            b'1.0000021 clone(flags=CLONE_THREAD|CLONE_VM|CLONE_FILES) = 43\n'
+            b'1.000003 socket(')
+        traces = {"41": shared_parent, "42": child, "43": extra}
+        from numeric_producer_trace import _events
+        with self.assertRaises(Rejected):
+            actual_output_v6.prove_socket_writers(
+                traces, _events(traces, ()), "41", ("41", "59"))
+        child_extra = child.replace(
+            b'1.000007 close(',
+            b'1.0000061 write(56<TCP:[local->remote]>, "x", 1) = 1\n'
+            b'1.000007 close(')
+        traces = {"41": parent, "42": child_extra}
+        _, proof = actual_output_v6.prove_socket_writers(
+            traces, _events(traces, ()), "41", ("41", "59"))
+        self.assertEqual(proof[0]["writes"], 2)
+        unmodelled = extra.replace(
+            b'write(56<TCP:[local->remote]>, "x", 1) = 1',
+            b'sendto(56<TCP:[local->remote]>, "x", 1, 0, NULL, 0) = 1')
+        traces = {"41": shared_parent, "42": child, "43": unmodelled}
+        with self.assertRaises(Rejected):
+            actual_output_v6.prove_socket_writers(
+                traces, _events(traces, ()), "41", ("41", "59"))
+        unrelated = ('1.0000061 sendto(560<TCP:[other]>, "x", 1, 0, '
+                     'NULL, 0) = 1\n'
+                     '1.0000062 write(9<pipe:[7]>, '
+                     '"56<TCP:[local->remote]>", 23) = 23\n')
+        traces = {"41": parent, "42": child.replace(
+            b'1.000007 close(', unrelated.encode() + b'1.000007 close(')}
+        _, proof = actual_output_v6.prove_socket_writers(
+            traces, _events(traces, ()), "41", ("41", "59"))
+        self.assertEqual(proof[0]["writes"], 1)
 
     def test_version6_source_binding_precedes_legacy_writer_selection(self):
         commit = "a" * 40

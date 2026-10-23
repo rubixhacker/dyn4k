@@ -4,7 +4,7 @@ import json
 import re
 import zipfile
 
-from actual_trace import (_project_descriptors, _validate_calls,
+from actual_trace import (_arguments, _project_descriptors, _validate_calls,
                           _version6_fd_token, normalize_rich_traces,
                           trace_exposes_environment)
 from boolean_rotation_jdi import jdi_bridge
@@ -67,6 +67,24 @@ def _opening(call):
              "version 6 output open descriptor differs")
     token = call[result_at + 4 + len(fd) + 1:end - 1]
     return match[1], match[2], fd, token
+
+
+def _protected_observer_operand(call, paths):
+    operand = _first_descriptor(call)
+    if operand is not None and operand[1] in paths:
+        return True
+    name = call.split("(", 1)[0]
+    if name not in ("open", "openat", "openat2", "stat", "lstat",
+                    "newfstatat", "statx", "rename", "renameat",
+                    "renameat2", "unlink", "unlinkat", "truncate"):
+        return False
+    for argument in _arguments(call):
+        if (argument.startswith('"') and argument.endswith('"') and
+                quoted(argument).decode("utf-8") in paths):
+            return True
+        if any(argument.endswith("<" + path + ">") for path in paths):
+            return True
+    return False
 
 
 def observer_command(interpreter, paths):
@@ -140,10 +158,14 @@ def verify_observer(raw_zip, interpreter, paths, identities, worker_events,
     active = None
     observed = {}
     next_role = 0
-    for stamp, _, _, call in events:
-        if stamp < start:
+    started = False
+    for _, _, _, call in events:
+        if not started and call != execs[0][1]:
+            _require(not _protected_observer_operand(call, paths),
+                     "version 6 observer protected launch action differs")
             continue
         if call == execs[0][1]:
+            started = True
             continue
         opened = _opening(call)
         if opened and quoted(opened[0]).decode("utf-8") in paths:
@@ -181,8 +203,7 @@ def verify_observer(raw_zip, interpreter, paths, identities, worker_events,
                              "writev(", "pwrite", "rename(", "unlink(",
                              "truncate(", "ftruncate(", "close_range(",
                              "socket(", "sendto(", "sendmsg(")) or
-                any('"' + path + '"' in call or '<' + path + '>' in call
-                    for path in paths)):
+                _protected_observer_operand(call, paths)):
             raise Rejected("version 6 observer protected action differs: " +
                            call.split("(", 1)[0])
     _require(next_role == 4 and active is None and set(observed) == set(ROLES),
@@ -233,6 +254,21 @@ def _first_descriptor(call):
     fd, end = _version6_fd_token(call, opening.end())
     decoration = call[opening.end() + len(fd) + 1:end - 1]
     return fd, decoration
+
+
+def _socket_output_operand(call, fd):
+    name = call.split("(", 1)[0]
+    position = ({"write": 0, "writev": 0, "pwrite64": 0,
+                 "pwritev": 0, "sendto": 0, "sendmsg": 0,
+                 "sendfile": 0, "copy_file_range": 2,
+                 "splice": 2}.get(name))
+    if position is None:
+        return False
+    projected = _project_descriptors(call, version6_raw=True)
+    arguments = _arguments(projected)
+    _require(position < len(arguments),
+             "version 6 socket transfer arguments differ")
+    return arguments[position] == fd
 
 
 def prove_file_lifetime(traces, events, root, path, data, identity, role):
@@ -413,7 +449,7 @@ def prove_socket_writers(traces, events, root, mirror,
                 provider_count += 1
                 continue
             if active is None:
-                if (tid, fd) in sockets and call.startswith("write("):
+                if tid in shared and _socket_output_operand(call, fd):
                     raise Rejected("version 6 socket write preceded provider")
                 continue
             if (call.startswith(("clone(", "clone3(", "fork(", "vfork(")) and
@@ -440,7 +476,8 @@ def prove_socket_writers(traces, events, root, mirror,
                                (":" + operation[1] if (operation := re.search(
                                    r", (F_[A-Z0-9_]+)", call)) else ""))
             if tid not in shared:
-                if re.match(r"(?:write|close|connect)" + operand, call):
+                if (_socket_output_operand(call, fd) or
+                        re.match(r"(?:close|connect)" + operand, call)):
                     raise Rejected("version 6 socket writer table differs")
                 continue
             if last_stamp == stamp and last_tid != tid and (
@@ -456,10 +493,17 @@ def prove_socket_writers(traces, events, root, mirror,
                          "version 6 socket connect differs")
                 connects += 1
                 continue
-            transfer = (_write_payload(call) if re.match(
-                r"(?:write|writev)\(" + re.escape(fd) + r"<", call) else None)
+            output = _socket_output_operand(call, fd)
+            if output and not call.startswith("write("):
+                raise Rejected("version 6 socket transfer is unsupported")
+            transfer = _write_payload(call) if output else None
+            if output and transfer is None:
+                raise Rejected("version 6 socket write is incomplete")
             if transfer and transfer[0] == fd:
-                _require(connects == 1 and transfer[1].startswith(("TCP:[", "TCPv6:[")),
+                _require((tid, fd) in sockets,
+                         "version 6 socket writer is outside the proved stream")
+                _require(connects == 1 and
+                         transfer[1].startswith(("TCP:[", "TCPv6:[")),
                          "version 6 socket write lacked live connection")
                 all_writes += 1
                 if any(prefix in transfer[2] for prefix in _WITNESS_PREFIXES):

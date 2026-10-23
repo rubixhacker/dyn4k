@@ -40,7 +40,11 @@ Version 6 binds the direct mirror before it selects a projected operation writer
 
 After the complete Gradle and helper process graphs exit, one traced read-only observer checks the four output objects in a fixed role order. The observer runs a fixed source literal through the measured capture interpreter. Replay checks its executable bytes, argument list, declared controlled environment, trace inventory, ordered no-follow opens, status calls, closes and zero exit. Each observed device and inode must match the original writer object; each final size must match the complete raw writes and archived bytes. The observer raw ZIP is part of the exact receipt and privacy scan. A rejected observer trace remains in the private UNVERIFIED directory and counts toward the existing budget.
 
+The observer also checks protected operands before interpreter exec. Unprotected launch calls may precede exec. Protected input or output work in that prefix rejects, including calls recorded at the same timestamp as exec.
+
 Every other operation-marked write stream remains visible. Version 6 requires complete XML-ordered marker copies and an independent live local socket object with all writes and a final close across proved shared-table threads. This is a local output classification. It does not identify the remote peer or the application protocol. Unknown or partial marked channels reject. Versions 3 through 5 retain their single marked stream rule. The JDWP socket and handshake proof stays separate.
+
+The socket proof credits only complete writes that the projected writer can model. It rejects other output calls on that live socket, including vector writes, sends and file-to-socket transfers. It checks output operands without treating FD digits or path text in quoted payloads as operands.
 
 ## Capture and replay
 
