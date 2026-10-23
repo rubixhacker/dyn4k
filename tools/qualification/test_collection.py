@@ -19,8 +19,6 @@ HEAD = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
 
 EXPECTED_CENTRAL_NEEDS = ["staged-jvm-and-linux", "hosted-publications",
                           "hosted-native"]
-EXPECTED_PUSH_BRANCHES = ["main", "codex/port-qualification-harness",
-                          "codex/dyn4k-port", "codex/port-publication-assembly"]
 
 
 def _mapping_block(lines, key, indentation, start=0, limit=None, required=True):
@@ -97,19 +95,16 @@ def central_collection_needs(workflow):
     return _block_list_values(lines, needs[0] + 1, needs[1], 6)
 
 
-def workflow_push_branches(workflow):
+def workflow_events(workflow):
     lines = workflow.splitlines()
     on_block = _mapping_block(lines, "on:", 0)
-    push_block = _mapping_block(lines, "push:", 2, on_block[0] + 1, on_block[1])
-    branches = _mapping_block(lines, "branches:", 4,
-                              push_block[0] + 1, push_block[1])
-    return _block_list_values(lines, branches[0] + 1, branches[1], 6)
+    return [line.strip() for line in lines[on_block[0] + 1:on_block[1]]
+            if line.startswith("  ") and line[2:3] not in ("", " ", "#")]
 
 
-def assert_main_push_trigger(workflow):
-    branches = workflow_push_branches(workflow)
-    if branches != EXPECTED_PUSH_BRANCHES:
-        raise AssertionError("push branch patterns differ from the approved list")
+def assert_manual_qualification_trigger(workflow):
+    if workflow_events(workflow) != ["workflow_dispatch:"]:
+        raise AssertionError("full qualification must require manual dispatch")
 
 
 class CollectionTests(unittest.TestCase):
@@ -290,7 +285,7 @@ class CollectionTests(unittest.TestCase):
 
     def test_workflow_runs_after_producers_and_retains_raw_results(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
-        assert_main_push_trigger(workflow)
+        assert_manual_qualification_trigger(workflow)
         self.assertEqual(EXPECTED_CENTRAL_NEEDS, central_collection_needs(workflow))
         for command in ("actions/download-artifact@v4", "collection.py --verify",
                         "independent_gates.py", "qualify.py record",
@@ -298,22 +293,20 @@ class CollectionTests(unittest.TestCase):
             self.assertIn(command, workflow)
         self.assertIn("if: always()", workflow)
 
-    def test_main_push_trigger_rejects_later_negative_branch_pattern(self):
+    def test_full_qualification_rejects_automatic_triggers(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
-        branch_block = (
-            "    branches:\n"
-            "      - main\n"
-            "      - codex/port-qualification-harness\n"
-            "      - codex/dyn4k-port\n"
-            "      - codex/port-publication-assembly\n"
-        )
-        self.assertEqual(1, workflow.count(branch_block))
-        excluded_main = workflow.replace(
-            branch_block, branch_block + "      - '!main'\n", 1)
-        self.assertEqual(EXPECTED_PUSH_BRANCHES + ["!main"],
-                         workflow_push_branches(excluded_main))
-        with self.assertRaisesRegex(AssertionError, "approved list"):
-            assert_main_push_trigger(excluded_main)
+        for event in ("push", "pull_request", "schedule", "workflow_run"):
+            with self.subTest(event=event):
+                altered = workflow.replace("on:\n", f"on:\n  {event}:\n", 1)
+                with self.assertRaisesRegex(AssertionError, "manual dispatch"):
+                    assert_manual_qualification_trigger(altered)
+
+    def test_cheap_source_checks_run_on_push_and_pull_request(self):
+        workflow = (ROOT / ".github/workflows/qualification-source-checks.yml").read_text()
+        self.assertEqual(["push:", "pull_request:"], workflow_events(workflow))
+        for command in ("guard_hosted_runners.py", "test_qualification_workflow",
+                        "test_guard_hosted_runners", "python3 -B -m unittest"):
+            self.assertIn(command, workflow)
 
     def test_central_workflow_dependencies_reject_invalid_and_later_job_lists(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
