@@ -10,9 +10,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/windows-collision-focus.yml"
+PRODUCER = ROOT / "tools/diagnostic/windows_collision/run-focused-controls.ps1"
 HELPER = ROOT / "tools/compatibility/windows_collision_focus.py"
 sys.path.insert(0, str(ROOT))
 from tools.compatibility import windows_collision_focus as focus
+from tools.compatibility.test_qualification_workflow import workflow_event_blocks
 
 
 FIXTURE_SHAPES = {
@@ -208,14 +210,20 @@ def write_reports(directory, omit=None, original_case_mutation=None):
     return native_rows, java_rows
 
 
-def require_workflow_contract(workflow, helper):
-    trigger_section = workflow.split("on:\n", 1)[1].split("\npermissions:", 1)[0]
-    triggers = [line.strip()[:-1] for line in trigger_section.splitlines()
-                if line.startswith("  ") and line.endswith(":")]
+def require_workflow_contract(workflow, helper, producer):
+    triggers = list(workflow_event_blocks(workflow))
     if triggers != ["workflow_dispatch"]:
         raise AssertionError(f"Expected workflow_dispatch only, found {triggers}")
-    if "tools/compatibility/windows_collision_focus.py" not in workflow:
-        raise AssertionError("The workflow must invoke the shared report validator")
+    delegated_call = (
+        "& (Join-Path $PWD 'tools/diagnostic/windows_collision/run-focused-controls.ps1') "
+        "-Route $env:DYN4K_COLLISION_ROUTE"
+    )
+    if delegated_call not in workflow:
+        raise AssertionError("The workflow must invoke the focused controls producer")
+    if "DYN4K_COLLISION_ROUTE: ${{ inputs.route }}" not in workflow:
+        raise AssertionError("The workflow must pass the selected route to the producer")
+    if "tools/compatibility/windows_collision_focus.py" not in producer:
+        raise AssertionError("The producer must invoke the shared report validator")
     if "if actual_names != expected_names:" not in helper:
         raise AssertionError("The shared validator must reject an incomplete report set")
     if "len(records) != 72" not in helper:
@@ -224,30 +232,44 @@ def require_workflow_contract(workflow, helper):
         raise AssertionError("The shared validator must compare trace identities")
     if "ORIGINAL_CASES" not in helper or "contains skipped cases" not in helper:
         raise AssertionError("The shared validator must check original cases and reject skips")
-    if "--collection-status" not in workflow or "--validation-status" not in workflow:
-        raise AssertionError("The workflow must record post-Gradle status separately")
+    if "--collection-status $collectionStatus" not in producer:
+        raise AssertionError("The producer must report collection status")
+    if "--validation-status $validationStatus" not in producer:
+        raise AssertionError("The producer must report validation status")
+    for evidence in (
+            "gradle-console.log", "gradle-exit-code.txt", "java-console.log",
+            "java-exit-code.txt", "baseline-source-revision.txt",
+            "runner-runtime-identity.txt", "sha256-inventory.txt",
+            "collection-status.txt", "validation-status.txt"):
+        if evidence not in producer:
+            raise AssertionError(f"The producer must record {evidence}")
 
 
 class WindowsCollisionFocusWorkflowContractTest(unittest.TestCase):
     def setUp(self):
         self.workflow = WORKFLOW.read_text()
+        self.producer = PRODUCER.read_text()
         self.helper = HELPER.read_text()
 
     def test_workflow_is_manual_scoped_and_uses_exact_windows_target(self):
-        require_workflow_contract(self.workflow, self.helper)
+        require_workflow_contract(self.workflow, self.helper, self.producer)
         self.assertIn("runs-on: windows-2025", self.workflow)
         self.assertIn("ref: ${{ github.sha }}", self.workflow)
         self.assertIn("actions/setup-java@v4", self.workflow)
         self.assertIn("java-version: '21'", self.workflow)
         self.assertIn("gradle/actions/setup-gradle@v4", self.workflow)
-        self.assertIn(":dyn4k-core:mingwX64Test", self.workflow)
-        selected = set(re.findall(r"--tests '([^']+)'", self.workflow))
+        self.assertIn("${{ runner.temp }}/windows-collision-focus/", self.workflow)
+        self.assertIn("Join-Path $env:RUNNER_TEMP 'windows-collision-focus'", self.producer)
+        selected = set(re.findall(r"--tests '([^']+)'", self.producer))
         expected_classes = set(focus.SUITES)
         self.assertEqual(expected_classes, selected)
-        self.assertIn("--no-daemon --rerun-tasks --console=plain", self.workflow)
-        self.assertIn("run-java-control.ps1", self.workflow)
-        self.assertIn("204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e", self.workflow)
-        self.assertIn("058bf6d982a0fb89b54050f929f6ea9dae53b714", self.workflow)
+        self.assertIn(":dyn4k-core:mingwX64Test", self.producer)
+        self.assertIn("--no-daemon --rerun-tasks --console=plain", self.producer)
+        self.assertIn("run-java-control.ps1", self.producer)
+        self.assertIn("-PwindowsCollisionPrecisionDiagnostic=true", self.producer)
+        self.assertIn("204ca8dd55626ad3727b82dacb37df1800c5eff0d6bb6e782b6e5af5162b2b3e", self.producer)
+        self.assertIn("058bf6d982a0fb89b54050f929f6ea9dae53b714", self.producer)
+        self.assertIn("kotlin-native-prebuilt-windows-x86_64-2.4.20", self.producer)
 
     def test_frozen_original_case_ids_match_all_six_kotlin_test_sources(self):
         for suite, case_ids in focus.ORIGINAL_CASES.items():
@@ -262,14 +284,28 @@ class WindowsCollisionFocusWorkflowContractTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             require_workflow_contract(
                 self.workflow.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  push:\n", 1),
-                self.helper,
+                self.helper, self.producer,
+            )
+        nested_push = self.workflow.replace(
+            "      route:\n", "      push:\n        description: Input named push\n      route:\n", 1)
+        require_workflow_contract(nested_push, self.helper, self.producer)
+        with self.assertRaises(AssertionError):
+            require_workflow_contract(
+                self.workflow.replace("run-focused-controls.ps1", "other-controls.ps1", 1),
+                self.helper, self.producer,
             )
         with self.assertRaises(AssertionError):
             require_workflow_contract(self.workflow, self.helper.replace(
-                "if actual_names != expected_names:", "if actual_names == expected_names:", 1))
+                "if actual_names != expected_names:", "if actual_names == expected_names:", 1),
+                self.producer)
         with self.assertRaises(AssertionError):
             require_workflow_contract(self.workflow, self.helper.replace(
-                "len(records) != 72", "len(records) != 71", 1))
+                "len(records) != 72", "len(records) != 71", 1), self.producer)
+        with self.assertRaises(AssertionError):
+            require_workflow_contract(
+                self.workflow, self.helper,
+                self.producer.replace("baseline-source-revision.txt", "baseline-revision.txt", 1),
+            )
 
     def test_empty_skipped_and_missing_original_cases_fail_the_shared_helper(self):
         suite = "org.dyn4j.coverage.collision.shapes.a.CapsuleSliceTest"
@@ -413,40 +449,45 @@ class WindowsCollisionFocusWorkflowContractTest(unittest.TestCase):
                 "runner-runtime-identity.txt", "sha256-inventory.txt",
                 "collection-status.txt", "validation-status.txt"):
             with self.subTest(evidence=evidence):
-                self.assertIn(evidence, self.workflow)
+                self.assertIn(evidence, self.producer)
         self.assertIn("if: always()", self.workflow)
         self.assertIn("actions/upload-artifact@v4", self.workflow)
         self.assertIn("if-no-files-found: error", self.workflow)
-        self.assertIn("windows_collision_focus.py status", self.workflow)
-        self.assertLess(self.workflow.index("run-java-control.ps1"),
-                        self.workflow.index("windows_collision_focus.py"))
+        self.assertIn("windows_collision_focus.py status", self.producer)
+        self.assertIn("if-no-files-found: error", self.workflow)
+        self.assertLess(self.producer.index("run-java-control.ps1"),
+                        self.producer.index("windows_collision_focus.py status"))
+        self.assertIn("if ($statusExit -ne 0 -or $scalarExit -ne 0 -or -not $routeControlExit)",
+                      self.producer)
+        self.assertIn('throw "Focused controls failed:', self.producer)
         self.assertNotIn("full_corpus", self.workflow)
         self.assertNotIn("staging-repository", self.workflow)
 
     def test_native_report_errors_do_not_short_circuit_later_evidence_collection(self):
-        copy_catch = self.workflow.index('"Native XML copy failed for')
-        java_control = self.workflow.index("run-java-control.ps1")
-        runner_identity = self.workflow.index("runner-runtime-identity.txt")
-        inventory = self.workflow.index("sha256-inventory.txt")
-        status_decision = self.workflow.index("windows_collision_focus.py status")
+        copy_catch = self.producer.index('"Native XML copy failed for')
+        java_control = self.producer.index("run-java-control.ps1")
+        runner_identity = self.producer.index("runner-runtime-identity.txt")
+        inventory = self.producer.index("sha256-inventory.txt")
+        status_decision = self.producer.index("windows_collision_focus.py status")
         upload = self.workflow.index("Upload Windows collision evidence")
         self.assertLess(copy_catch, java_control)
         self.assertLess(java_control, runner_identity)
         self.assertLess(runner_identity, inventory)
         self.assertLess(inventory, status_decision)
-        self.assertLess(status_decision, upload)
-        self.assertIn("$collectionStatus = 1", self.workflow[copy_catch:java_control])
+        self.assertLess(self.workflow.index("run-focused-controls.ps1"),
+                        self.workflow.index("Upload Windows collision evidence"))
+        self.assertIn("$collectionStatus = 1", self.producer[copy_catch:java_control])
         self.assertIn("if: always()", self.workflow[upload:])
 
     def test_gradle_exit_is_written_once_and_collection_error_fails_final_status(self):
-        capture = self.workflow.index("$gradleExit = [string]$LASTEXITCODE")
+        capture = self.producer.index("$gradleExit = [string]$LASTEXITCODE")
         raw_write_line = "Set-Content -Path $gradleExitFile -Value $gradleExit"
-        raw_write = self.workflow.index(raw_write_line)
+        raw_write = self.producer.index(raw_write_line)
         self.assertLess(capture, raw_write)
-        self.assertEqual(1, self.workflow.count(raw_write_line))
-        self.assertIn("gradle-exit-code.txt", self.workflow)
-        self.assertNotIn("$gradleExit =", self.workflow[raw_write:])
-        self.assertIn("--gradle-exit-code $gradleExit", self.workflow)
+        self.assertEqual(1, self.producer.count(raw_write_line))
+        self.assertIn("gradle-exit-code.txt", self.producer)
+        self.assertNotIn("$gradleExit =", self.producer[raw_write:])
+        self.assertIn("--gradle-exit-code $gradleExit", self.producer)
 
         collector_failure = subprocess.run(
             [sys.executable, str(HELPER), "status", "--gradle-exit-code", "0",
