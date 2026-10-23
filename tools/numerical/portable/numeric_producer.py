@@ -20,7 +20,7 @@ from urllib.parse import unquote, urlparse
 
 from receipt import Rejected, digest, exact, _pairs, _reject_nonfinite
 from numeric_producer_trace import (Unbound, verify_transport, verify_stable_input,
-                                    select_worker_exec, worker_exec)
+                                    select_worker_exec, worker_exec, successful_execve)
 from numeric_class_witness import build_agent, read_witness, SCHEMA as WITNESS_SCHEMA
 
 SCHEMA = "portable-binary64-probe-receipt/2"
@@ -38,7 +38,8 @@ KEYS = {"schema", "candidate_commit", "source_sha256", "fixture_source_sha256",
         "trace_sha256", "primary_receipt_sha256", "geometry_case_sha256", "artifact_sha256",
         "runtime", "selected_test", "probe", "files", "proof"}
 PROOF_KEYS = {"worker_pid", "parent_pids", "worker_argv_sha256", "worker_exit",
-              "runtime_executable_sha256", "classpath_sha256", "class_archive_sha256",
+              "runtime_executable_sha256", "build_runtime_sha256", "classpath_sha256",
+              "class_archive_sha256",
               "provider_origins", "mirror_writer_tid", "mirror_fd", "mirror_destination",
               "mirror_sha256", "xml_sha256", "gradle_log_sha256", "trace_manifest_sha256",
               "class_witness"}
@@ -518,6 +519,30 @@ def verify_witness_loaders(definitions, loaded, helper, host="jvm"):
             "class witness focused worker loader relationship differs")
 
 
+def verify_build_runtime(traces, selected_exec):
+    build = str(WITNESS_JDK / "bin/java")
+    wrappers, daemons = [], []
+    for tid, data in traces.items():
+        for line in data.decode().splitlines():
+            if " execve(" not in line:
+                continue
+            executed = successful_execve(line.split(" ", 1)[1])
+            if executed is None:
+                continue
+            path, arguments = executed
+            if any(value.endswith(".GradleWorkerMain") for value in arguments) and \
+                    (tid, path, arguments) != selected_exec:
+                raise Rejected("additional or wrong-runtime test worker differs")
+            if "org.gradle.launcher.daemon.bootstrap.GradleDaemon" in arguments:
+                daemons.append((tid, path))
+            if any(token.endswith("/gradle/wrapper/gradle-wrapper.jar") for token in arguments):
+                wrappers.append((tid, path))
+    require(len(wrappers) == 1 and len(daemons) == 1 and
+            wrappers[0][1] == build and daemons[0][1] == build,
+            "Gradle build runtime differs from JDK 21")
+    return digest(build)
+
+
 def _witness(raw, source, metadata, traces, worker, payload, artifact, class_root,
              classpath_entries, selected_exec, scratch, host="jvm"):
     agent_path = Path(metadata["agent_path"])
@@ -685,6 +710,7 @@ def _proof(raw, receipt, cases, artifacts, scratch):
             digest(expected_executable) == runtime.get("executable_sha256"),
             "worker runtime executable differs")
     selected_exec = select_worker_exec(traces, expected_executable)
+    build_runtime_sha = verify_build_runtime(traces, selected_exec)
     executable, argv, startup, response_path, response, tokens = _startup(raw, selected_exec, host)
     proof = verify_transport(traces, metadata["mirror"], raw["mirror.log"], selected_exec,
                              response_path, response, mirror_identity=mirror_identity)
@@ -779,6 +805,7 @@ def _proof(raw, receipt, cases, artifacts, scratch):
                                       payload, Path(artifacts["target"]), class_root,
                                       entries, selected_exec, scratch, host)
     proof.update({"runtime_executable_sha256": digest(executable),
+                  "build_runtime_sha256": build_runtime_sha,
                   "classpath_sha256": sha(encoded(entries)),
                   "class_archive_sha256": sha(raw["compiled-classes.zip"]),
                   "provider_origins": origins, "xml_sha256": sha(raw["selected.xml"]),
@@ -791,7 +818,8 @@ def _validate_proof(proof):
     require(isinstance(proof, dict) and set(proof) == PROOF_KEYS,
             "numeric producer proof schema differs")
     pid = lambda value: type(value) is str and re.fullmatch(r"[1-9][0-9]*", value) is not None
-    digests = ("worker_argv_sha256", "runtime_executable_sha256", "classpath_sha256",
+    digests = ("worker_argv_sha256", "runtime_executable_sha256", "build_runtime_sha256",
+               "classpath_sha256",
                "class_archive_sha256", "mirror_sha256", "xml_sha256",
                "gradle_log_sha256", "trace_manifest_sha256")
     providers = {CLASS, "portable.PortableMatrixTest", "portable.NumericalRecorder",

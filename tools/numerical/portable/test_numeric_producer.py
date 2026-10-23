@@ -690,6 +690,29 @@ class StartupTest(unittest.TestCase):
             with self.assertRaisesRegex(Rejected, "class major"):
                 require_java8_classes({"test/portable/Test.class": major65}, jar, agent.getvalue())
 
+    def test_java8_build_and_worker_are_separate_executed_runtimes(self):
+        from numeric_producer import verify_build_runtime, WITNESS_JDK
+        build = str(WITNESS_JDK / "bin/java")
+        worker = "/jdk8/bin/java"
+        def event(path, arguments):
+            return ("1.0 execve(" + json.dumps(path) + ", " +
+                    json.dumps(arguments) + ", 0x0) = 0\n").encode()
+        selected = ("3", worker, (worker,
+                    "worker.org.gradle.process.internal.worker.GradleWorkerMain", "executor"))
+        traces = {
+            "1": event(build, [build, "-jar", "/repo/gradle/wrapper/gradle-wrapper.jar"]),
+            "2": event(build, [build, "org.gradle.launcher.daemon.bootstrap.GradleDaemon"]),
+            "3": event(worker, list(selected[2])),
+        }
+        self.assertEqual(verify_build_runtime(traces, selected),
+                         hashlib.sha256(Path(build).read_bytes()).hexdigest())
+        for changed in ({**traces, "2": event(worker, [worker,
+                         "org.gradle.launcher.daemon.bootstrap.GradleDaemon"])},
+                        {**traces, "4": event(worker, [worker,
+                         "worker.org.gradle.process.internal.worker.GradleWorkerMain", "extra"])}):
+            with self.assertRaises(Rejected):
+                verify_build_runtime(changed, selected)
+
     def test_witness_worker_requires_one_agent_and_guard_flags(self):
         from numeric_producer import verify_startup_log
         def raw(flags):
@@ -781,6 +804,7 @@ class ArchiveTest(unittest.TestCase):
             proof = {"worker_pid": "100", "parent_pids": ["1"],
                      "worker_argv_sha256": "0" * 64, "worker_exit": 0,
                      "runtime_executable_sha256": "0" * 64,
+                     "build_runtime_sha256": "0" * 64,
                      "classpath_sha256": "0" * 64, "class_archive_sha256": "0" * 64,
                      "provider_origins": {
                          name: "file:///classes" for name in (
@@ -914,6 +938,7 @@ class ArchiveTest(unittest.TestCase):
             return {"worker_pid": "100", "parent_pids": ["1"],
                     "worker_argv_sha256": "0" * 64, "worker_exit": 0,
                     "runtime_executable_sha256": "0" * 64,
+                    "build_runtime_sha256": "0" * 64,
                     "classpath_sha256": "0" * 64, "class_archive_sha256": "0" * 64,
                     "provider_origins": {
                         name: "file:///classes" for name in (
