@@ -28,6 +28,18 @@ def quoted(value):
     return result
 
 
+def successful_execve(call):
+    match = re.fullmatch(r'execve\((' + STRING + r'), \[(.*)\], .*\) = 0', call)
+    if match is None or "..." in match[2] or re.fullmatch(
+            STRING + r"(?:, " + STRING + r")*", match[2]) is None:
+        return None
+    try:
+        return (quoted(match[1]).decode("utf-8"),
+                tuple(quoted(item).decode("utf-8") for item in re.findall(STRING, match[2])))
+    except UnicodeDecodeError as error:
+        raise Rejected("worker executable or argument is not UTF-8") from error
+
+
 def _events(traces, protected):
     if not traces or len(traces) > MAX_THREADS or sum(map(len, traces.values())) > MAX_TRACE_BYTES:
         raise Rejected("trace budget or inventory differs")
@@ -83,19 +95,26 @@ def _buffer(call, vector=False):
     return value, int(match[3]) if match[3] else None
 
 
-def verify_stable_input(traces, path, expected_identity, worker, jar):
+def verify_stable_input(traces, path, expected_identity, worker, jar, selected_exec):
     events = _events(traces, (path,))
     groups = {}
     descriptors = {}
     path_identity = False
     worker_started = False
     worker_finished = False
+    selected_count = 0
     opened = []
     for _, tid, _, call in events:
         groups.setdefault(tid, tid)
         descriptors.setdefault(tid, {})
         if tid == worker and call.startswith(("execve(", "execveat(")) and call.endswith(" = 0"):
-            worker_started = True
+            if successful_execve(call) == selected_exec:
+                selected_count += 1
+                if selected_count != 1 or worker_finished:
+                    raise Rejected("agent input selected worker execution is ambiguous")
+                worker_started = True
+            elif worker_started:
+                worker_finished = True
         if tid == worker and call.startswith(("+++ exited with ", "+++ killed by ")):
             worker_finished = True
         if worker_finished and groups[tid] == worker and path in call:
@@ -242,7 +261,7 @@ def verify_stable_input(traces, path, expected_identity, worker, jar):
             raise Unbound("agent input close range is unsupported")
     if len(jar) != expected_identity["size"]:
         raise Rejected("agent input rebuilt JAR size differs")
-    if not worker_started or not worker_finished:
+    if selected_count != 1 or not worker_finished:
         raise Unbound("agent input worker execution or completion is unavailable")
     for item in opened:
         if item["reads"] or item["pending_maps"]:

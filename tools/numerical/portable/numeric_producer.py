@@ -19,7 +19,8 @@ import zipfile
 from urllib.parse import unquote, urlparse
 
 from receipt import Rejected, digest, exact, _pairs, _reject_nonfinite
-from numeric_producer_trace import Unbound, verify_transport, verify_stable_input, quoted, STRING
+from numeric_producer_trace import (Unbound, verify_transport, verify_stable_input,
+                                    successful_execve, quoted, STRING)
 from numeric_class_witness import build_agent, read_witness, SCHEMA as WITNESS_SCHEMA
 
 SCHEMA = "portable-binary64-probe-receipt/2"
@@ -372,15 +373,19 @@ def _source(raw, commit, expected_sha):
 
 
 def _startup(traces, raw):
-    calls = [line for value in traces.values() for line in value.decode().splitlines()
-             if " execve(" in line and "GradleWorkerMain" in line and line.endswith(" = 0")]
-    require(len(calls) == 1, "numeric producer worker invocation differs")
-    match = re.search(r'execve\((' + STRING + r'), \[(.*)\], .*\) = 0$', calls[0])
-    require(match is not None and "..." not in match[2], "worker argv is truncated")
-    require(re.fullmatch(STRING + r"(?:, " + STRING + r")*", match[2]) is not None,
-            "worker argument list is malformed")
-    argv = [quoted(item).decode() for item in re.findall(STRING, match[2])]
-    executable = quoted(match[1]).decode()
+    candidates = []
+    for value in traces.values():
+        for line in value.decode().splitlines():
+            if " execve(" not in line or "GradleWorkerMain" not in line or not line.endswith(" = 0"):
+                continue
+            parsed = successful_execve(line.split(" ", 1)[1])
+            require(parsed is not None, "worker argv is truncated or malformed")
+            if len(parsed[1]) >= 3 and parsed[1][-2] == (
+                    "worker.org.gradle.process.internal.worker.GradleWorkerMain"):
+                candidates.append(parsed)
+    require(len(candidates) == 1, "numeric producer worker invocation differs")
+    executable, selected_argv = candidates[0]
+    argv = list(selected_argv)
     response_paths = [token[1:] for token in argv if token.startswith("@")]
     if response_paths:
         require(len(response_paths) == 1 and "worker-classpath.txt" in raw and
@@ -482,7 +487,7 @@ def verify_witness_loaders(definitions, loaded, helper):
 
 
 def _witness(raw, source, metadata, traces, worker, payload, artifact, class_root,
-             classpath_entries, executable, scratch):
+             classpath_entries, selected_exec, scratch):
     agent_path = Path(metadata["agent_path"])
     witness_path = Path(metadata["witness_path"])
     require(agent_path.is_absolute() and witness_path.is_absolute() and
@@ -495,7 +500,7 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
         entry = archive.extractfile(OBSERVER)
         require(entry is not None, "class witness committed source is absent")
         java_source = entry.read()
-    compiler = Path(executable).parents[1]
+    compiler = Path(selected_exec[0]).parents[1]
     require(compiler.resolve() == Path("/tmp/dyn4k-tools/jdk21").resolve(),
             "class witness compiler runtime differs")
     rebuilt = build_agent(java_source, compiler, scratch / "witness-rebuilt.jar",
@@ -503,7 +508,7 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
     require(rebuilt == raw["class-witness-agent.jar"],
             "class witness complete JAR differs from committed source")
     input_proof = verify_stable_input(traces, str(agent_path), metadata["agent_identity"],
-                                      worker, rebuilt)
+                                      worker, rebuilt, selected_exec)
     output_proof = verify_transport(traces, str(witness_path), raw["class-witness.log"],
                                     mirror_identity=metadata["witness_identity"],
                                     shared_writers=True)
@@ -671,7 +676,7 @@ def _proof(raw, receipt, cases, artifacts, scratch):
     require(class_map(rebuilt) == payload, "independent deterministic recompilation differs")
     proof["class_witness"] = _witness(raw, source, metadata, traces, proof["worker_pid"],
                                       payload, Path(artifacts["target"]), class_root,
-                                      entries, executable, scratch)
+                                      entries, (executable, tuple(argv)), scratch)
     proof.update({"runtime_executable_sha256": digest(executable),
                   "classpath_sha256": sha(encoded(entries)),
                   "class_archive_sha256": sha(raw["compiled-classes.zip"]),

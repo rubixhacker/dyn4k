@@ -110,7 +110,7 @@ class ClassWitnessTest(unittest.TestCase):
                         "inode": status.st_ino, "size": status.st_size}
             try:
                 input_proof = verify_stable_input(traces, str(agent), identity, worker,
-                                                  agent.read_bytes())
+                                                  agent.read_bytes(), (command[0], tuple(command)))
             except Exception as error:
                 count = sum(str(agent) in line for data in traces.values()
                             for line in data.decode().splitlines())
