@@ -1,6 +1,7 @@
 import json
 import hashlib
 import io
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -144,6 +145,33 @@ class FocusedReplayTest(unittest.TestCase):
         result = actual_output_v6.verify_observer(
             packed(rows), interpreter, paths, identities, producer, producer)
         self.assertEqual(result["status"], "PROVED_V6_OUTPUT_OBSERVER")
+        valid_zip = packed(rows)
+        self.assertEqual(result["trace_sha256"], hashlib.sha256(valid_zip).hexdigest())
+        declared_oversize = bytearray(valid_zip)
+        local_header = declared_oversize.find(b"PK\x03\x04")
+        central_header = declared_oversize.rfind(b"PK\x01\x02")
+        self.assertGreaterEqual(local_header, 0)
+        self.assertGreaterEqual(central_header, 0)
+        oversized_size = 128 * 1024 * 1024 + 1
+        declared_oversize[local_header + 22:local_header + 26] = \
+            oversized_size.to_bytes(4, "little")
+        declared_oversize[central_header + 24:central_header + 28] = \
+            oversized_size.to_bytes(4, "little")
+        with patch.object(zipfile.ZipExtFile, "read",
+                          side_effect=AssertionError(
+                              "member read before size rejection")) as member_read:
+            with self.assertRaisesRegex(Rejected, "observer trace inventory"):
+                actual_output_v6.verify_observer(
+                    bytes(declared_oversize), interpreter, paths, identities,
+                    producer, producer)
+        member_read.assert_not_called()
+        corrupt_crc = bytearray(valid_zip)
+        corrupt_crc[local_header + 14] ^= 0x01
+        corrupt_crc[central_header + 16] ^= 0x01
+        with self.assertRaisesRegex(Rejected, "observer trace is malformed"):
+            actual_output_v6.verify_observer(
+                bytes(corrupt_crc), interpreter, paths, identities,
+                producer, producer)
         self.assertEqual(actual_output_v6.verify_observer(
             packed(rows, comment=b'"\\xZZ"'), interpreter, paths,
             identities, producer, producer)["status"],
@@ -840,6 +868,28 @@ class FocusedReplayTest(unittest.TestCase):
             (root / "mirror.log").symlink_to(root / "capture.xml")
             with self.assertRaises(FocusedRejected):
                 load_version6_archive(root)
+
+    def test_version6_loader_rejects_oversized_observer_before_reading_it(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory)
+            for name in FILE_NAMES.values():
+                path = root / name
+                if name != FILE_NAMES["output_observer_traces"]:
+                    path.write_bytes(b"safe")
+            for name in ("worker-class-load-42.log", "worker-arguments-42.log"):
+                (root / name).write_bytes(b"safe")
+            (root / "receipt.json").write_text(
+                json.dumps({"schema": "portable-arithmetic-capture-receipt/6"}))
+            observer = root / FILE_NAMES["output_observer_traces"]
+            with observer.open("wb") as stream:
+                stream.truncate(128 * 1024 * 1024 + 1)
+            with patch.object(Path, "read_bytes",
+                              side_effect=AssertionError(
+                                  "observer read_bytes is unbounded")) as read_bytes:
+                with self.assertRaisesRegex(
+                        FocusedRejected, "observer archive exceeds compressed size limit"):
+                    load_version6_archive(root)
+            read_bytes.assert_not_called()
 
     def test_boolean_only_root_still_fails_global_method_inventory(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as directory:

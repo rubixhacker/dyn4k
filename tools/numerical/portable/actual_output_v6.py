@@ -15,6 +15,7 @@ from receipt import Rejected
 
 
 ROLES = ("mirror", "worker_arguments", "worker_class_load", "helper_arguments")
+MAX_OBSERVER_ARCHIVE_BYTES = 128 * 1024 * 1024
 OBSERVER_SOURCE = (
     "import os,sys\n"
     "if len(sys.argv)!=5: raise SystemExit(2)\n"
@@ -156,19 +157,25 @@ def _terminal_stamp(events):
 
 def verify_observer(raw_zip, interpreter, paths, identities, worker_events,
                     helper_events):
-    _require(type(raw_zip) is bytes and ENVIRONMENT_SENTINEL not in raw_zip and
+    _require(type(raw_zip) is bytes,
+             "version 6 observer privacy differs")
+    _require(len(raw_zip) <= MAX_OBSERVER_ARCHIVE_BYTES,
+             "version 6 observer archive size differs")
+    _require(ENVIRONMENT_SENTINEL not in raw_zip and
              FORBIDDEN_ENVIRONMENT_KEY not in raw_zip,
              "version 6 observer privacy differs")
     try:
         with zipfile.ZipFile(io.BytesIO(raw_zip)) as archive:
             names = archive.namelist()
-            _require(len(names) == 1 and re.fullmatch(r"trace\.[1-9][0-9]*", names[0])
-                     and archive.testzip() is None and len(raw_zip) <= 128 * 1024 * 1024
-                     and archive.getinfo(names[0]).file_size <= 128 * 1024 * 1024,
+            _require(len(names) == 1 and re.fullmatch(r"trace\.[1-9][0-9]*", names[0]),
+                     "version 6 observer trace inventory differs")
+            info = archive.getinfo(names[0])
+            _require(info.file_size <= MAX_OBSERVER_ARCHIVE_BYTES,
                      "version 6 observer trace inventory differs")
             with archive.open(names[0]) as member:
-                raw = member.read(128 * 1024 * 1024 + 1)
-                _require(len(raw) == archive.getinfo(names[0]).file_size and
+                raw = member.read(MAX_OBSERVER_ARCHIVE_BYTES + 1)
+                _require(len(raw) <= MAX_OBSERVER_ARCHIVE_BYTES and
+                         len(raw) == info.file_size and
                          not member.read(1),
                          "version 6 observer trace size differs")
     except (OSError, ValueError, zipfile.BadZipFile, RuntimeError) as error:

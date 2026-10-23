@@ -112,7 +112,18 @@ def load_version6_archive(root):
                 "focused archive inventory differs")
         require(len({name.split("-")[-1].removesuffix(".log") for name in variable}) == 1,
                 "focused worker log PID differs")
-        files = {key: (root / name).read_bytes() for key, name in FILE_NAMES.items()}
+        observer_path = root / FILE_NAMES["output_observer_traces"]
+        observer_limit = actual_output_v6.MAX_OBSERVER_ARCHIVE_BYTES
+        require(observer_path.stat().st_size <= observer_limit,
+                "focused observer archive exceeds compressed size limit")
+        with observer_path.open("rb") as stream:
+            observer_bytes = stream.read(observer_limit + 1)
+        require(len(observer_bytes) <= observer_limit,
+                "focused observer archive exceeds compressed size limit")
+        files = {key: (root / name).read_bytes()
+                 for key, name in FILE_NAMES.items()
+                 if key != "output_observer_traces"}
+        files["output_observer_traces"] = observer_bytes
         files["worker_class_load"] = (root / next(
             name for name in variable if name.startswith("worker-class-load-"))).read_bytes()
         files["worker_arguments"] = (root / next(
