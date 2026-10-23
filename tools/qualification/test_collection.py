@@ -11,6 +11,7 @@ from unittest import mock
 
 import collection
 import independent_gates
+from tools.compatibility import test_qualification_workflow as workflow_contract
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -304,9 +305,25 @@ class CollectionTests(unittest.TestCase):
     def test_cheap_source_checks_run_on_push_and_pull_request(self):
         workflow = (ROOT / ".github/workflows/qualification-source-checks.yml").read_text()
         self.assertEqual(["push:", "pull_request:"], workflow_events(workflow))
-        for command in ("guard_hosted_runners.py", "test_qualification_workflow",
-                        "test_guard_hosted_runners", "python3 -B -m unittest"):
-            self.assertIn(command, workflow)
+        workflow_contract.QualificationWorkflowContractTest().assert_source_checks_job_contract(
+            workflow)
+
+    def test_source_checks_reject_comment_only_or_misplaced_invocations(self):
+        workflow = (ROOT / ".github/workflows/qualification-source-checks.yml").read_text()
+        comment_only = (workflow.split("    steps:\n", 1)[0]
+                        + "    steps:\n      - run: echo no checks\n"
+                        + "        # guard_hosted_runners.py test_qualification_workflow "
+                        + "test_guard_hosted_runners python3 -B -m unittest\n")
+        for altered in (comment_only,
+                        workflow.replace("  workflow-source-contracts:\n", "  unrelated-job:\n"),
+                        workflow.replace(
+                            "        run: python3 -B tools/qualification/guard_hosted_runners.py",
+                            "        run: echo no checks\n"
+                            "        # python3 -B tools/qualification/guard_hosted_runners.py")):
+            with self.subTest(workflow=altered), mock.patch.object(
+                    Path, "read_text", return_value=altered):
+                with self.assertRaises(AssertionError):
+                    self.test_cheap_source_checks_run_on_push_and_pull_request()
 
     def test_central_workflow_dependencies_reject_invalid_and_later_job_lists(self):
         workflow = (ROOT / ".github/workflows/qualification.yml").read_text()
