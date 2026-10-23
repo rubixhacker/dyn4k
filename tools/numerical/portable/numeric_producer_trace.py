@@ -83,8 +83,92 @@ def _buffer(call, vector=False):
     return value, int(match[3]) if match[3] else None
 
 
+def verify_stable_input(traces, path, expected_identity, worker):
+    events = _events(traces, (path,))
+    groups = {}
+    descriptors = {}
+    observed = set()
+    path_identity = False
+    reads = 0
+    for _, tid, _, call in events:
+        groups.setdefault(tid, tid)
+        descriptors.setdefault(tid, {})
+        child = re.match(r"(?:clone|clone3|fork|vfork)\(.*\) = ([1-9][0-9]*)$", call)
+        if child:
+            groups[child[1]] = groups[tid] if "CLONE_THREAD" in call else child[1]
+            descriptors[child[1]] = (descriptors[tid] if "CLONE_FILES" in call
+                                     else dict(descriptors[tid]))
+        opening = re.fullmatch(r'open(?:at|at2)?\((.*?)\) = ' + FD, call)
+        if opening and opening[3] == path:
+            if (('"' + path + '"') not in opening[1] or groups[tid] != worker or
+                    "O_WRONLY" in opening[1] or "O_RDWR" in opening[1] or
+                    "O_CREAT" in opening[1] or "O_TRUNC" in opening[1]):
+                raise Rejected("agent input provider or open mode differs")
+            descriptors[tid][opening[2]] = {"verified": False, "reads": 0}
+        if path not in call:
+            continue
+        statx_path = re.fullmatch(r'statx\(AT_FDCWD(?:<[^>]+>)?, "' +
+                                  re.escape(path) + r'", .*\) = 0', call)
+        if statx_path:
+            major = re.search(r'stx_dev_major=([0-9]+)', call)
+            minor = re.search(r'stx_dev_minor=([0-9]+)', call)
+            inode = re.search(r'stx_ino=([0-9]+)', call)
+            size = re.search(r'stx_size=([0-9]+)', call)
+            if (groups[tid] != worker or not all((major, minor, inode, size)) or
+                    "stx_mode=S_IFREG" not in call):
+                raise Unbound("agent input path identity unavailable")
+            actual = {"device_major": int(major[1]), "device_minor": int(minor[1]),
+                      "inode": int(inode[1]), "size": int(size[1])}
+            if actual != expected_identity:
+                raise Rejected("agent input path identity differs")
+            path_identity = True
+        writer = re.match(r'(?:write|writev|pwrite64|pwritev|ftruncate)\(' + FD, call)
+        mapped_writer = re.match(r'mmap\(.*' + FD + r', [0-9]+\) = ', call)
+        if (call.startswith(("rename", "unlink", "truncate", "sendfile",
+                             "copy_file_range", "splice")) or
+                (writer is not None and writer[2] == path) or
+                (mapped_writer is not None and mapped_writer[2] == path and
+                 "PROT_WRITE" in call and "MAP_SHARED" in call)):
+            raise Rejected("agent input was changed or mapped writable")
+        identity = re.fullmatch(r'(?:fstat|newfstatat|statx)\(' + FD + r', (.*)\) = 0', call)
+        if identity and identity[1] in descriptors[tid]:
+            device = re.search(r'st_dev=makedev\(([^)]+)\)', identity[3])
+            inode = re.search(r'st_ino=([0-9]+)', identity[3])
+            size = re.search(r'st_size=([0-9]+)', identity[3])
+            if not device or not inode or not size or "S_IFREG" not in identity[3]:
+                raise Unbound("agent input descriptor identity unavailable")
+            parts = [item.strip() for item in device[1].split(",")]
+            if len(parts) != 2 or any(re.fullmatch(r"(?:0x[0-9a-f]+|[0-9]+)", item) is None
+                                     for item in parts):
+                raise Unbound("agent input device identity unavailable")
+            major, minor = (int(item, 16 if item.startswith("0x") else 10) for item in parts)
+            actual = {"device_major": major, "device_minor": minor,
+                      "inode": int(inode[1]), "size": int(size[1])}
+            if actual != expected_identity:
+                raise Rejected("agent input file identity differs")
+            descriptors[tid][identity[1]]["verified"] = True
+            observed.add((tid, identity[1]))
+        transfer = re.match(r'(?:read|pread64|readv|preadv)\(' + FD + r',', call)
+        mapped = re.match(r'mmap\(.*' + FD + r', [0-9]+\) = ', call)
+        descriptor = transfer or mapped
+        if descriptor and descriptor[1] in descriptors[tid]:
+            if groups[tid] != worker:
+                raise Rejected("agent input read occurred outside worker")
+            descriptors[tid][descriptor[1]]["reads"] += 1
+            reads += 1
+        closed = re.fullmatch(r'close\(' + FD + r'\) = 0', call)
+        if closed:
+            item = descriptors[tid].get(closed[1])
+            descriptors[tid].pop(closed[1], None)
+    if not (observed or path_identity) or not reads:
+        raise Unbound("agent input read and stable identity unavailable")
+    return {"reads": reads, "identity": expected_identity,
+            "identity_mode": "descriptor" if observed else "path"}
+
+
 def verify_transport(traces, destination, mirror, response_path=None, response=None, *,
-                     exclusive=True, ordered=True, mirror_identity=None):
+                     exclusive=True, ordered=True, mirror_identity=None,
+                     shared_writers=False):
     events = _events(traces, (destination, response_path))
     workers = []
     parents, groups, tables, exits = {}, {}, {}, {}
@@ -241,7 +325,8 @@ def verify_transport(traces, destination, mirror, response_path=None, response=N
             covered.update(range(offset, offset + len(value)))
         if covered != set(range(len(response))):
             raise Unbound("response read bytes are incomplete")
-    if not opened or not writers or (ordered and len(writers) != 1):
+    if not opened or not writers or (ordered and len(writers) != 1 and
+                                     (not shared_writers or len({fd for _, fd in writers}) != 1)):
         raise Unbound("mirror writer ordering is ambiguous")
     if (b"".join(outputs) != mirror if ordered else
             sorted(b"".join(outputs).splitlines()) != sorted(mirror.splitlines())):
@@ -264,7 +349,10 @@ def verify_transport(traces, destination, mirror, response_path=None, response=N
         current = parents[current]
         chain.append(current)
     writer, fd = sorted(writers)[0]
-    return {"worker_pid": worker, "parent_pids": chain,
-            "worker_argv_sha256": hashlib.sha256(worker_argv.encode()).hexdigest(),
-            "worker_exit": exits[worker], "mirror_writer_tid": writer, "mirror_fd": fd,
-            "mirror_destination": destination, "mirror_sha256": hashlib.sha256(mirror).hexdigest()}
+    result = {"worker_pid": worker, "parent_pids": chain,
+              "worker_argv_sha256": hashlib.sha256(worker_argv.encode()).hexdigest(),
+              "worker_exit": exits[worker], "mirror_writer_tid": writer, "mirror_fd": fd,
+              "mirror_destination": destination, "mirror_sha256": hashlib.sha256(mirror).hexdigest()}
+    if shared_writers:
+        result["writer_tids"] = sorted({tid for tid, _ in writers})
+    return result

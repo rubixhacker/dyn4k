@@ -104,6 +104,15 @@ providers.gradleProperty("portableWorkerClassLoadLog").orNull?.let { logPattern 
     }
 }
 
+providers.gradleProperty("portableClassWitnessAgent").orNull?.let { agent ->
+    val witness = providers.gradleProperty("portableClassWitnessOutput").get()
+    require(File(agent).isAbsolute && File(witness).isAbsolute &&
+        !agent.contains('=') && !witness.contains('='))
+    tasks.named<Test>("jvmTest") {
+        jvmArgs("-javaagent:$agent=$witness", "-XX:+DisableAttachMechanism", "-Xshare:off")
+    }
+}
+
 providers.gradleProperty("portableBooleanJdiPort").orNull?.let { rawPort ->
     val port = rawPort.toIntOrNull()
     require(rawPort.matches(Regex("[1-9][0-9]{0,4}")) && port != null && port in 1..65535)
