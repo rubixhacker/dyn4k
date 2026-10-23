@@ -72,6 +72,13 @@ class TransportTest(unittest.TestCase):
             verify_transport(self.trace(False), "/work/mirror.log", b"hello\n",
                              "/work/args.txt", b"-cp\n/a\n")
 
+    def test_malformed_trace_record_rejects(self):
+        malformed = self.trace()["100"].replace(b"1.000000 execve", b"not-a-time execve")
+        with self.assertRaisesRegex(Rejected, "trace timestamp") as error:
+            verify_transport({"100": malformed}, "/work/mirror.log", b"hello\n",
+                             "/work/args.txt", b"-cp\n/a\n")
+        self.assertNotIsInstance(error.exception, Unbound)
+
     def test_exact_response_read_and_exclusive_output_bind_transport(self):
         proof = verify_transport(self.trace(), "/work/mirror.log", b"hello\n",
                                  "/work/args.txt", b"-cp\n/a\n")
@@ -326,7 +333,8 @@ class ArchiveTest(unittest.TestCase):
                 verify_sidecar_identity({}, runtime, artifact)
 
     def test_public_schema_two_cannot_pass_without_loaded_class_bytes(self):
-        from numeric_producer import verify, encoded, sha, FIXTURE, CLASS, METHOD, SCHEMA, PROOF_KEYS
+        from numeric_producer import encoded, sha, FIXTURE, CLASS, METHOD, SCHEMA
+        from prospective_compare import verify_numeric_probe
         from run import declared_cases, method_case_ids
         with tempfile.TemporaryDirectory() as directory:
             lane = Path(directory) / "jvm"
@@ -337,7 +345,18 @@ class ArchiveTest(unittest.TestCase):
             artifact = Path(directory) / "target.jar"
             artifact.write_bytes(b"artifact")
             runtime = {"method_executions": 15}
-            proof = {key: "synthetic" for key in PROOF_KEYS}
+            proof = {"worker_pid": "100", "parent_pids": ["1"],
+                     "worker_argv_sha256": "0" * 64, "worker_exit": 0,
+                     "runtime_executable_sha256": "0" * 64,
+                     "classpath_sha256": "0" * 64, "class_archive_sha256": "0" * 64,
+                     "provider_origins": {
+                         name: "file:///classes" for name in (
+                             CLASS, "portable.PortableMatrixTest", "portable.NumericalRecorder",
+                             "org.dyn4j.dynamics.Body", "org.dyn4j.geometry.Geometry")},
+                     "mirror_writer_tid": "100", "mirror_fd": "4",
+                     "mirror_destination": "/work/mirror.log", "mirror_sha256": "0" * 64,
+                     "xml_sha256": "0" * 64, "gradle_log_sha256": "0" * 64,
+                     "trace_manifest_sha256": "0" * 64}
             receipt = {"schema": SCHEMA, "candidate_commit": "commit", "source_sha256": "source",
                        "fixture_source_sha256": FIXTURE, "trace_sha256": "trace",
                        "primary_receipt_sha256": sha(b"{}"),
@@ -346,14 +365,38 @@ class ArchiveTest(unittest.TestCase):
                        "selected_test": {"class": CLASS, "method": METHOD, "task": "jvmTest", "host": "jvm"},
                        "probe": {}, "files": {"synthetic": {"size": 1, "sha256": "0" * 64}},
                        "proof": proof}
+            (lane / "numeric-probe").mkdir()
+            (lane / "numeric-probe" / "synthetic").write_bytes(b"x")
             (lane / "numeric-probe-receipt.json").write_bytes(encoded(receipt))
             with patch("numeric_producer.load_raw", return_value={}), \
                     patch("numeric_producer._proof", return_value=proof), \
                     patch("numeric_producer.inventory", return_value=receipt["files"]):
-                result = verify(lane, "commit", "source", "trace", {"target": artifact},
-                                runtime, scratch=Path(directory) / "rebuild")
+                result = verify_numeric_probe(lane, "commit", "source", "trace",
+                                              {"target": artifact}, runtime)
             self.assertEqual(result["status"], "UNPASSED_UNBOUND_PRODUCER")
             self.assertIn("loaded class bytes", result["reason"])
+            for changed in ({**proof, "worker_exit": "0"},
+                            {**proof, "worker_exit": 1},
+                            {**proof, "parent_pids": [True]},
+                            {**proof, "mirror_fd": 4},
+                            {**proof, "mirror_sha256": "not-a-digest"},
+                            {**proof, "provider_origins": {}}):
+                receipt["proof"] = changed
+                (lane / "numeric-probe-receipt.json").write_bytes(encoded(receipt))
+                with self.subTest(changed=changed):
+                    with patch("numeric_producer.load_raw", side_effect=AssertionError("raw replay began")), \
+                            patch("numeric_producer._proof", side_effect=Unbound("trace final record is truncated")):
+                        with self.assertRaisesRegex(Rejected, "numeric producer proof field") as error:
+                            verify_numeric_probe(lane, "commit", "source", "trace",
+                                                 {"target": artifact}, runtime)
+                    self.assertNotIsInstance(error.exception, Unbound)
+            receipt["proof"] = proof
+            (lane / "numeric-probe-receipt.json").write_bytes(encoded(receipt))
+            with patch("numeric_producer.load_raw", return_value={}), \
+                    patch("numeric_producer._proof", side_effect=Unbound("trace final record is truncated")), \
+                    self.assertRaisesRegex(Rejected, "sealed numeric producer proof cannot be replayed") as error:
+                verify_numeric_probe(lane, "commit", "source", "trace", {"target": artifact}, runtime)
+            self.assertNotIsInstance(error.exception, Unbound)
 
     def test_strict_raw_inventory_rejects_resealed_extra_members_and_digest_changes(self):
         from numeric_producer import REQUIRED, inventory, load_raw

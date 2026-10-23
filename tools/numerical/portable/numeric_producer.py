@@ -520,6 +520,32 @@ def _proof(raw, receipt, cases, artifacts, scratch):
     return proof
 
 
+def _validate_proof(proof):
+    require(isinstance(proof, dict) and set(proof) == PROOF_KEYS,
+            "numeric producer proof schema differs")
+    pid = lambda value: type(value) is str and re.fullmatch(r"[1-9][0-9]*", value) is not None
+    digests = ("worker_argv_sha256", "runtime_executable_sha256", "classpath_sha256",
+               "class_archive_sha256", "mirror_sha256", "xml_sha256",
+               "gradle_log_sha256", "trace_manifest_sha256")
+    providers = {CLASS, "portable.PortableMatrixTest", "portable.NumericalRecorder",
+                 "org.dyn4j.dynamics.Body", "org.dyn4j.geometry.Geometry"}
+    require(pid(proof["worker_pid"]) and type(proof["parent_pids"]) is list and
+            proof["parent_pids"] and all(pid(value) for value in proof["parent_pids"]) and
+            len(set(proof["parent_pids"])) == len(proof["parent_pids"]) and
+            proof["worker_pid"] not in proof["parent_pids"] and
+            type(proof["worker_exit"]) is int and proof["worker_exit"] == 0 and
+            pid(proof["mirror_writer_tid"]) and type(proof["mirror_fd"]) is str and
+            re.fullmatch(r"[0-9]+", proof["mirror_fd"]) is not None and
+            type(proof["mirror_destination"]) is str and
+            Path(proof["mirror_destination"]).is_absolute() and
+            isinstance(proof["provider_origins"], dict) and
+            set(proof["provider_origins"]) == providers and
+            all(type(value) is str and value.startswith("file:/")
+                for value in proof["provider_origins"].values()) and
+            all(type(proof[field]) is str and re.fullmatch(r"[0-9a-f]{64}", proof[field])
+                for field in digests), "numeric producer proof field differs")
+
+
 def verify(lane, commit, source_sha256, trace_sha256, artifacts, runtime, *, scratch=None):
     lane = Path(lane)
     receipt_path = lane / "numeric-probe-receipt.json"
@@ -548,9 +574,8 @@ def verify(lane, commit, source_sha256, trace_sha256, artifacts, runtime, *, scr
     cases = {case: (lane / "cases" / (case + ".jsonl")).read_bytes() for case in method_case_ids(METHOD)}
     require(receipt["geometry_case_sha256"] == {case: sha(raw) for case, raw in cases.items()},
             "numeric producer geometry slice digest differs")
+    _validate_proof(receipt["proof"])
     raw = load_raw(lane / "numeric-probe", receipt["files"])
-    require(isinstance(receipt["proof"], dict) and set(receipt["proof"]) == PROOF_KEYS,
-            "numeric producer proof schema differs")
     if scratch is None:
         scratch = Path(tempfile.mkdtemp(prefix="numeric-replay-", dir=lane.parent)) / "rebuild"
     scratch = Path(scratch).resolve()
@@ -560,7 +585,7 @@ def verify(lane, commit, source_sha256, trace_sha256, artifacts, runtime, *, scr
     try:
         proof = _proof(raw, receipt, cases, artifacts, scratch)
     except Unbound as error:
-        return {"status": "UNPASSED_UNBOUND_PRODUCER", "reason": str(error)}
+        raise Rejected("sealed numeric producer proof cannot be replayed: " + str(error)) from error
     require(exact(proof, receipt["proof"]), "numeric producer recomputed proof differs")
     require(inventory(lane / "numeric-probe") == receipt["files"], "raw evidence changed during replay")
     return {"status": "UNPASSED_UNBOUND_PRODUCER",

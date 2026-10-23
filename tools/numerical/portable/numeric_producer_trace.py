@@ -35,13 +35,15 @@ def _events(traces, protected):
     for tid, data in traces.items():
         if re.fullmatch(r"[1-9][0-9]*", tid) is None:
             raise Rejected("trace thread identity differs")
-        if not data.endswith(b"\n"):
-            raise Unbound("trace final record is truncated")
+        try:
+            lines = data.decode("utf-8").splitlines()
+        except UnicodeDecodeError as error:
+            raise Rejected("trace record is not UTF-8") from error
         previous = Decimal(0)
-        for index, line in enumerate(data.decode("utf-8").splitlines()):
-            match = re.fullmatch(r"([0-9]+\.[0-9]+) (.*)", line)
+        for index, line in enumerate(lines):
+            match = re.fullmatch(r"([0-9]+\.[0-9]+) (.+)", line)
             if match is None:
-                raise Unbound("trace timestamp or complete syscall unavailable")
+                raise Rejected("trace timestamp or syscall record is malformed")
             stamp, call = match.groups()
             if "<unfinished ...>" in call or "resumed>" in call:
                 raise Unbound("trace syscall ordering is ambiguous")
@@ -49,6 +51,8 @@ def _events(traces, protected):
                 raise Rejected("trace thread time moved backwards")
             previous = Decimal(stamp)
             events.append((previous, tid, index, call))
+        if not data.endswith(b"\n"):
+            raise Unbound("trace final record is truncated")
     events.sort()
     for _, bucket in groupby(events, key=lambda row: row[0]):
         rows = list(bucket)
