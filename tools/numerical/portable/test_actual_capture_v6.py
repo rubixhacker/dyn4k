@@ -134,15 +134,24 @@ class FocusedReplayTest(unittest.TestCase):
                 f'st_size={number + 4}' + '}) = 0',
                 f'2.{stamp + 2:06d} close(3<{path}>) = 0'))
         rows.append('2.000020 +++ exited with 0 +++')
-        def packed(values):
+        def packed(values, comment=b""):
             buffer = io.BytesIO()
             with zipfile.ZipFile(buffer, "w") as archive:
                 archive.writestr("trace.51", ("\n".join(values) + "\n").encode())
+                archive.comment = comment
             return buffer.getvalue()
         producer = [(1, "41", 0, "+++ exited with 0 +++")]
         result = actual_output_v6.verify_observer(
             packed(rows), interpreter, paths, identities, producer, producer)
         self.assertEqual(result["status"], "PROVED_V6_OUTPUT_OBSERVER")
+        self.assertEqual(actual_output_v6.verify_observer(
+            packed(rows, comment=b'"\\xZZ"'), interpreter, paths,
+            identities, producer, producer)["status"],
+            "PROVED_V6_OUTPUT_OBSERVER")
+        with self.assertRaisesRegex(Rejected, "observer privacy"):
+            actual_output_v6.verify_observer(
+                packed(rows, comment=b"OLLAMA_API_KEY"), interpreter, paths,
+                identities, producer, producer)
         protected_transfers = (
             f'sendfile(1<pipe:[8]>, 3<{paths[0]}>, NULL, 1) = 1',
             f'mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, 3<{paths[0]}>, 0) = 0x1000',

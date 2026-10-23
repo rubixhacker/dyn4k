@@ -5,7 +5,8 @@ import posixpath
 import re
 import zipfile
 
-from actual_trace import (V6_FD_START, _arguments, _project_descriptors, _validate_calls,
+from actual_trace import (ENVIRONMENT_SENTINEL, FORBIDDEN_ENVIRONMENT_KEY,
+                          V6_FD_START, _arguments, _project_descriptors, _validate_calls,
                           _version6_fd_token, normalize_rich_traces,
                           trace_exposes_environment)
 from boolean_rotation_jdi import jdi_bridge
@@ -155,7 +156,8 @@ def _terminal_stamp(events):
 
 def verify_observer(raw_zip, interpreter, paths, identities, worker_events,
                     helper_events):
-    _require(type(raw_zip) is bytes and not trace_exposes_environment(raw_zip),
+    _require(type(raw_zip) is bytes and ENVIRONMENT_SENTINEL not in raw_zip and
+             FORBIDDEN_ENVIRONMENT_KEY not in raw_zip,
              "version 6 observer privacy differs")
     try:
         with zipfile.ZipFile(io.BytesIO(raw_zip)) as archive:
