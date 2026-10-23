@@ -215,6 +215,26 @@ def verify_stable_input(traces, path, expected_identity, worker, jar, selected_e
             if actual != expected_identity:
                 raise Rejected("agent input path identity differs")
             path_identity = True
+        path_stat = (re.fullmatch(r'newfstatat\(AT_FDCWD(?:<[^>]+>)?, "' +
+                                  re.escape(path) + r'", (\{.*\}), [^)]*\) = 0', call) or
+                     re.fullmatch(r'stat\("' + re.escape(path) + r'", (\{.*\})\) = 0', call))
+        if path_stat:
+            device = re.search(r'st_dev=makedev\(([^)]+)\)', path_stat[1])
+            inode = re.search(r'st_ino=([0-9]+)', path_stat[1])
+            size = re.search(r'st_size=([0-9]+)', path_stat[1])
+            if (groups[tid] != worker or not worker_started or worker_finished or
+                    not all((device, inode, size)) or "st_mode=S_IFREG" not in path_stat[1]):
+                raise Unbound("agent input path identity unavailable")
+            parts = [item.strip() for item in device[1].split(",")]
+            if len(parts) != 2 or any(re.fullmatch(r"(?:0x[0-9a-f]+|[0-9]+)", item) is None
+                                     for item in parts):
+                raise Unbound("agent input device identity unavailable")
+            major, minor = (int(item, 16 if item.startswith("0x") else 10) for item in parts)
+            actual = {"device_major": major, "device_minor": minor,
+                      "inode": int(inode[1]), "size": int(size[1])}
+            if actual != expected_identity:
+                raise Rejected("agent input path identity differs")
+            path_identity = True
         writer = re.match(r'(?:write|writev|pwrite64|pwritev|ftruncate)\(' + FD, call)
         mapped_writer = re.match(MAPPED_FD + r' [0-9]+\) = ', call)
         if (call.startswith(("rename", "unlink", "truncate", "sendfile",

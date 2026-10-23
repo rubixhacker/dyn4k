@@ -50,7 +50,7 @@ class TracePrivacyTest(unittest.TestCase):
             self.assertIn(b"st_ino=", selective)
             self.assertEqual(trace_arguments(),
                              ["-ff", "-ttt", "-yy", "-e",
-                              "abbrev=!fstat,newfstatat,statx", "-s", "131072", "-e",
+                      "abbrev=!stat,lstat,fstat,newfstatat,statx", "-s", "131072", "-e",
                               "trace=" + SYSCALLS])
 
 
@@ -146,6 +146,19 @@ class TransportTest(unittest.TestCase):
                 b'1.125000 statx(AT_FDCWD, "/private/agent.jar", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mode=S_IFREG|0644, stx_ino=44, stx_size=3, stx_dev_major=0, stx_dev_minor=1}) = 0\n')
         self.assertEqual(verify_stable_input({"100": path_stat}, path, identity, "100", b"JAR", WORKER_EXEC)["identity_mode"],
                          "path")
+        linux_stat = path_stat.replace(
+            b'1.125000 statx(AT_FDCWD, "/private/agent.jar", AT_STATX_SYNC_AS_STAT, STATX_ALL, {stx_mode=S_IFREG|0644, stx_ino=44, stx_size=3, stx_dev_major=0, stx_dev_minor=1}) = 0\n',
+            b'1.125000 newfstatat(AT_FDCWD, "/private/agent.jar", {st_mode=S_IFREG|0644, st_size=3, st_dev=makedev(0, 1), st_ino=44}, 0) = 0\n')
+        self.assertEqual(verify_stable_input({"100": linux_stat}, path, identity, "100",
+                                             b"JAR", WORKER_EXEC)["identity_mode"], "path")
+        legacy_stat = linux_stat.replace(
+            b'1.125000 newfstatat(AT_FDCWD, "/private/agent.jar", {st_mode=S_IFREG|0644, st_size=3, st_dev=makedev(0, 1), st_ino=44}, 0) = 0\n',
+            b'1.125000 stat("/private/agent.jar", {st_mode=S_IFREG|0644, st_size=3, st_dev=makedev(0, 1), st_ino=44}) = 0\n')
+        self.assertEqual(verify_stable_input({"100": legacy_stat}, path, identity, "100",
+                                             b"JAR", WORKER_EXEC)["identity_mode"], "path")
+        with self.assertRaises(Rejected):
+            verify_stable_input({"100": legacy_stat}, path, {**identity, "inode": 45},
+                                "100", b"JAR", WORKER_EXEC)
         with self.assertRaises(Rejected):
             verify_stable_input({"100": trace["100"].replace(b'"JAR", 3', b'"JAR", 3')
                                  .replace(b'O_RDONLY', b'O_RDWR')}, path, identity, "100", b"JAR", WORKER_EXEC)

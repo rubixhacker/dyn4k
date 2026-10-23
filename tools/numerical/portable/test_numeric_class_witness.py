@@ -155,10 +155,10 @@ class ClassWitnessTest(unittest.TestCase):
             self.assertIsNotNone(tracer)
             witness_path.unlink()
             traced = subprocess.run([tracer, "-ff", "-ttt", "-yy", "-e",
-                                     "abbrev=!fstat,newfstatat,statx", "-s", "131072",
+                                     "abbrev=!stat,lstat,fstat,newfstatat,statx", "-s", "131072",
                                      "-e", "trace=process,open,openat,openat2,close,read,pread64,lseek,"
-                                     "fstat,newfstatat,statx,write,mmap,rename,unlink,truncate",
-                                     "-o", str(root / "trace"), *command],
+                                     "stat,lstat,fstat,newfstatat,statx,write,mmap,rename,unlink,truncate",
+                                     "-o", str(root / "trace"), *java8],
                                     capture_output=True, check=False, timeout=30)
             self.assertEqual(traced.returncode, 0, traced.stderr.decode())
             traces = {path.name.split(".")[-1]: path.read_bytes()
@@ -171,7 +171,7 @@ class ClassWitnessTest(unittest.TestCase):
                         "inode": status.st_ino, "size": status.st_size}
             try:
                 input_proof = verify_stable_input(traces, str(agent), identity, worker,
-                                                  agent.read_bytes(), (command[0], tuple(command)))
+                                                  agent.read_bytes(), (java8[0], tuple(java8)))
             except Exception as error:
                 count = sum(str(agent) in line for data in traces.values()
                             for line in data.decode().splitlines())
@@ -180,7 +180,10 @@ class ClassWitnessTest(unittest.TestCase):
                          for data in traces.values() for line in data.decode().splitlines()
                          if str(agent) in line and line.split(" ", 1)[-1].startswith(
                              ("write", "mmap", "rename", "unlink", "truncate"))]
-                self.fail(str(error) + f"; relevant trace records: {count}; operations: {kinds[:10]}")
+                stats = [line[:450] for data in traces.values()
+                         for line in data.decode().splitlines()
+                         if str(agent) in line and "stat" in line]
+                self.fail(str(error) + f"; relevant trace records: {count}; operations: {kinds[:10]}; stats: {stats[:6]}")
             self.assertGreater(input_proof["reads"], 0)
             broken = classes / "portable" / "PortableMatrixTest.class"
             bad = broken.read_bytes()

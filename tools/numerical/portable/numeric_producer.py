@@ -32,7 +32,7 @@ PORTABLE = Path(__file__).resolve().parent
 WRAPPER = "tools/numerical/portable/src/jvmTest/kotlin/portable/NumericProbeMatrixTest.kt"
 WRAPPER_SHA256 = "6e9d5a3436f2d10f0a40606a21b8cafafb548f8911e993725b2fda97f12a260a"
 OBSERVER = "tools/numerical/portable/class_witness/NumericClassWitness.java"
-OBSERVER_SHA256 = "17ea5acd860bde82e8ac8289f2dfb43d423f85fe1881e13fe9ce95afee6dcd86"
+OBSERVER_SHA256 = "1bed2d631df60b6db97dc3cbdd8903917ccff234455ebafcc03808978321d564"
 WITNESS_JDK = Path("/tmp/dyn4k-tools/jdk21")
 KEYS = {"schema", "candidate_commit", "source_sha256", "fixture_source_sha256",
         "trace_sha256", "primary_receipt_sha256", "geometry_case_sha256", "artifact_sha256",
@@ -59,12 +59,12 @@ MAX_TRACE_MEMBER = 512 * 1024 * 1024
 MAX_CAPTURE_TOTAL = 2 * 1024 * 1024 * 1024
 MAX_MEMBERS = 1040
 SYSCALLS = ("process,open,openat,openat2,close,close_range,dup,dup2,dup3,fcntl,"
-            "read,pread64,readv,preadv,lseek,fstat,newfstatat,statx,"
+            "read,pread64,readv,preadv,lseek,stat,lstat,fstat,newfstatat,statx,"
             "write,writev,pwrite64,pwritev,sendfile,copy_file_range,splice,mmap,munmap,rename,renameat,renameat2,unlink,unlinkat,truncate,ftruncate")
 
 
 def trace_arguments():
-    return ["-ff", "-ttt", "-yy", "-e", "abbrev=!fstat,newfstatat,statx",
+    return ["-ff", "-ttt", "-yy", "-e", "abbrev=!stat,lstat,fstat,newfstatat,statx",
             "-s", "131072", "-e", "trace=" + SYSCALLS]
 
 

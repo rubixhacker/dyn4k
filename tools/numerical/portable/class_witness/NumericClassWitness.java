@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.Files;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.CodeSource;
 import java.security.MessageDigest;
 import java.security.ProtectionDomain;
@@ -184,6 +186,10 @@ public final class NumericClassWitness {
     public static void premain(String destination, Instrumentation instrumentation) throws Exception {
         Path jar = Paths.get(NumericClassWitness.class.getProtectionDomain()
             .getCodeSource().getLocation().toURI()).toRealPath();
+        BasicFileAttributes jarAttributes = Files.readAttributes(jar, BasicFileAttributes.class);
+        if (!jarAttributes.isRegularFile()) {
+            throw new IllegalStateException("class witness agent is not a regular file");
+        }
         provider(NumericClassWitness.class, jar);
         provider(Observer.class, jar);
         if (instrumentation.isRetransformClassesSupported() ||
