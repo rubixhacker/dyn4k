@@ -761,7 +761,7 @@ def verify(lane, commit, source_sha256, trace_sha256, artifacts, runtime, *, scr
     _validate_proof(receipt["proof"])
     raw = load_raw(lane / "numeric-probe", receipt["files"])
     if scratch is None:
-        scratch = Path(tempfile.mkdtemp(prefix="numeric-replay-", dir=lane.parent)) / "rebuild"
+        scratch = Path(tempfile.mkdtemp(prefix="numeric-replay-", dir=Path.home())) / "rebuild"
     scratch = Path(scratch).resolve()
     require(scratch.is_relative_to(Path.home().resolve()) and not scratch.exists(),
             "numeric producer replay scratch must be a new home-backed directory")
