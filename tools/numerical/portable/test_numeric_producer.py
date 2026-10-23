@@ -190,7 +190,7 @@ class OutputTest(unittest.TestCase):
     def xml(self, mirror):
         suite = ET.Element("testsuite", tests="1", skipped="0", failures="0", errors="0")
         ET.SubElement(suite, "testcase", classname="portable.NumericProbeMatrixTest",
-                      name="geometryCollisionBoundaryAndScale")
+                      name="geometryCollisionBoundaryAndScale[jvm]")
         ET.SubElement(suite, "system-out").text = mirror.decode()
         return ET.tostring(suite)
 
@@ -219,6 +219,7 @@ class OutputTest(unittest.TestCase):
                 verify_output(modified, self.xml(modified), cases)
         for old, new in ((b'tests="1"', b'tests="2"'),
                          (b'skipped="0"', b'skipped="1"'),
+                         (b'geometryCollisionBoundaryAndScale[jvm]"', b'geometryCollisionBoundaryAndScale"'),
                          (b'portable.NumericProbeMatrixTest', b'portable.PortableMatrixTest')):
             with self.subTest(xml=new), self.assertRaises(Rejected):
                 verify_output(mirror, self.xml(mirror).replace(old, new), cases)
@@ -228,7 +229,7 @@ class OutputTest(unittest.TestCase):
     def test_mirror_requires_exactly_one_probe_and_all_original_streams(self):
         from numeric_producer import verify_output
         with self.assertRaisesRegex(Rejected, "probe marker count"):
-            verify_output(b"", b'<testsuite tests="1" skipped="0" failures="0" errors="0"><testcase classname="portable.NumericProbeMatrixTest" name="geometryCollisionBoundaryAndScale"/><system-out></system-out></testsuite>', {})
+            verify_output(b"", b'<testsuite tests="1" skipped="0" failures="0" errors="0"><testcase classname="portable.NumericProbeMatrixTest" name="geometryCollisionBoundaryAndScale[jvm]"/><system-out></system-out></testsuite>', {})
 
 
 class StartupTest(unittest.TestCase):

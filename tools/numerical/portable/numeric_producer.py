@@ -97,7 +97,7 @@ def verify_output(mirror, xml, cases):
             "numeric producer selected test did not succeed")
     tests = suite.findall("testcase")
     require(len(tests) == 1 and tests[0].get("classname") == CLASS and
-            tests[0].get("name") == METHOD and not list(tests[0]),
+            tests[0].get("name") == METHOD + "[jvm]" and not list(tests[0]),
             "numeric producer selected test identity differs")
     outputs = suite.findall("system-out")
     require(len(outputs) == 1 and (outputs[0].text or "").encode() == mirror,
