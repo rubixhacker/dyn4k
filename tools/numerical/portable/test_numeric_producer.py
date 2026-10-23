@@ -1,4 +1,7 @@
 import hashlib
+import shutil
+import subprocess
+import sys
 import unittest
 import tempfile
 import json
@@ -12,6 +15,38 @@ from unittest.mock import patch
 
 from numeric_producer_trace import verify_transport, Unbound
 from receipt import Rejected
+
+
+class TracePrivacyTest(unittest.TestCase):
+    def test_stat_identity_without_exec_environment_expansion(self):
+        from numeric_producer import trace_arguments, SYSCALLS
+
+        tracer = shutil.which("strace")
+        self.assertIsNotNone(tracer)
+        with tempfile.TemporaryDirectory() as directory:
+            canary = "SYNTHETIC_STAGE_B_ENVIRONMENT_CANARY_7f9d0a"
+            child = [sys.executable, "-B", "-c",
+                     "import os; fd = os.open('/dev/null', os.O_RDONLY); os.fstat(fd); os.close(fd)"]
+            synthetic_env = {"STAGE_B_CANARY": canary}
+            base = ["-ff", "-ttt", "-yy", "-s", "131072", "-e", "trace=" + SYSCALLS]
+            def recorded(name, options):
+                prefix = Path(directory) / name
+                result = subprocess.run([tracer, *options, "-o", str(prefix), *child],
+                                        env=synthetic_env, capture_output=True, timeout=30)
+                self.assertEqual(result.returncode, 0)
+                return b"".join(path.read_bytes() for path in prefix.parent.glob(name + ".*"))
+
+            broad = recorded("broad", [*base[:3], "-v", *base[3:]])
+            self.assertIn(canary.encode(), broad)
+            selective = recorded("selective", trace_arguments())
+            self.assertNotIn(canary.encode(), selective)
+            self.assertIn(b"execve(", selective)
+            self.assertIn(b"st_dev=makedev(", selective)
+            self.assertIn(b"st_ino=", selective)
+            self.assertEqual(trace_arguments(),
+                             ["-ff", "-ttt", "-yy", "-e",
+                              "abbrev=!fstat,newfstatat,statx", "-s", "131072", "-e",
+                              "trace=" + SYSCALLS])
 
 
 class TransportTest(unittest.TestCase):

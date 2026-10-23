@@ -49,6 +49,11 @@ SYSCALLS = ("process,open,openat,openat2,close,close_range,dup,dup2,dup3,fcntl,"
             "write,writev,pwrite64,pwritev,sendfile,copy_file_range,splice,mmap,munmap,rename,renameat,renameat2,unlink,unlinkat,truncate,ftruncate")
 
 
+def trace_arguments():
+    return ["-ff", "-ttt", "-yy", "-e", "abbrev=!fstat,newfstatat,statx",
+            "-s", "131072", "-e", "trace=" + SYSCALLS]
+
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -471,8 +476,7 @@ def _proof(raw, receipt, cases, artifacts, scratch):
     require(any("execve(" + json.dumps(command[0]) + ", " + json.dumps(command) + ", " in line and
                 line.endswith(" = 0") for line in traces[root].decode().splitlines()),
             "traced root invocation differs")
-    require(metadata["trace_arguments"] == ["-ff", "-ttt", "-yy", "-v", "-s", "131072", "-e",
-                                          "trace=" + SYSCALLS], "tracer invocation differs")
+    require(metadata["trace_arguments"] == trace_arguments(), "tracer invocation differs")
     verify_startup_log(raw["worker-arguments.log"], proof["worker_pid"], startup)
     for field, file in (("arguments_log", "worker-arguments.log"), ("class_load_log", "class-load.log")):
         verify_transport(traces, metadata[field], raw[file], exclusive=False, ordered=False)
@@ -593,8 +597,8 @@ def capture(output, scratch):
     require(tracer is not None, "strace is unavailable")
     version = subprocess.run([tracer, "--version"], env=env, capture_output=True,
                              check=True, timeout=10).stdout.decode()
-    trace_arguments = ["-ff", "-ttt", "-yy", "-v", "-s", "131072", "-e", "trace=" + SYSCALLS]
-    invocation = [tracer, *trace_arguments, "-o", str(output / "process/trace"), *command]
+    tracer_arguments = trace_arguments()
+    invocation = [tracer, *tracer_arguments, "-o", str(output / "process/trace"), *command]
     budget = CaptureBudget(output, scratch, (PORTABLE / "build",),
                            limit_bytes=MAX_CAPTURE_TOTAL, seconds=900)
     response_source = None
@@ -668,7 +672,7 @@ def capture(output, scratch):
                        "executable_sha256": digest(executable), "version": runtime_version,
                        "dependency_sha256": digest(dependency)}
     metadata = {"command": command, "tracer": tracer, "tracer_version": version,
-                "trace_arguments": trace_arguments, "exit": process.returncode,
+                "trace_arguments": tracer_arguments, "exit": process.returncode,
                 "mirror": str(mirror), "class_root": str(class_root),
                 "arguments_log": str(argument_pattern).replace("%p", worker),
                 "class_load_log": str(class_pattern).replace("%p", worker),
