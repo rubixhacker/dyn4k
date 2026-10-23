@@ -5,12 +5,14 @@ import os
 from pathlib import Path
 import re
 import stat
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 from urllib.parse import unquote, urlparse
 
 import actual_arithmetic
+import actual_output_v6
 from actual_arithmetic import (CaptureRejected, _FOCUSED_BOOLEAN_CASE,
                                _FOCUSED_BOOLEAN_METHOD, _PINNED_JAVA,
                                _STAGED_JAR, _unique_object, make_capture_receipt)
@@ -23,7 +25,7 @@ from numeric_class_witness import build_agent, read_witness
 from numeric_producer import (MAX_TRACE_MEMBER, captured_file_identity, class_map, select_worker_exec,
                               verify_build_runtime, verify_witness_classpath)
 from numeric_producer_trace import (_events, successful_execve,
-                                    verify_stable_input, verify_transport)
+                                    quoted, verify_stable_input, verify_transport)
 from prospective_compare import compare_host
 from receipt import Rejected
 from run import comparison_coverage
@@ -52,6 +54,7 @@ FILE_NAMES = {
     "jdi_transport": "jdi-transport.json",
     "agent": "class-witness-agent.jar", "class_witness": "class-witness.log",
     "mirror": "mirror.log", "all_process_traces": "all-process-traces.zip",
+    "output_observer_traces": "output-observer-traces.zip",
     "metadata": "capture-metadata.json",
 }
 OBSERVER = "tools/numerical/portable/class_witness/NumericClassWitness.java"
@@ -117,7 +120,7 @@ def load_version6_archive(root):
         receipt_bytes = (root / "receipt.json").read_bytes()
         for key, raw in files.items():
             if key not in {"source", "worker_write_traces", "jdi_helper_traces",
-                           "all_process_traces"}:
+                           "all_process_traces", "output_observer_traces"}:
                 require(not trace_exposes_environment(raw),
                         "focused archive exposed the environment")
         require(not trace_exposes_environment(receipt_bytes),
@@ -379,8 +382,104 @@ def verify_helper_startup(raw, helper_pid, argv, argument_path):
             "argument_path": argument_path}
 
 
+def _helper_argv(transport):
+    paths = [transport[key] for key in (
+        "helper_classes_path", "output_path", "temp_path")]
+    return [str(JDK / "bin/java"), "--add-modules", "jdk.jdi",
+            "-Djava.io.tmpdir=" + paths[2], "-cp", paths[0],
+            "RotationJdiProbe", "attach", paths[1], "127.0.0.1",
+            str(transport["port"]), "org.dyn4j.geometry.Transform", "1800", "600"]
+
+
+def _output_proof(files, metadata, traces, events, worker, transport, environment,
+                  verified_class_reads):
+    _xml_mirror(files)
+    selected = select_worker_exec(traces, _PINNED_JAVA)
+    with zipfile.ZipFile(io.BytesIO(files["worker_write_traces"])) as archive:
+        worker_raw = {name[6:]: archive.read(name) for name in archive.namelist()}
+    worker_traces, worker_aborted = normalize_rich_traces(worker_raw)
+    require(not worker_aborted, "version 6 protected worker output call is incomplete")
+    worker_events = _events(worker_traces, ())
+    helper_raw = jdi_bridge._trace_members(
+        files["jdi_helper_traces"], version6_raw=True)
+    helper_traces, helper_aborted = normalize_rich_traces({
+        str(pid): raw.encode() for pid, raw in helper_raw.items()})
+    require(not helper_aborted, "version 6 protected helper output call is incomplete")
+    helper_events = _events(helper_traces, ())
+    argv = _helper_argv(transport)
+    helper_selected = (str(transport["helper_pid"]), argv[0], tuple(argv))
+    spec = (
+        ("mirror", worker_traces, worker_events, selected, "mirror_path", "mirror",
+         "mirror_identity"),
+        ("worker_arguments", worker_traces, worker_events, selected,
+         "argument_path", "worker_arguments", "argument_identity"),
+        ("worker_class_load", worker_traces, worker_events, selected,
+         "class_load_path", "worker_class_load", "class_load_identity"),
+        ("helper_arguments", helper_traces, helper_events, helper_selected,
+         "helper_argument_path", "jdi_helper_arguments", "helper_argument_identity"),
+    )
+    checked = {}
+    for role, scope, scope_events, execution, path_key, data_key, identity_key in spec:
+        path = metadata[path_key]
+        data = files[data_key]
+        expected_identity = metadata[identity_key]
+        transport_check = verify_transport(
+            scope, path, data, execution,
+            metadata["response_path"] if role == "mirror" else None,
+            files["worker_classpath"] if role == "mirror" else None,
+            exclusive=role == "mirror", shared_writers=role != "mirror",
+            mirror_identity=expected_identity if role == "mirror" else None,
+            allow_initial_log_seek=role != "mirror")
+        lifetime = actual_output_v6.prove_file_lifetime(
+            scope, scope_events, execution[0], path, data, expected_identity, role)
+        require(transport_check["mirror_destination"] == path and
+                (role != "mirror" or
+                 (transport_check["mirror_writer_tid"],
+                  transport_check["mirror_fd"]) ==
+                 (lifetime["writer_tid"], lifetime["writer_fd"])),
+                "version 6 output destination binding differs")
+        checked[role] = {"transport": transport_check, "lifetime": lifetime}
+    current_interpreter = Path(sys.executable).resolve()
+    try:
+        interpreter_identity = captured_file_identity(current_interpreter)
+        interpreter_digest = sha(current_interpreter.read_bytes())
+    except OSError as error:
+        raise FocusedRejected("version 6 observer interpreter is unavailable") from error
+    require(metadata["observer_interpreter_path"] == str(current_interpreter) and
+            metadata["observer_interpreter_identity"] ==
+            metadata["observer_interpreter_after_identity"] == interpreter_identity and
+            metadata["observer_interpreter_sha256"] == interpreter_digest and
+            metadata["observer_exit_code"] == 0 and
+            metadata["observer_environment_sha256"] ==
+            actual_output_v6.declared_environment_hash(environment),
+            "version 6 observer interpreter or declared environment differs")
+    paths = tuple(metadata[key] for key in (
+        "mirror_path", "argument_path", "class_load_path", "helper_argument_path"))
+    require(metadata["observer_command"] == list(actual_output_v6.observer_command(
+        str(current_interpreter), paths)),
+        "version 6 observer source or argv differs")
+    observer = actual_output_v6.verify_observer(
+        files["output_observer_traces"], str(current_interpreter), paths,
+        {role: metadata[key] for role, key in (
+            ("mirror", "mirror_identity"),
+            ("worker_arguments", "argument_identity"),
+            ("worker_class_load", "class_load_identity"),
+            ("helper_arguments", "helper_argument_identity"))},
+        events, helper_events)
+    mirror = checked["mirror"]["transport"]
+    socket_keys, sockets = actual_output_v6.prove_socket_writers(
+        worker_traces, worker_events, selected[0],
+        (mirror["mirror_writer_tid"], mirror["mirror_fd"]),
+        verified_class_reads)
+    binding = actual_arithmetic.V6WriterBinding(
+        sha(worker["legacy_zip"]),
+        (mirror["mirror_writer_tid"], mirror["mirror_fd"]), socket_keys)
+    return checked, observer, sockets, binding
+
+
 def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
-           aborted, environment=None):
+           aborted, output_proofs, output_observer, socket_proofs,
+           environment=None):
     if environment is None:
         from capture_actual import child_environment
         environment = child_environment(focused=True)
@@ -395,6 +494,10 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
         "launcher_identity", "launcher_after_identity", "launcher_sha256",
         "helper_class_before", "helper_class_after",
         "helper_argument_path", "helper_argument_identity",
+        "observer_interpreter_path", "observer_interpreter_identity",
+        "observer_interpreter_after_identity", "observer_interpreter_sha256",
+        "observer_command", "observer_environment_sha256",
+        "observer_exit_code",
         "worker_pid", "exit_code"} and
         metadata["schema"] == "focused-arithmetic-capture/6" and
         metadata["trace_arguments"] == rich_trace_arguments() and
@@ -453,20 +556,11 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
     response_read = verify_stable_input(
         traces, response_path, metadata["response_identity"], selected[0],
         files["worker_classpath"], selected[1:], allow_external_readers=True)
-    mirror = verify_transport(
-        traces, metadata["mirror_path"], files["mirror"], selected,
-        response_path, files["worker_classpath"],
-        mirror_identity=metadata["mirror_identity"])
+    mirror = output_proofs["mirror"]["transport"]
     require(mirror["worker_pid"] == selected[0] and mirror["parent_pids"],
             "direct mirror worker ancestry differs")
-    arguments = verify_transport(
-        traces, metadata["argument_path"], files["worker_arguments"], selected,
-        mirror_identity=metadata["argument_identity"],
-        exclusive=False, shared_writers=True)
-    class_load = verify_transport(
-        traces, metadata["class_load_path"], files["worker_class_load"], selected,
-        mirror_identity=metadata["class_load_identity"],
-        exclusive=False, shared_writers=True)
+    arguments = output_proofs["worker_arguments"]["transport"]
+    class_load = output_proofs["worker_class_load"]["transport"]
     temporary_root = Path(os.environ.get("TMPDIR", ""))
     require(temporary_root.is_absolute() and
             temporary_root.resolve().is_relative_to(Path.home().resolve()),
@@ -525,10 +619,7 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
             helper_source, Path(directory), environment=environment, jdk_home=JDK)
     require(compiled == files["jdi_helper_classes"],
             "JDI helper class bytes differ from committed source")
-    argv = [str(JDK / "bin/java"), "--add-modules", "jdk.jdi",
-            "-Djava.io.tmpdir=" + paths[2], "-cp", paths[0],
-            "RotationJdiProbe", "attach", paths[1], "127.0.0.1",
-            str(transport["port"]), "org.dyn4j.geometry.Transform", "1800", "600"]
+    argv = _helper_argv(transport)
     startup = verify_boolean_startup(files["worker_arguments"], selected, metadata,
                                      transport["port"])
     class_paths, _ = _helper_members(files, transport)
@@ -549,11 +640,7 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
             metadata["helper_argument_identity"]["size"] ==
             len(files["jdi_helper_arguments"]),
             "JDI helper startup log identity differs")
-    helper_argument = verify_transport(
-        helper_traces, metadata["helper_argument_path"],
-        files["jdi_helper_arguments"],
-        (str(transport["helper_pid"]), argv[0], tuple(argv)),
-        exclusive=False, shared_writers=True, allow_initial_log_seek=True)
+    helper_argument = output_proofs["helper_arguments"]["transport"]
     helper_startup = verify_helper_startup(
         files["jdi_helper_arguments"], transport["helper_pid"], argv,
         metadata["helper_argument_path"])
@@ -615,6 +702,9 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
         "worker_startup": startup,
         "helper_startup": helper_startup,
         "helper_argument_destination": helper_argument["mirror_destination"],
+        "output_observer": output_observer["status"],
+        "output_observer_raw_sha256": output_observer["trace_sha256"],
+        "auxiliary_socket_count": len(socket_proofs),
         "source_sites": sites,
         "calls_checked": 1800,
         "worker_raw_sha256": worker["raw_sha256"],
@@ -622,6 +712,97 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
         "all_process_raw_sha256": sha(files["all_process_traces"]),
         "aborted_socket_or_wait_calls": len(aborted),
     }
+
+
+def _raw_projections(files, protected, output_paths):
+    worker = checked_projection(files["worker_write_traces"], protected,
+                                version6_raw=True)
+    helper = checked_projection(files["jdi_helper_traces"], protected,
+                                strict_outputs=set(output_paths), version6_raw=True)
+    return worker, helper
+
+
+def _verified_compiled_marker_reads(files, worker_pid, class_bytes, origins,
+                                    witnessed):
+    candidates = {}
+    for name, data in class_bytes.items():
+        origin = origins[name]
+        if (name.startswith("portable/") and origin != _STAGED_JAR and
+                any(prefix in data for prefix in actual_arithmetic._WITNESS_PREFIXES) and
+                name in witnessed):
+            require(_origin_path(witnessed[name]["origin"]) == origin.resolve(),
+                    "marker class provider differs from witnessed origin")
+            candidates[str(origin / (name + ".class"))] = data
+    require(candidates, "compiled marker class inventory differs")
+    with zipfile.ZipFile(io.BytesIO(files["worker_write_traces"])) as archive:
+        raw = {name[6:]: archive.read(name) for name in archive.namelist()}
+    traces, _ = normalize_rich_traces(raw)
+    selected = select_worker_exec(traces, _PINNED_JAVA)
+    require(selected[0] == str(worker_pid), "marker class selected worker differs")
+    selected_reads = {}
+    for tid, trace in traces.items():
+        for index, record in enumerate(trace.decode("utf-8").splitlines()):
+            call = record.split(" ", 1)[1]
+            if not call.startswith("read(") or not any(
+                    prefix.decode() in call for prefix in
+                    actual_arithmetic._WITNESS_PREFIXES):
+                continue
+            match = re.fullmatch(r'read\(([0-9]+)<([^<>]+)>, '
+                                 r'("(?:\\.|[^"\\])*"), ([0-9]+)\) = ([0-9]+)',
+                                 call)
+            if match is None or match[2] not in candidates:
+                continue
+            payload = quoted(match[3])
+            require(len(payload) == int(match[5]) and
+                    len(payload) <= int(match[4]),
+                    "compiled marker class read is incomplete")
+            selected_reads.setdefault(match[2], []).append((tid, index, match[1]))
+    verified = set()
+    for path, records in selected_reads.items():
+        identities = set()
+        for tid, trace in traces.items():
+            if not any(row[0] == tid for row in records):
+                continue
+            for record in trace.decode("utf-8").splitlines():
+                call = record.split(" ", 1)[1]
+                if not call.startswith('stat("' + path + '", ') or not call.endswith(") = 0"):
+                    continue
+                device = re.search(r'st_dev=makedev\(([^)]+)\)', call)
+                inode = re.search(r'st_ino=([0-9]+)', call)
+                size = re.search(r'st_size=([0-9]+)', call)
+                require(device is not None and inode is not None and size is not None and
+                        "st_mode=S_IFREG" in call,
+                        "compiled marker class stat differs")
+                parts = [value.strip() for value in device[1].split(",")]
+                require(len(parts) == 2 and all(re.fullmatch(
+                    r'(?:0x[0-9a-f]+|[0-9]+)', value) for value in parts),
+                    "compiled marker class device differs")
+                numbers = tuple(int(value, 16 if value.startswith("0x") else 10)
+                                for value in parts)
+                identities.add((*numbers, int(inode[1]), int(size[1])))
+        require(len(identities) == 1 and next(iter(identities))[3] ==
+                len(candidates[path]), "compiled marker class identity differs")
+        major, minor, inode, size = next(iter(identities))
+        verify_stable_input(traces, path, {"device_major": major,
+                            "device_minor": minor, "inode": inode, "size": size},
+                            selected[0], candidates[path], selected[1:])
+        for tid, index, fd in records:
+            calls = [line.split(" ", 1)[1] for line in
+                     traces[tid].decode("utf-8").splitlines()]
+            opened = any(re.fullmatch(r'open(?:at|at2)?\(.*\) = ' + fd +
+                            '<' + re.escape(path) + '>', call)
+                         for call in calls[:index])
+            checked_fd = any(re.fullmatch(r'fstat\(' + fd + '<' +
+                             re.escape(path) + r'>, \{.*st_size=' +
+                             str(len(candidates[path])) + r'[^}]*\}\) = 0', call)
+                             for call in calls[:index])
+            closed = any(re.fullmatch(r'close\(' + fd + '<' +
+                            re.escape(path) + r'>\) = 0', call)
+                         for call in calls[index + 1:])
+            require(opened and checked_fd and closed,
+                    "compiled marker class descriptor lifecycle differs")
+            verified.add((tid, index))
+    return frozenset(verified), set(candidates)
 
 
 def make_version6_receipt(files, commit, runtime_executable=_PINNED_JAVA):
@@ -649,6 +830,10 @@ def make_version6_receipt(files, commit, runtime_executable=_PINNED_JAVA):
         "launcher_identity", "launcher_after_identity", "launcher_sha256",
         "helper_class_before",
         "helper_class_after", "helper_argument_path", "helper_argument_identity",
+        "observer_interpreter_path", "observer_interpreter_identity",
+        "observer_interpreter_after_identity", "observer_interpreter_sha256",
+        "observer_command", "observer_environment_sha256",
+        "observer_exit_code",
         "worker_pid", "exit_code"} and
         all(type(metadata[key]) is str and metadata[key].startswith("/") for key in (
             "response_path", "agent_path", "witness_path", "mirror_path",
@@ -674,16 +859,29 @@ def make_version6_receipt(files, commit, runtime_executable=_PINNED_JAVA):
     jdi_bridge.verify_worker_launch_v6(
         events, metadata["worker_pid"], launcher_sha256=metadata["launcher_sha256"],
         protected_paths=protected)
-    worker = checked_projection(files["worker_write_traces"], protected)
-    helper = checked_projection(files["jdi_helper_traces"], protected,
-                                strict_outputs=set(output_paths))
+    expected_classes, origins = _expected_classes(files)
+    witness = read_witness(files["class_witness"], expected_classes, profile="boolean")
+    witnessed = {row["name"]: row for row in witness["definitions"]}
+    class_paths = {str(origins[name] / (name + ".class")) for name, data in
+                   expected_classes.items() if name.startswith("portable/") and
+                   origins[name] != _STAGED_JAR and name in witnessed and any(
+                   prefix in data for prefix in actual_arithmetic._WITNESS_PREFIXES)}
+    worker, helper = _raw_projections(files, protected | class_paths, output_paths)
+    verified_reads, selected_paths = _verified_compiled_marker_reads(
+        files, metadata["worker_pid"], expected_classes, origins, witnessed)
+    require(selected_paths == class_paths, "compiled marker class protection differs")
+    output_proofs, output_observer, socket_proofs, binding = _output_proof(
+        files, metadata, traces, events, worker, transport, environment,
+        verified_reads)
     legacy_files = _legacy_files(files, worker)
     legacy = make_capture_receipt(
         legacy_files, _FOCUSED_BOOLEAN_METHOD, commit,
         [_FOCUSED_BOOLEAN_CASE], runtime_executable, TEST_CLASS,
-        environment=environment)
+        environment=environment, verified_class_reads=verified_reads,
+        v6_writer_binding=binding)
     proof = _proof(files, legacy, metadata, raw_traces, traces, events,
-                   worker, helper, aborted, environment)
+                   worker, helper, aborted, output_proofs, output_observer,
+                   socket_proofs, environment)
     return {"schema": SCHEMA, "candidate_commit": commit,
             "method": _FOCUSED_BOOLEAN_METHOD,
             "source_archive_sha256": sha(files["source"]),

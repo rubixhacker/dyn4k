@@ -565,6 +565,65 @@ class ActualArithmeticTest(unittest.TestCase):
                         archive(extras=((name, b"unrelated trace\n"),)),
                         xml, "42", execution)
 
+    def test_version6_writer_binding_keeps_both_marked_streams(self):
+        xml = xml_for(focused_wheel_fixture(), "captureWheelActive")
+        direct = ET.fromstring(xml).find("system-out").text.encode()
+        lines = direct.splitlines(keepends=True)
+        worker = (b'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+                  b'["GradleWorkerMain"], 0x0) = 0\n'
+                  b'clone(0) = 43\nclone(0) = 44\n')
+        execution = b"42 " + worker.splitlines()[0] + b"\n"
+        packed = io.BytesIO()
+        with zipfile.ZipFile(packed, "w") as traces:
+            traces.writestr("trace.42", worker)
+            traces.writestr("trace.43", b"".join(
+                f'write(59, {json.dumps(line.decode())}, {len(line)}) = {len(line)}\n'
+                .encode() for line in lines))
+            traces.writestr("trace.44", b"".join(
+                f'write(56, {json.dumps((b"prefix" + line).decode())}, '
+                f'{len(line) + 6}) = {len(line) + 6}\n'.encode() for line in lines))
+        archive = packed.getvalue()
+        with self.assertRaisesRegex(CaptureRejected, "ambiguous"):
+            actual_arithmetic.verify_worker_write_witness(
+                archive, xml, "42", execution)
+        binding = actual_arithmetic.V6WriterBinding(
+            hashlib.sha256(archive).hexdigest(), ("43", "59"),
+            frozenset({("44", "56")}))
+        result = actual_arithmetic.verify_worker_write_witness(
+            archive, xml, "42", execution, v6_binding=binding)
+        self.assertEqual(result["writer_thread_pid"], "43")
+        self.assertEqual(result["auxiliary_streams"], 1)
+        for changed in (
+                binding._replace(mirror=("44", "56")),
+                binding._replace(sockets=frozenset()),
+                binding._replace(projected_sha256="0" * 64)):
+            with self.subTest(changed=changed), self.assertRaises(CaptureRejected):
+                actual_arithmetic.verify_worker_write_witness(
+                    archive, xml, "42", execution, v6_binding=changed)
+        for label, extra, replacement in (
+                ("third_stream", b'write(57, "NUMERICAL_JSON {}\\n", 18) = 18\n',
+                 None),
+                ("reversed_records", b"", list(reversed(lines))),
+                ("partial_record", b"", [line[:-1] for line in lines])):
+            packed = io.BytesIO()
+            with zipfile.ZipFile(packed, "w") as traces:
+                traces.writestr("trace.42", worker)
+                traces.writestr("trace.43", b"".join(
+                    f'write(59, {json.dumps(line.decode())}, {len(line)}) = {len(line)}\n'
+                    .encode() for line in lines))
+                auxiliary = replacement if replacement is not None else lines
+                traces.writestr("trace.44", b"".join(
+                    f'write(56, {json.dumps((b"prefix" + line).decode())}, '
+                    f'{len(line) + 6}) = {len(line) + 6}\n'.encode()
+                    for line in auxiliary) + extra)
+            changed_archive = packed.getvalue()
+            changed_binding = binding._replace(
+                projected_sha256=hashlib.sha256(changed_archive).hexdigest())
+            with self.subTest(change=label), self.assertRaises(CaptureRejected):
+                actual_arithmetic.verify_worker_write_witness(
+                    changed_archive, xml, "42", execution,
+                    v6_binding=changed_binding)
+
     def test_missing_extra_reordered_and_wrong_method_fail(self):
         original = fixture()
         expected = ["geometry-boundary-s0-o0-d0"]

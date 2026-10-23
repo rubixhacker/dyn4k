@@ -292,9 +292,17 @@ def verify_jdi_archive(raw, class_bytes, class_name, expected_count, markers,
         raise EvidenceRejected("JDI archive is malformed") from error
 
 
-def _trace_members(raw):
+def _trace_members(raw, *, version6_raw=False):
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            if version6_raw:
+                from actual_trace import TraceRejected, validate_version6_raw_archive
+                try:
+                    members = validate_version6_raw_archive(raw, archive)
+                except TraceRejected as error:
+                    raise EvidenceRejected("JDI version 6 raw trace bound differs") from error
+                return {int(member.filename[6:]):
+                        archive.read(member).decode("utf-8") for member in members}
             names = archive.namelist()
             if (not names or len(names) > 1024 or len(names) != len(set(names)) or
                     any(re.fullmatch(r"trace\.[1-9][0-9]*", name) is None
@@ -775,7 +783,8 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
         raise EvidenceRejected("JDI version 6 command identity differs")
 
     def records(raw):
-        original = {str(pid): trace.encode() for pid, trace in _trace_members(raw).items()}
+        original = {str(pid): trace.encode() for pid, trace in
+                    _trace_members(raw, version6_raw=True).items()}
         if any(re.match(rb'[0-9]+\.[0-9]+ <\.\.\. [a-z][a-z0-9_]* resumed>', line)
                for trace in original.values() for line in trace.splitlines()):
             raise EvidenceRejected("JDI version 6 split completion lacks entry time")

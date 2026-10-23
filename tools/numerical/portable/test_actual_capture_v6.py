@@ -7,6 +7,9 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
+import actual_capture_receipt as focused_receipt
+import actual_output_v6
+import capture_actual
 from actual_capture_receipt import (FILE_NAMES, FocusedRejected,
                                     _expected_classes, _helper_members, _xml_mirror,
                                     verify_boolean_startup, verify_helper_startup,
@@ -20,6 +23,316 @@ from receipt import Rejected
 
 
 class FocusedReplayTest(unittest.TestCase):
+    def test_failed_observer_raw_stays_private_and_counted(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            root = Path(directory)
+            scratch = root / "scratch"
+            private = root / "private"
+            output = root / "output"
+            for path in (scratch, private, output):
+                path.mkdir(mode=0o700)
+            raw = scratch / "output-observer-trace.41"
+            raw.write_bytes(b"synthetic rejected trace\n")
+            budget = capture_actual.CaptureBudget(
+                output, scratch, (), private=private, limit_bytes=100)
+            before = budget.check()
+            original = capture_actual.CaptureRejected("original observer failure")
+            capture_actual.retain_observer_diagnostics(
+                scratch, private, budget, original)
+            retained = private / raw.name
+            self.assertFalse(raw.exists())
+            self.assertEqual(retained.read_bytes(), b"synthetic rejected trace\n")
+            self.assertEqual(retained.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(before, budget.check())
+            self.assertEqual(str(original), "original observer failure")
+            second = capture_actual.CaptureRejected("original budget failure")
+            next_raw = scratch / "output-observer-trace.42"
+            next_raw.write_bytes(b"synthetic second rejection\n")
+            small = capture_actual.CaptureBudget(
+                output, scratch, (), private=private, limit_bytes=1)
+            capture_actual.retain_observer_diagnostics(
+                scratch, private, small, second)
+            self.assertEqual((private / next_raw.name).read_bytes(),
+                             b"synthetic second rejection\n")
+            self.assertEqual(str(second), "original budget failure")
+            self.assertTrue(any("retention failed" in note
+                                for note in second.__notes__))
+
+    def test_version6_original_writer_identity_and_close(self):
+        path = str(Path.home() / "focused-output-proof-test")
+        identity = {"device_major": 0, "device_minor": 42, "inode": 19,
+                    "size": 4}
+        status = "{st_dev=makedev(0, 42), st_ino=19, st_mode=S_IFREG|0644, st_size=4}"
+        raw = (
+            '1.000001 execve("/jdk/java", ["/jdk/java"], 0x0) = 0\n'
+            f'1.000002 openat(AT_FDCWD, "{path}", O_WRONLY|O_CREAT|O_EXCL, '
+            f'0666) = 59<{path}>\n'
+            f'1.000003 write(59<{path}>, "abc\\n", 4) = 4\n'
+            f'1.000004 fstat(59<{path}>, {status}) = 0\n'
+            f'1.000005 close(59<{path}>) = 0\n'
+            '1.000006 +++ exited with 0 +++\n').encode()
+        from numeric_producer_trace import _events
+        events = _events({"41": raw}, {path})
+        result = actual_output_v6.prove_file_lifetime(
+            {"41": raw}, events, "41", path, b"abc\n", identity, "mirror")
+        self.assertEqual(result["writer_identity"], identity)
+        for label, changed in (
+                ("lost_stat", raw.replace(
+                    f'1.000004 fstat(59<{path}>, {status}) = 0\n'.encode(), b"")),
+                ("lost_close", raw.replace(
+                    f'1.000005 close(59<{path}>) = 0\n'.encode(), b"")),
+                ("alias", raw.replace(
+                    f'1.000004 fstat(59<{path}>, {status}) = 0\n'.encode(),
+                    (f'1.0000031 dup(59<{path}>) = 60<{path}>\n'
+                     f'1.000004 fstat(59<{path}>, {status}) = 0\n').encode())),
+                ("late_seek", raw.replace(
+                    f'1.000004 fstat(59<{path}>, {status}) = 0\n'.encode(),
+                    (f'1.0000031 lseek(59<{path}>, 0, SEEK_SET) = 0\n'
+                     f'1.000004 fstat(59<{path}>, {status}) = 0\n').encode())),
+                ("early_close", raw.replace(
+                    f'1.000004 fstat(59<{path}>, {status}) = 0\n'.encode(),
+                    f'1.000004 close(59<{path}>) = 0\n'.encode()).replace(
+                    f'1.000005 close(59<{path}>) = 0\n'.encode(), b"")),
+                ("wrong_object", raw.replace(b"st_ino=19", b"st_ino=20"))):
+            with self.subTest(change=label), self.assertRaises(Rejected):
+                actual_output_v6.prove_file_lifetime(
+                    {"41": changed}, _events({"41": changed}, {path}), "41",
+                    path, b"abc\n", identity, "mirror")
+        for label, extra, before in (
+                ("changed_path_after_close",
+                 f'1.0000051 rename("{path}", "{path}.old") = 0\n',
+                 b'1.000006 +++ exited with 0 +++\n'),
+                ("changed_final_identity",
+                 f'1.0000041 fstat(59<{path}>, '
+                 '{st_dev=makedev(0, 42), st_ino=20, '
+                 'st_mode=S_IFREG|0644, st_size=4}) = 0\n',
+                 f'1.000005 close(59<{path}>) = 0\n'.encode())):
+            changed = raw.replace(before, extra.encode() + before)
+            with self.subTest(change=label), self.assertRaises(Rejected):
+                actual_output_v6.prove_file_lifetime(
+                    {"41": changed}, _events({"41": changed}, {path}), "41",
+                    path, b"abc\n", identity, "mirror")
+
+    def test_version6_observer_requires_four_ordered_read_only_identities(self):
+        paths = tuple(str(Path.home() / f"focused-observer-{number}")
+                      for number in range(4))
+        interpreter = "/usr/bin/python3"
+        argv = actual_output_v6.observer_command(interpreter, paths)
+        identities = {role: {"device_major": 0, "device_minor": 42,
+                              "inode": number + 1, "size": number + 4}
+                      for number, role in enumerate(actual_output_v6.ROLES)}
+        rows = [f'2.000001 execve("{interpreter}", '
+                f'[{", ".join(json.dumps(item) for item in argv)}], 0x0) = 0']
+        for number, path in enumerate(paths):
+            stamp = 2 + number * 3
+            rows.extend((
+                f'2.{stamp:06d} openat(AT_FDCWD, "{path}", '
+                f'O_RDONLY|O_CLOEXEC|O_NOFOLLOW) = 3<{path}>',
+                f'2.{stamp + 1:06d} fstat(3<{path}>, '
+                '{st_dev=makedev(0, 42), '
+                f'st_ino={number + 1}, st_mode=S_IFREG|0644, '
+                f'st_size={number + 4}' + '}) = 0',
+                f'2.{stamp + 2:06d} close(3<{path}>) = 0'))
+        rows.append('2.000020 +++ exited with 0 +++')
+        def packed(values):
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                archive.writestr("trace.51", ("\n".join(values) + "\n").encode())
+            return buffer.getvalue()
+        producer = [(1, "41", 0, "+++ exited with 0 +++")]
+        result = actual_output_v6.verify_observer(
+            packed(rows), interpreter, paths, identities, producer, producer)
+        self.assertEqual(result["status"], "PROVED_V6_OUTPUT_OBSERVER")
+        for label, changed in (
+                ("early", [rows[0].replace("2.000001", "0.000001"), *rows[1:]]),
+                ("wrong_flags", [line.replace("O_NOFOLLOW", "O_TRUNC")
+                                 for line in rows]),
+                ("wrong_literal", [rows[0].replace(
+                    "import os,sys", "import os,time"), *rows[1:]]),
+                ("missing_stat", [line for line in rows if "fstat(" not in line]),
+                ("extra_write", [*rows[:-1],
+                                 '2.000019 write(1<pipe:[42]>, "x", 1) = 1',
+                                 rows[-1]]),
+                ("wrong_role", [rows[0], *rows[4:7], *rows[1:4], *rows[7:]])):
+            with self.subTest(change=label), self.assertRaises(Rejected):
+                actual_output_v6.verify_observer(
+                    packed(changed), interpreter, paths, identities,
+                    producer, producer)
+        for label, added in (
+                ("extra_exec", '2.000000 execve("/other", ["/other"], 0x0) = -1 ENOENT'),
+                ("protected_query", f'2.000003 fcntl(3<{paths[0]}>, F_GETFD) = 1')):
+            with self.subTest(change=label), self.assertRaises(Rejected):
+                actual_output_v6.verify_observer(
+                    packed([rows[0], added, *rows[1:]]), interpreter,
+                    paths, identities, producer, producer)
+
+    def test_version6_auxiliary_socket_requires_shared_live_object(self):
+        payload = b"NUMERICAL_JSON {}\n"
+        direct = f'write(59</home/mirror>, {json.dumps(payload.decode())}, '
+        direct += f'{len(payload)}) = {len(payload)}'
+        copy = b"framed" + payload
+        outgoing = f'write(56<TCP:[local->remote]>, {json.dumps(copy.decode())}, '
+        outgoing += f'{len(copy)}) = {len(copy)}'
+        parent = (
+            '1.000001 execve("/jdk/java", ["/jdk/java"], 0x0) = 0\n'
+            '1.000002 clone(flags=CLONE_THREAD|CLONE_VM|CLONE_FILES) = 42\n'
+            '1.000003 socket(AF_INET, SOCK_STREAM, IPPROTO_TCP) = 56<TCP:[local]>\n'
+            '1.000004 connect(56<TCP:[local]>, {sa_family=AF_INET}, 16) = '
+            '-1 EINPROGRESS (Operation now in progress)\n'
+            f'1.000005 {direct}\n'
+            '1.000009 +++ exited with 0 +++\n').encode()
+        child = (f'1.000006 {outgoing}\n'
+                 '1.000007 close(56<TCP:[local->remote]>) = 0\n'
+                 '1.000008 +++ exited with 0 +++\n').encode()
+        def check(worker, writer):
+            from numeric_producer_trace import _events
+            traces = {"41": worker, "42": writer}
+            return actual_output_v6.prove_socket_writers(
+                traces, _events(traces, ()), "41", ("41", "59"))
+        selected, proof = check(parent, child)
+        self.assertEqual(selected, frozenset({("42", "56")}))
+        self.assertEqual(proof[0]["writes"], 1)
+        for label, worker, writer in (
+                ("copied_table", parent.replace(b"CLONE_FILES", b"CLONE_FS"), child),
+                ("wrong_provider", parent.replace(b"IPPROTO_TCP", b"IPPROTO_UDP"), child),
+                ("alias", parent.replace(
+                    b'1.000004 connect(', b'1.0000031 dup(56<TCP:[local]>) = '
+                    b'100<TCP:[local]>\n1.000004 connect('), child),
+                ("lost_close", parent, child.replace(
+                    b'1.000007 close(56<TCP:[local->remote]>) = 0\n', b""))):
+            with self.subTest(change=label), self.assertRaises(Rejected):
+                check(worker, writer)
+
+    def test_version6_source_binding_precedes_legacy_writer_selection(self):
+        commit = "a" * 40
+        path = str(Path.home() / "focused-order-test")
+        metadata = {key: path for key in (
+            "response_path", "agent_path", "witness_path", "mirror_path",
+            "class_load_path", "argument_path", "helper_argument_path")}
+        metadata.update({key: {} for key in (
+            "agent_identity", "witness_identity", "mirror_identity",
+            "argument_identity", "class_load_identity", "response_identity",
+            "agent_after_identity", "artifact_identity",
+            "artifact_after_identity", "runtime_identity",
+            "runtime_after_identity", "launcher_identity",
+            "launcher_after_identity", "helper_class_before",
+            "helper_class_after", "helper_argument_identity",
+            "observer_interpreter_identity",
+            "observer_interpreter_after_identity")})
+        metadata.update({"schema": "focused-arithmetic-capture/6",
+                         "command": [], "trace_arguments": [],
+                         "launcher_sha256": "", "observer_interpreter_path": path,
+                         "observer_interpreter_sha256": "",
+                         "observer_command": [],
+                         "observer_environment_sha256": "",
+                         "observer_exit_code": 0,
+                         "worker_pid": 41, "exit_code": 0})
+        transport = {"schema": "boolean-jdi-transport/1", "port": 41234,
+                     "worker_pid": 41, "helper_pid": 42,
+                     "helper_classes_path": path, "output_path": path,
+                     "temp_path": path, "live_socket_owner": True}
+        files = {key: b"raw" for key in FILE_NAMES}
+        files.update(worker_class_load=b"class", worker_arguments=b"arguments",
+                     source=b"source", metadata=json.dumps(metadata).encode(),
+                     jdi_transport=json.dumps(transport).encode())
+        binding = focused_receipt.actual_arithmetic.V6WriterBinding(
+            "b" * 64, ("41", "59"), frozenset({("42", "56")}))
+        order = []
+        def outputs(*args):
+            order.append("raw output")
+            return {}, {"status": "PROVED_V6_OUTPUT_OBSERVER"}, [], binding
+        def legacy(*args, **kwargs):
+            order.append("legacy writer")
+            self.assertIs(kwargs["v6_writer_binding"], binding)
+            return {"status": "legacy"}
+        def proof(*args):
+            order.append("focused proof")
+            return {"status": "PASSED_FOCUSED_METHOD_EVIDENCE"}
+        with patch("capture_actual.child_environment", return_value={}), \
+                patch("capture_actual.clean_source", return_value=commit), \
+                patch.object(focused_receipt.actual_arithmetic, "_source_archive",
+                             return_value=b"source"), \
+                patch.object(focused_receipt, "_helper_members", return_value=({}, {})), \
+                patch.object(focused_receipt, "_trace_map", return_value={}), \
+                patch.object(focused_receipt, "normalize_rich_traces",
+                             return_value=({}, [])), \
+                patch.object(focused_receipt, "_events", return_value=[]), \
+                patch.object(focused_receipt, "_validate_calls"), \
+                patch.object(focused_receipt, "verify_launcher_input"), \
+                patch.object(jdi_bridge, "verify_worker_launch_v6"), \
+                patch.object(focused_receipt, "_expected_classes",
+                             return_value=({}, {})), \
+                patch.object(focused_receipt, "read_witness",
+                             return_value={"definitions": []}), \
+                patch.object(focused_receipt, "_raw_projections",
+                             return_value=({"legacy_zip": b"projected"}, {})), \
+                patch.object(focused_receipt, "_verified_compiled_marker_reads",
+                             return_value=(frozenset(), set())), \
+                patch.object(focused_receipt, "_output_proof", side_effect=outputs), \
+                patch.object(focused_receipt, "make_capture_receipt",
+                             side_effect=legacy), \
+                patch.object(focused_receipt, "_proof", side_effect=proof):
+            result = focused_receipt.make_version6_receipt(files, commit)
+        self.assertEqual(order, ["raw output", "legacy writer", "focused proof"])
+        self.assertEqual(result["qualification"], "UNPASSED")
+
+    def test_compiled_marker_read_requires_bound_input_bytes_and_lifetime(self):
+        name = "portable/NumericalRecorder"
+        root = Path.home() / "focused-class-input-test"
+        path = root / (name + ".class")
+        data = b"class-prefix NUMERICAL_JSON class-suffix"
+        identity = (f'{{st_dev=makedev(0, 0), st_ino=42, '
+                    f'st_mode=S_IFREG|0644, st_size={len(data)}}}')
+        literal = json.dumps(data.decode())
+        trace = (
+            '1.000001 execve("/jdk/java", ["/jdk/java", "GradleWorkerMain"], 0x0) = 0\n'
+            f'1.000002 stat("{path}", {identity}) = 0\n'
+            f'1.000003 openat(AT_FDCWD, "{path}", O_RDONLY) = 7<{path}>\n'
+            f'1.000004 fstat(7<{path}>, {identity}) = 0\n'
+            f'1.000005 read(7<{path}>, {literal}, {len(data)}) = {len(data)}\n'
+            f'1.000006 close(7<{path}>) = 0\n'
+            '1.000007 +++ exited with 0 +++\n').encode()
+        def archive(raw):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as packed:
+                packed.writestr("trace.41", raw)
+            return {"worker_write_traces": output.getvalue()}
+        selected = ("41", "/jdk/java", ("/jdk/java", "GradleWorkerMain"))
+        witness = {name: {"origin": root.as_uri()}}
+        with patch.object(focused_receipt, "select_worker_exec", return_value=selected):
+            trusted, paths = focused_receipt._verified_compiled_marker_reads(
+                archive(trace), 41, {name: data}, {name: root}, witness)
+            self.assertEqual(trusted, frozenset({("41", 4)}))
+            self.assertEqual(paths, {str(path)})
+            for label, changed in (
+                    ("wrong_bytes", trace.replace(
+                        data, b"wrong-input NUMERICAL_JSON wrong-input")),
+                    ("lost_close", trace.replace(f'close(7<{path}>) = 0'.encode(),
+                                  b'close(7) = 0')),
+                    ("lost_fstat", trace.replace(
+                        f'1.000004 fstat(7<{path}>, {identity}) = 0\n'.encode(), b'')),
+                    ("wrong_provider", trace.replace(
+                        f'openat(AT_FDCWD, "{path}"'.encode(),
+                        b'openat(AT_FDCWD, "/home/other"'))):
+                with self.subTest(change=label), \
+                        self.assertRaises((FocusedRejected, Rejected)):
+                    focused_receipt._verified_compiled_marker_reads(
+                        archive(changed), 41, {name: data}, {name: root}, witness)
+
+    def test_receipt_projects_both_raw_archives_with_version6_profile(self):
+        raw = io.BytesIO()
+        with zipfile.ZipFile(raw, "w") as output:
+            output.writestr("trace.41", b"1.000001 +++ exited with 0 +++\n")
+        worker, helper = focused_receipt._raw_projections(
+            {"worker_write_traces": raw.getvalue(),
+             "jdi_helper_traces": raw.getvalue()}, set(), set())
+        self.assertEqual((worker["threads"], helper["threads"]), (1, 1))
+        with patch("actual_trace.V6_RAW_MAX_BYTES", len(raw.getvalue()) - 1):
+            with self.assertRaises(TraceRejected):
+                focused_receipt._raw_projections(
+                    {"worker_write_traces": raw.getvalue(),
+                     "jdi_helper_traces": raw.getvalue()}, set(), set())
+
     def test_pinned_launcher_identity_and_bytes(self):
         launcher_bytes = b"bounded pinned launcher source test"
         identity = {"device_major": 0, "device_minor": 56,

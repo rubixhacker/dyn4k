@@ -1,5 +1,5 @@
 import ast
-from collections import Counter
+from collections import Counter, namedtuple
 import hashlib
 import io
 import json
@@ -81,6 +81,7 @@ _FOCUSED_BOOLEAN_SOURCE_SHA256 = "d7a8467eb390a4c0db1544472fdb092420933470c87988
 _WITNESS_PREFIXES = (b"NUMERICAL_JSON ", b"PROSPECTIVE_ROTATION_JSON ",
                      b"PROSPECTIVE_BINDING_JSON ")
 _WITNESS_WRITE = re.compile(r'^write\((\d+), ("(?:\\.|[^"\\])*"), (\d+)\)\s+= (\d+)$')
+V6WriterBinding = namedtuple("V6WriterBinding", "projected_sha256 mirror sockets")
 
 
 def _require_focused_wheel_step_calls(markers, step):
@@ -935,10 +936,17 @@ def _check_process(files, runtime_executable, method, jdi_port=None,
 
 
 def verify_worker_write_witness(archive, xml, worker_pid, execve_log,
-                                complete_exec=False):
+                                complete_exec=False, verified_class_reads=frozenset(),
+                                v6_binding=None):
     try:
         if type(complete_exec) is not bool:
             raise CaptureRejected("worker process trace mode differs")
+        if v6_binding is not None and (type(v6_binding) is not V6WriterBinding or
+                v6_binding.projected_sha256 != _sha(archive) or
+                type(v6_binding.mirror) is not tuple or
+                type(v6_binding.sockets) is not frozenset or
+                v6_binding.mirror in v6_binding.sockets):
+            raise CaptureRejected("version 6 writer binding differs")
         with zipfile.ZipFile(io.BytesIO(archive)) as traces:
             names = traces.namelist()
             if not names or len(names) > 1024 or len(names) != len(set(names)) or any(
@@ -1001,7 +1009,7 @@ def verify_worker_write_witness(archive, xml, worker_pid, execve_log,
         for pid in descendants:
             per_fd = {}
             bad_write = False
-            for line in decoded[pid].splitlines():
+            for index, line in enumerate(decoded[pid].splitlines()):
                 if line.startswith("write("):
                     match = _WITNESS_WRITE.fullmatch(line)
                     if match is None:
@@ -1012,17 +1020,42 @@ def verify_worker_write_witness(archive, xml, worker_pid, execve_log,
                     if len(payload) != int(requested) or int(requested) != int(written):
                         bad_write = True
                     per_fd.setdefault(fd, []).append(payload)
-                elif any(prefix.decode() in line for prefix in _WITNESS_PREFIXES):
+                elif (any(prefix.decode() in line for prefix in _WITNESS_PREFIXES) and
+                      (pid, index) not in verified_class_reads):
                     raise CaptureRejected("worker wrote an unparsed operation record")
             for fd, writes in per_fd.items():
                 stream = b"".join(writes)
                 if any(prefix in stream for prefix in _WITNESS_PREFIXES):
                     if bad_write:
                         raise CaptureRejected("worker write call is incomplete")
-                    streams.append((pid, fd, stream))
-        if len(streams) != 1:
-            raise CaptureRejected("worker operation writer is ambiguous")
-        thread_pid, fd, stream = streams[0]
+                    streams.append((pid, fd, stream, writes))
+        if v6_binding is None:
+            if len(streams) != 1:
+                raise CaptureRejected("worker operation writer is ambiguous")
+            thread_pid, fd, stream, _ = streams[0]
+            auxiliary_count = 0
+        else:
+            by_key = {(pid, fd): (stream, writes) for pid, fd, stream, writes in streams}
+            if (len(by_key) != len(streams) or
+                    set(by_key) != {v6_binding.mirror} | v6_binding.sockets or
+                    by_key[v6_binding.mirror][0] != outputs[0].text.encode("utf-8")):
+                raise CaptureRejected("version 6 marked writer inventory differs")
+            thread_pid, fd = v6_binding.mirror
+            stream = by_key[v6_binding.mirror][0]
+            for key in v6_binding.sockets:
+                marker_writes = []
+                for payload in by_key[key][1]:
+                    found = [(offset, prefix) for prefix in _WITNESS_PREFIXES
+                             if (offset := payload.find(prefix)) >= 0]
+                    if not found:
+                        continue
+                    if len(found) != 1 or any(payload.count(prefix) != 1
+                                               for _, prefix in found):
+                        raise CaptureRejected("version 6 socket marker is ambiguous")
+                    marker_writes.append(payload[found[0][0]:])
+                if marker_writes != [line + b"\n" for line in expected]:
+                    raise CaptureRejected("version 6 socket marker order differs")
+            auxiliary_count = len(v6_binding.sockets)
         observed = []
         for line in stream.split(b"\n"):
             positions = [line.find(prefix) for prefix in _WITNESS_PREFIXES
@@ -1035,6 +1068,7 @@ def verify_worker_write_witness(archive, xml, worker_pid, execve_log,
             raise CaptureRejected("worker write stream differs from XML")
         return {"status": "PASSED_KERNEL_WORKER_WRITES", "worker_pid": worker_pid,
                 "writer_thread_pid": thread_pid, "writer_fd": fd,
+                "auxiliary_streams": auxiliary_count,
                 "lines": len(observed),
                 "operation_lines": sum(line.startswith(_WITNESS_PREFIXES[1])
                                        for line in observed),
@@ -1272,7 +1306,14 @@ def _verify_boolean_jdi(files, summary, worker_pid):
 
 
 def make_capture_receipt(files, method, commit, expected_ids, runtime_executable,
-                         boolean_test_class=_FOCUSED_BOOLEAN_CLASS, environment=None):
+                         boolean_test_class=_FOCUSED_BOOLEAN_CLASS, environment=None,
+                         verified_class_reads=frozenset(), v6_writer_binding=None):
+    if (type(verified_class_reads) is not frozenset or
+            verified_class_reads and method != _FOCUSED_BOOLEAN_METHOD or
+            v6_writer_binding is not None and
+            (method != _FOCUSED_BOOLEAN_METHOD or
+             type(v6_writer_binding) is not V6WriterBinding)):
+        raise CaptureRejected("verified class input selection differs")
     requires_writes = method in ("captureWheelActive", "captureRotationPremises",
                                  _FOCUSED_BOOLEAN_METHOD)
     required_files = _RECEIPT_FILES | ({"worker_write_traces"}
@@ -1345,7 +1386,9 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
         witness = verify_worker_write_witness(files["worker_write_traces"],
                                               files["xml"], worker_pid,
                                               files["execve_log"],
-                                              complete_exec=bool(jdi_files))
+                                              complete_exec=bool(jdi_files),
+                                              verified_class_reads=verified_class_reads,
+                                              v6_binding=v6_writer_binding)
         receipt["worker_write_traces_sha256"] = _sha(files["worker_write_traces"])
         receipt["external_xml_witness"] = witness
         summary["external_xml_witness"] = witness["status"]

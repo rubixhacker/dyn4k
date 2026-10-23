@@ -1,8 +1,12 @@
+import hashlib
 import io
+import struct
 from pathlib import Path
 import unittest
 import zipfile
+from unittest.mock import patch
 
+import actual_trace
 from actual_trace import checked_projection, TraceRejected, trace_exposes_environment
 from boolean_rotation_jdi.jdi_bridge import verify_jdi_file_writes
 
@@ -16,6 +20,152 @@ def archived(rows):
 
 
 class ActualTraceTest(unittest.TestCase):
+    def test_connected_socket_projection_keeps_complete_call(self):
+        calls = (
+            b'write(56<TCPv6:[[::ffff:127.0.0.1]:1234->[::ffff:127.0.0.1]:5678]>, "a->b", 4) = 4',
+            b'write(57<TCP:[127.0.0.1:1234->127.0.0.1:5678]>, "ok", 2) = 2',
+            b'listen(58<TCP:[127.0.0.1:1234]>, 16) = 0',
+        )
+        trace = b"".join(f"1.{index:06d} ".encode() + call + b"\n"
+                         for index, call in enumerate(calls, 1)) + \
+                b"1.000004 +++ exited with 0 +++\n"
+        result = checked_projection(archived({"trace.41": trace}), version6_raw=True)
+        with zipfile.ZipFile(io.BytesIO(result["legacy_zip"])) as projected:
+            self.assertEqual(projected.read("trace.41").splitlines(), [
+                b'write(56, "a->b", 4) = 4',
+                b'write(57, "ok", 2) = 2',
+                b'listen(58, 16) = 0',
+                b'+++ exited with 0 +++',
+            ])
+
+    def test_version6_descriptor_projection_rejects_incomplete_socket_tokens(self):
+        good = b'1.000001 write(56<TCPv6:[[::1]:1234->[::1]:5678]>, "<->", 3) = 3\n'
+        good += b'1.000002 +++ exited with 0 +++\n'
+        result = checked_projection(archived({"trace.41": good}), version6_raw=True)
+        with zipfile.ZipFile(io.BytesIO(result["legacy_zip"])) as projected:
+            self.assertIn(b'write(56, "<->", 3) = 3', projected.read("trace.41"))
+        for changed in (
+                good.replace(b'5678]>', b'5678>'),
+                good.replace(b'5678]>', b'5678]>>'),
+                good.replace(b'5678]>', b'5678]>tail'),
+                good.replace(b'1234->[', b'1234-><['),
+                good.replace(b'5678]>', b'5678]>, 99<')):
+            with self.subTest(changed_hash=hashlib.sha256(changed).hexdigest()), \
+                    self.assertRaises(TraceRejected):
+                checked_projection(archived({"trace.41": changed}), version6_raw=True)
+
+    def test_version6_projects_observed_native_descriptor_shapes(self):
+        calls = (
+            b'dup2(7<pipe:[12345]>, 8</dev/null<char 1:3>>) = 8<pipe:[12345]>',
+            b'close(9<anon_inode:[eventpoll]>) = 0',
+            b'close(16<anon_inode:inotify>) = 0',
+            b'close(10<{eventfd-count=0, eventfd-id=12, eventfd-semaphore=0}>) = 0',
+            b'close(17<{eventfd-count=0x0, eventfd-id=13, eventfd-semaphore=0}>) = 0',
+            b'close(11<UNIX-STREAM:[123->456]>) = 0',
+            b'close(12<UDPv6:[[::1]:4000]>) = 0',
+            b'fstat(13</tmp/old>(deleted), {st_mode=S_IFREG}) = 0',
+            b'openat(AT_FDCWD</tmp>, "/tmp/new", O_RDONLY) = 14</tmp/new>',
+            b'write(15<TCPv6:[[::1]:4000->[::1]:5000]>, "<char 1:3> ->", 13) = 13',
+        )
+        trace = b"".join(f"1.{index:06d} ".encode() + call + b"\n"
+                         for index, call in enumerate(calls, 1))
+        trace += b"1.000011 +++ exited with 0 +++\n"
+        result = checked_projection(archived({"trace.41": trace}), version6_raw=True)
+        expected = (
+            b'dup2(7, 8) = 8', b'close(9) = 0', b'close(16) = 0',
+            b'close(10) = 0', b'close(17) = 0',
+            b'close(11) = 0', b'close(12) = 0',
+            b'fstat(13, {st_mode=S_IFREG}) = 0',
+            b'openat(AT_FDCWD, "/tmp/new", O_RDONLY) = 14',
+            b'write(15, "<char 1:3> ->", 13) = 13',
+            b'+++ exited with 0 +++',
+        )
+        with zipfile.ZipFile(io.BytesIO(result["legacy_zip"])) as projected:
+            self.assertEqual(projected.read("trace.41").splitlines(), list(expected))
+
+    def test_version6_rejects_malformed_native_descriptor_neighbors(self):
+        call = b'dup2(7<pipe:[12345]>, 8</dev/null<char 1:3>>) = 8<pipe:[12345]>'
+        bad_calls = (
+            call.replace(b'<char 1:3>', b'<char 1:3'),
+            call.replace(b'<char 1:3>', b'<char 1:3><char 1:3>'),
+            call.replace(b'<char 1:3>', b'<block X:Y>'),
+            call.replace(b'8</dev/null<char 1:3>>', b'8</dev/null<char 1:3>>tail'),
+            call.replace(b'8</dev/null<char 1:3>>', b'8</dev/null<char 1:3>>9<pipe:[5]>'),
+            call.replace(b'8</dev/null<char 1:3>>', b'8</dev/null<char 1:3>> 9<pipe:[5]>'),
+            call.replace(b'8</dev/null<char 1:3>>', b'8</dev/"null<char 1:3>>'),
+            b'close(7<UNIX-STREAM:[12->]>) = 0',
+            b'close(7<anon_inode:[]>) = 0',
+            b'close(7<{eventfd-count=0, eventfd-id=12}>) = 0',
+            b'close(7<{eventfd-count=0xg, eventfd-id=12, eventfd-semaphore=0}>) = 0',
+            b'close(7</tmp/file>(renamed)) = 0',
+            b'openat(AT_FDCWD</tmp>junk, "/tmp/new", O_RDONLY) = 14</tmp/new>',
+        )
+        for bad in bad_calls:
+            trace = b"1.000001 " + bad + b"\n1.000002 +++ exited with 0 +++\n"
+            with self.subTest(call_sha256=hashlib.sha256(bad).hexdigest()), \
+                    self.assertRaises(TraceRejected):
+                checked_projection(archived({"trace.41": trace}), version6_raw=True)
+
+    def test_version6_raw_limits_and_legacy_selection(self):
+        line = b"1.000001 +++ exited with 0 +++\n"
+        one = archived({"trace.41": line})
+        self.assertEqual(actual_trace.V6_RAW_MAX_BYTES, 268435456)
+        self.assertEqual(actual_trace.V6_RAW_MAX_MEMBERS, 1024)
+        self.assertEqual(actual_trace.V6_RAW_MAX_LINES, 2000000)
+        self.assertEqual(actual_trace.V6_RAW_MAX_RECORD_BYTES, 1048576)
+        self.assertEqual(checked_projection(one, version6_raw=True)["threads"], 1)
+        with patch.object(actual_trace, "V6_RAW_MAX_BYTES", len(one)):
+            self.assertEqual(checked_projection(one, version6_raw=True)["threads"], 1)
+        with patch.object(actual_trace, "V6_RAW_MAX_BYTES", len(one) - 1):
+            with self.assertRaises(TraceRejected):
+                checked_projection(one, version6_raw=True)
+            self.assertEqual(checked_projection(one)["threads"], 1)
+
+    def test_version6_raw_independent_inventory_limits(self):
+        line = b"1.000001 +++ exited with 0 +++\n"
+        two = archived({"trace.41": line, "trace.42": line})
+        with patch.object(actual_trace, "V6_RAW_MAX_MEMBERS", 1), \
+                patch.object(actual_trace, "V6_RAW_MAX_LINES", 1), \
+                patch.object(actual_trace, "V6_RAW_MAX_RECORD_BYTES", len(line)):
+            self.assertEqual(checked_projection(archived({"trace.41": line}),
+                                                version6_raw=True)["threads"], 1)
+        with patch.object(actual_trace, "V6_RAW_MAX_MEMBERS", 1):
+            with self.assertRaisesRegex(TraceRejected, "member"):
+                checked_projection(two, version6_raw=True)
+        with patch.object(actual_trace, "V6_RAW_MAX_LINES", 1):
+            with self.assertRaisesRegex(TraceRejected, "line"):
+                checked_projection(two, version6_raw=True)
+        with patch.object(actual_trace, "V6_RAW_MAX_RECORD_BYTES", len(line) - 1):
+            with self.assertRaisesRegex(TraceRejected, "record"):
+                checked_projection(two, version6_raw=True)
+
+        repeated = line * 20
+        compressed = io.BytesIO()
+        with zipfile.ZipFile(compressed, "w", compression=zipfile.ZIP_DEFLATED) as out:
+            out.writestr("trace.41", repeated)
+        packed = compressed.getvalue()
+        self.assertLess(len(packed), len(repeated))
+        with patch.object(actual_trace, "V6_RAW_MAX_BYTES", len(packed) + 1):
+            with self.assertRaisesRegex(TraceRejected, "decoded"):
+                checked_projection(packed, version6_raw=True)
+        with zipfile.ZipFile(io.BytesIO(packed)) as reader, \
+                patch.object(actual_trace, "V6_RAW_MAX_BYTES", len(repeated)):
+            self.assertEqual(len(actual_trace.validate_version6_raw_archive(
+                packed, reader)), 1)
+
+        changed = bytearray(archived({"trace.41": line}))
+        central = changed.index(b"PK\x01\x02")
+        struct.pack_into("<I", changed, central + 24, len(line) + 1)
+        with self.assertRaisesRegex(TraceRejected, "decoded size"):
+            checked_projection(bytes(changed), version6_raw=True)
+
+        duplicate = io.BytesIO()
+        with zipfile.ZipFile(duplicate, "w") as output:
+            output.writestr("trace.41", line)
+            output.writestr("trace.41", line)
+        with self.assertRaisesRegex(TraceRejected, "member"):
+            checked_projection(duplicate.getvalue(), version6_raw=True)
+
     def test_privacy_decoder_rejects_escaped_pairs_and_keys(self):
         for token in (b'DYN4K_CAPTURE_ENV_SENTINEL\\x3dportable-capture-check',
                       b'OLLAMA_\\x41PI_KEY'):

@@ -24,8 +24,22 @@ PROCESS_SYSCALLS = (
     "pidfd_open", "pidfd_send_signal", "kill", "tkill", "tgkill")
 ALLOWED = set(SYSCALLS.split(",")) - {"process"} | set(SOCKET_SYSCALLS) | set(PROCESS_SYSCALLS)
 FD_TOKEN = re.compile(r"([0-9]+)<([^<>\r\n]+)>")
+V6_FD_START = re.compile(r"([0-9]+)<")
+V6_FILE = re.compile(r"/[^<>\r\n\"(),]+(?:<char [0-9]+:[0-9]+>)?")
+V6_SOCKET = re.compile(
+    r"(?:TCP|TCPv6|UDPv6):\[(?:->|[0-9A-Za-z:.%_\[\]-])+\]")
+V6_UNIX_SOCKET = re.compile(r"UNIX-STREAM:\[[0-9]+->[0-9]+\]")
+V6_PIPE = re.compile(r"pipe:\[[0-9]+\]")
+V6_ANON_INODE = re.compile(r"anon_inode:(?:\[[0-9A-Za-z_-]+\]|[0-9A-Za-z_-]+)")
+V6_EVENTFD = re.compile(
+    r"\{eventfd-count=(?:0x)?[0-9a-f]+, eventfd-id=[0-9]+, "
+    r"eventfd-semaphore=[0-9]+\}")
 CALL = re.compile(r"([a-z][a-z0-9_]*)\(")
 MAX_READER_BYTES = 128 * 1024 * 1024
+V6_RAW_MAX_BYTES = 256 * 1024 * 1024
+V6_RAW_MAX_MEMBERS = 1024
+V6_RAW_MAX_LINES = 2000000
+V6_RAW_MAX_RECORD_BYTES = 1024 * 1024
 ENVIRONMENT_SENTINEL = b"DYN4K_CAPTURE_ENV_SENTINEL=portable-capture-check"
 FORBIDDEN_ENVIRONMENT_KEY = b"OLLAMA_API_KEY"
 QUOTED_BYTES = re.compile(rb'"(?:[^"\\]|\\.)*"')
@@ -137,7 +151,72 @@ def rich_trace_arguments():
     return args
 
 
-def _project_descriptors(call):
+def _version6_fd_token(call, index, *, directory=False):
+    if directory:
+        if not call.startswith("AT_FDCWD<", index):
+            raise TraceRejected("version 6 directory descriptor differs")
+        number = "AT_FDCWD"
+        beginning = index + len("AT_FDCWD<")
+    else:
+        match = V6_FD_START.match(call, index)
+        if match is None:
+            raise TraceRejected("version 6 descriptor decoration is incomplete")
+        number = match[1]
+        beginning = match.end()
+    socket = call.startswith(("TCP:", "TCPv6:", "UDPv6:",
+                              "UNIX-STREAM:"), beginning)
+    cursor = beginning
+    nested = False
+    while cursor < len(call):
+        if call.startswith("->", cursor) and socket:
+            cursor += 2
+            continue
+        char = call[cursor]
+        if char == ">":
+            break
+        if char == "<":
+            inner = re.match(r"<char [0-9]+:[0-9]+>", call[cursor:])
+            if socket or nested or inner is None:
+                raise TraceRejected("version 6 descriptor nesting differs")
+            nested = True
+            cursor += inner.end()
+            continue
+        if char in '"\r\n':
+            raise TraceRejected("version 6 descriptor decoration is incomplete")
+        cursor += 1
+    if cursor == len(call):
+        raise TraceRejected("version 6 descriptor decoration is incomplete")
+    decoration = call[beginning:cursor]
+    if directory:
+        valid = V6_FILE.fullmatch(decoration) is not None and not nested
+    elif decoration.startswith(("TCP:", "TCPv6:", "UDPv6:")):
+        valid = V6_SOCKET.fullmatch(decoration) is not None
+        valid = valid and decoration.count("->") <= 1
+        valid = valid and (not decoration.startswith("UDPv6:") or
+                           "->" not in decoration)
+        depth = 0
+        for char in decoration[decoration.index(":") + 1:]:
+            if char == "[":
+                depth += 1
+            elif char == "]":
+                depth -= 1
+                if depth < 0:
+                    valid = False
+        valid = valid and depth == 0
+    else:
+        valid = any(pattern.fullmatch(decoration) is not None for pattern in (
+            V6_FILE, V6_UNIX_SOCKET, V6_PIPE, V6_ANON_INODE, V6_EVENTFD))
+    if not valid:
+        raise TraceRejected("version 6 descriptor decoration differs")
+    end = cursor + 1
+    if decoration.startswith("/") and call.startswith("(deleted)", end):
+        end += len("(deleted)")
+    if end < len(call) and call[end] not in ",)]":
+        raise TraceRejected("version 6 descriptor has a trailing fragment")
+    return number, end
+
+
+def _project_descriptors(call, *, version6_raw=False):
     output = []
     quoted = False
     escaped = False
@@ -160,17 +239,32 @@ def _project_descriptors(call):
             index += 1
             continue
         if call.startswith("AT_FDCWD<", index):
-            end = call.find(">", index)
-            if end < 0:
-                raise TraceRejected("rich directory descriptor is incomplete")
+            if version6_raw:
+                _, end = _version6_fd_token(call, index, directory=True)
+            else:
+                end = call.find(">", index)
+                if end < 0:
+                    raise TraceRejected("rich directory descriptor is incomplete")
+                end += 1
             output.append("AT_FDCWD")
-            index = end + 1
+            index = end
             continue
-        match = FD_TOKEN.match(call, index)
+        if version6_raw and V6_FD_START.match(call, index):
+            number, end = _version6_fd_token(call, index)
+            output.append(number)
+            index = end
+            continue
+        match = FD_TOKEN.match(call, index) if not version6_raw else None
         if match:
             output.append(match[1])
             index = match.end()
             continue
+        if version6_raw and char.isdigit():
+            end = index
+            while end < len(call) and call[end].isdigit():
+                end += 1
+            if end < len(call) and call[end] == "<":
+                raise TraceRejected("version 6 descriptor decoration is unsupported")
         output.append(char)
         index += 1
     if quoted:
@@ -352,8 +446,42 @@ def _validate_calls(events, protected, strict_outputs=()):
     return tables
 
 
-def checked_projection(raw, protected=(), *, strict_outputs=()):
-    if type(raw) is not bytes or not raw or len(raw) > MAX_READER_BYTES:
+def validate_version6_raw_archive(raw, archive):
+    if type(raw) is not bytes or not raw or len(raw) > V6_RAW_MAX_BYTES:
+        raise TraceRejected("version 6 raw archive exceeds reader bound")
+    members = archive.infolist()
+    names = [member.filename for member in members]
+    if (not names or len(names) > V6_RAW_MAX_MEMBERS or
+            len(names) != len(set(names)) or
+            any(re.fullmatch(r"trace\.[1-9][0-9]*", name) is None
+                for name in names) or
+            any(stat.S_ISLNK(member.external_attr >> 16) for member in members)):
+        raise TraceRejected("version 6 raw member inventory differs")
+    if sum(member.file_size for member in members) > V6_RAW_MAX_BYTES:
+        raise TraceRejected("version 6 raw declared decoded total exceeds reader bound")
+    decoded = 0
+    lines = 0
+    for member in members:
+        actual = 0
+        with archive.open(member) as stream:
+            while record := stream.readline(V6_RAW_MAX_RECORD_BYTES + 1):
+                if len(record) > V6_RAW_MAX_RECORD_BYTES or not record.endswith(b"\n"):
+                    raise TraceRejected("version 6 raw record exceeds bound or is incomplete")
+                actual += len(record)
+                decoded += len(record)
+                lines += 1
+                if decoded > V6_RAW_MAX_BYTES:
+                    raise TraceRejected("version 6 raw actual decoded total exceeds reader bound")
+                if lines > V6_RAW_MAX_LINES:
+                    raise TraceRejected("version 6 raw physical line count exceeds bound")
+        if actual != member.file_size:
+            raise TraceRejected("version 6 raw actual decoded size differs")
+    return members
+
+
+def checked_projection(raw, protected=(), *, strict_outputs=(), version6_raw=False):
+    if (type(version6_raw) is not bool or type(raw) is not bytes or not raw or
+            len(raw) > (V6_RAW_MAX_BYTES if version6_raw else MAX_READER_BYTES)):
         raise TraceRejected("rich trace archive exceeds reader bound")
     if not isinstance(protected, (set, frozenset, tuple, list)) or any(
             type(path) is not str or not path.startswith("/") for path in protected):
@@ -363,13 +491,14 @@ def checked_projection(raw, protected=(), *, strict_outputs=()):
         raise TraceRejected("protected output path inventory differs")
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-            members = archive.infolist()
+            members = (validate_version6_raw_archive(raw, archive) if version6_raw
+                       else archive.infolist())
             names = [member.filename for member in members]
-            if (not names or len(names) != len(set(names)) or
+            if (not version6_raw and (not names or len(names) != len(set(names)) or
                     any(re.fullmatch(r"trace\.[1-9][0-9]*", name) is None
                         for name in names) or archive.testzip() is not None or
                     sum(member.file_size for member in members) > MAX_READER_BYTES or
-                    any(stat.S_ISLNK(member.external_attr >> 16) for member in members)):
+                    any(stat.S_ISLNK(member.external_attr >> 16) for member in members))):
                 raise TraceRejected("rich trace member inventory differs")
             traces = {name.removeprefix("trace."): archive.read(name) for name in names}
         if any(trace_exposes_environment(data) for data in traces.values()):
@@ -383,7 +512,8 @@ def checked_projection(raw, protected=(), *, strict_outputs=()):
                 projected = []
                 for line in normalized[tid].decode("utf-8").splitlines():
                     _, call = line.split(" ", 1)
-                    projected.append(_project_descriptors(call))
+                    projected.append(_project_descriptors(call,
+                        version6_raw=version6_raw))
                 legacy.writestr("trace." + tid, ("\n".join(projected) + "\n").encode())
         return {"raw_sha256": hashlib.sha256(raw).hexdigest(),
                 "legacy_zip": output.getvalue(), "threads": len(traces),

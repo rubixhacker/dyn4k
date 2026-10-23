@@ -68,6 +68,16 @@ HELPER_SOCKET_TRACE = (
 
 
 class JdiBridgeTest(unittest.TestCase):
+    def test_version6_raw_reader_bound_is_separate_from_legacy(self):
+        import actual_trace
+        raw = archive({"trace.41": b"1.000001 +++ exited with 0 +++\n"})
+        self.assertEqual(jdi_bridge._trace_members(raw),
+                         jdi_bridge._trace_members(raw, version6_raw=True))
+        with patch.object(actual_trace, "V6_RAW_MAX_BYTES", len(raw) - 1):
+            with self.assertRaises(EvidenceRejected):
+                jdi_bridge._trace_members(raw, version6_raw=True)
+            self.assertIn(41, jdi_bridge._trace_members(raw))
+
     def test_disassembly_uses_selected_focused_environment(self):
         from capture_actual import child_environment
         inherited = {"TMPDIR": os.environ["TMPDIR"], "HOME": "",
@@ -251,9 +261,13 @@ class JdiBridgeTest(unittest.TestCase):
             b'"request", 7) = 7\n'
             b'1.000014 read(7<TCP:[127.0.0.1:41000->127.0.0.1:40001]>, '
             b'"response", 8) = 8\n')
-        result = verify_jdi_transport_v6(archive({"trace.123": worker}),
-                                          archive({"trace.456": helper}),
-                                          40001, 123, 456, HELPER_ARGS)
+        with patch.object(jdi_bridge, "_trace_members",
+                          wraps=jdi_bridge._trace_members) as reader:
+            result = verify_jdi_transport_v6(archive({"trace.123": worker}),
+                                              archive({"trace.456": helper}),
+                                              40001, 123, 456, HELPER_ARGS)
+        self.assertEqual([call.kwargs for call in reader.call_args_list],
+                         [{"version6_raw": True}, {"version6_raw": True}])
         self.assertEqual(result["status"], "PROVED_JDI_RAW_EXCHANGE")
         launcher = (
             b'0.999999 execve("/tmp/dyn4k-tools/jdk21/lib/jspawnhelper", '

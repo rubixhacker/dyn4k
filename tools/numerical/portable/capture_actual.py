@@ -10,6 +10,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import zipfile
@@ -21,6 +22,7 @@ from actual_arithmetic import (CaptureRejected, assess_focused_wheel,
                                _portable_classes_archive,
                                _FOCUSED_BOOLEAN_METHOD,
                                _FOCUSED_BOOLEAN_REFERENCE_SHA256)
+from actual_output_v6 import (declared_environment_hash, observer_command)
 from boolean_rotation_jdi import jdi_bridge
 from actual_trace import (ENVIRONMENT_SENTINEL as TRACE_ENVIRONMENT_SENTINEL,
                           TraceRejected, checked_projection, rich_trace_arguments,
@@ -312,6 +314,20 @@ def private_trace_or_reject(trace_path, private, budget, scope):
     raise error
 
 
+def retain_observer_diagnostics(scratch, private, budget, error):
+    for path in Path(scratch).glob("output-observer-trace.*"):
+        try:
+            destination = Path(private) / path.name
+            if destination.exists() or path.is_symlink():
+                raise OSError("observer diagnostic destination differs")
+            os.replace(path, destination)
+            destination.chmod(0o600)
+            if budget is not None:
+                budget.check()
+        except (OSError, CaptureRejected):
+            error.add_note("private observer trace retention failed")
+
+
 def git(*args, focused=False):
     return subprocess.run(("git", *args), cwd=ROOT, check=True,
                           capture_output=True, env=child_environment(focused)).stdout
@@ -362,7 +378,7 @@ def archive_file_names(method, worker_log, worker_argument_log=None, version6=Fa
         if version6:
             names.update(("class-witness-agent.jar", "class-witness.log", "mirror.log",
                           "all-process-traces.zip", "capture-metadata.json",
-                          "jdi-helper-arguments.log"))
+                          "jdi-helper-arguments.log", "output-observer-traces.zip"))
     return names
 
 
@@ -403,6 +419,7 @@ def verify_archive_inventory(output, method, worker_log, worker_argument_log=Non
                      "jdi-helper-traces.zip"}
         if version6:
             archives.add("all-process-traces.zip")
+            archives.add("output-observer-traces.zip")
     for archive_name in archives:
         try:
             with zipfile.ZipFile(output / archive_name) as archive:
@@ -469,6 +486,9 @@ def run_capture(method, output, reference_case=None):
             try:
                 return _run_capture(method, output, reference_case, commit,
                                     Path(scratch), budget, active, private)
+            except Exception as error:
+                retain_observer_diagnostics(scratch, private, budget, error)
+                raise
             finally:
                 for process in active:
                     stop_capture_process(process)
@@ -803,6 +823,13 @@ def _run_capture(method, output, reference_case, commit, temporary,
     if not worker_log.is_file():
         raise CaptureRejected("executed JVM worker class-load log missing")
     worker_argument_log = None
+    observer_command_line = None
+    observer_environment_sha256 = None
+    observer_interpreter = None
+    observer_interpreter_before = None
+    observer_interpreter_after = None
+    observer_interpreter_sha256 = None
+    observer_exit_code = None
     if method == _FOCUSED_BOOLEAN_METHOD:
         raw_argument_log = Path(str(argument_pattern).replace("%p", worker_pid))
         if not raw_argument_log.is_file():
@@ -811,6 +838,45 @@ def _run_capture(method, output, reference_case, commit, temporary,
         check_budget(raw_argument_log.stat().st_size)
         shutil.copyfile(raw_argument_log, worker_argument_log)
         check_budget()
+        if target.returncode or not xml.is_file():
+            raise CaptureRejected("executed arithmetic target method failed")
+        observer_interpreter = Path(sys.executable).resolve()
+        observer_interpreter_before = captured_file_identity(observer_interpreter)
+        observer_interpreter_sha256 = hashlib.sha256(
+            observer_interpreter.read_bytes()).hexdigest()
+        observer_paths = (str(mirror_path), str(raw_argument_log),
+                          str(worker_log), str(helper_argument_path))
+        observer_command_line = observer_command(
+            str(observer_interpreter), observer_paths)
+        observer_environment = child_environment(focused=True)
+        observer_environment_sha256 = declared_environment_hash(
+            observer_environment)
+        observer_trace_prefix = temporary / "output-observer-trace"
+        observer_exit_code = run_bounded_process(
+            ["strace", *trace_syscalls(method, version6=True), "-o",
+             str(observer_trace_prefix), *observer_command_line],
+            PORTABLE, observer_environment,
+            temporary / "output-observer-control.log", budget, active)
+        if observer_exit_code:
+            raise CaptureRejected("version 6 output observer failed")
+        observer_interpreter_after = captured_file_identity(observer_interpreter)
+        if (observer_interpreter_after != observer_interpreter_before or
+                hashlib.sha256(observer_interpreter.read_bytes()).hexdigest() !=
+                observer_interpreter_sha256):
+            raise CaptureRejected("version 6 output observer interpreter changed")
+        observer_traces = sorted(temporary.glob("output-observer-trace.*"))
+        if len(observer_traces) != 1:
+            raise CaptureRejected("version 6 output observer process inventory differs")
+        with zipfile.ZipFile(output / "output-observer-traces.zip", "x") as archive:
+            for path in observer_traces:
+                raw = private_trace_or_reject(path, private, budget,
+                                              "output observer")
+                pid = path.name.removeprefix("output-observer-trace.")
+                if not pid.isdecimal():
+                    raise CaptureRejected("version 6 output observer PID differs")
+                check_budget(len(raw))
+                archive.writestr("trace." + pid, raw)
+                check_budget()
     check_budget(xml.stat().st_size)
     shutil.copyfile(xml, output / "capture.xml")
     check_budget()
@@ -847,7 +913,8 @@ def _run_capture(method, output, reference_case, commit, temporary,
             "jdi_evidence": "jdi-evidence.zip",
             "jdi_helper_traces": "jdi-helper-traces.zip",
             "jdi_helper_arguments": "jdi-helper-arguments.log",
-            "jdi_transport": "jdi-transport.json"}.items()})
+            "jdi_transport": "jdi-transport.json",
+            "output_observer_traces": "output-observer-traces.zip"}.items()})
         response = re.search(r"@(/[^\s]+gradle-worker-classpath[^\s]+txt)",
                              files["gradle_log"].decode("utf-8"))
         if response is None or response.group(1) != response_source or response_before is None:
@@ -891,6 +958,13 @@ def _run_capture(method, output, reference_case, commit, temporary,
                         for name in helper_class_before},
                     "helper_argument_path": str(helper_argument_path),
                     "helper_argument_identity": identity(helper_argument_path),
+                    "observer_interpreter_path": str(observer_interpreter),
+                    "observer_interpreter_identity": observer_interpreter_before,
+                    "observer_interpreter_after_identity": observer_interpreter_after,
+                    "observer_interpreter_sha256": observer_interpreter_sha256,
+                    "observer_command": list(observer_command_line),
+                    "observer_environment_sha256": observer_environment_sha256,
+                    "observer_exit_code": observer_exit_code,
                     "witness_identity": identity(witness_path),
                     "mirror_identity": identity(mirror_path),
                     "argument_identity": identity(raw_argument_log),
