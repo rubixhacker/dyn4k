@@ -14,6 +14,8 @@ import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from pathlib import Path, PurePosixPath
 
+import independent_linux_observer
+
 
 ORIGINAL_REVISION = "058bf6d982a0fb89b54050f929f6ea9dae53b714"
 REVIEWED_MAP_COMMIT = "16923c101f4c5f99e9f80ff829da63e6d51c1298"
@@ -25,6 +27,7 @@ PAIR_FIELDS = ("original", "disposition", "classname", "method", "reason",
                "review", "review_sha256")
 REVIEWED_PAIRS_SHA256 = "f92af322e9e02fba179737bc9401e5bf50a40c39dd62bf8c847ce1dc0e6b8e60"
 ARTIFACT_SUFFIXES = {".class", ".jar", ".klib", ".kexe", ".wasm", ".js"}
+NODE_PROBE_PATH = "tools/qualification/node_runtime_probe.cjs"
 HOSTS = (
     ("jvm", "jvmTest", "[jvm]"),
     ("linuxX64", "linuxX64Test", "[linuxX64]"),
@@ -39,10 +42,114 @@ GROUPS = tuple({"id": ("core-" if module == "dyn4k-core" else "") + host,
                 "pattern": f"{module}/build/test-results/{task}/TEST-*.xml"}
                for host, task, suffix in HOSTS
                for module in ("dyn4k-core", "dyn4k"))
+NODE_GROUPS = {group["id"] for group in GROUPS
+               if group["host"] in ("jsNode", "wasmJsNode", "wasmWasiNode")}
 GRADLE_COMMAND = ["./gradlew", "--no-daemon", "--max-workers=1", "--rerun-tasks",
                   "--continue", "--console=plain"] + [
                       f":{module}:{task}" for _, task, _ in HOSTS
                       for module in ("dyn4k-core", "dyn4k")]
+
+
+def node_group_for_argv(repository, argv):
+    repository = Path(repository).resolve()
+    if not isinstance(argv, list) or len(argv) < 2 or not all(
+            isinstance(part, str) for part in argv):
+        return None
+    mocha = repository / "build/js/node_modules/mocha/bin/mocha.js"
+    runner = repository / ("build/js/node_modules/kotlin-web-helpers/dist/"
+                           "kotlin-test-nodejs-runner.js")
+    for module in ("dyn4k-core", "dyn4k"):
+        prefix = "core-" if module == "dyn4k-core" else ""
+        payload = repository / (f"build/js/packages/dyn4k-{module}-test/kotlin/"
+                                f"dyn4k-{module}-test.js")
+        if (argv[1:3] == [str(mocha), str(payload)]
+                and any(argv[index:index + 2] == ["--require", str(runner)]
+                        for index in range(3, len(argv) - 1))):
+            return (prefix + "jsNode", payload)
+        for host, candidate in (
+                ("wasmJsNode", repository / f"build/wasm/packages/dyn4k-{module}-test/"
+                 "static/runUnitTests.mjs"),
+                ("wasmWasiNode", repository / module / "build/compileSync/wasmWasi/"
+                 "test/testDevelopmentExecutable/kotlin/static/runUnitTests.mjs")):
+            if argv[1:] == [str(candidate)]:
+                return (prefix + host, candidate)
+    return None
+
+
+def node_task(group_id):
+    module = "dyn4k-core" if group_id.startswith("core-") else "dyn4k"
+    host = group_id.removeprefix("core-")
+    return f":{module}:{host}Test"
+
+
+def observe_node_request(repository, request_file, gradle_pid, gradle_start_ticks,
+                         started_ns):
+    repository = Path(repository).resolve()
+    request_file = Path(request_file)
+    if request_file.is_symlink() or request_file.stat().st_size > 8192:
+        raise ValueError("Node request is linked or oversized")
+    raw = request_file.read_bytes()
+    request = json.loads(raw)
+    pid, nonce = request["pid"], request["nonce"]
+    if (type(pid) is not int or pid <= 0 or not isinstance(nonce, str)
+            or not re.fullmatch(r"[0-9a-f]{32}", nonce)
+            or request_file.name != f"{pid}-{nonce}.json"):
+        raise ValueError("Node request identity differs")
+    observed_ns = time.time_ns()
+    image = independent_linux_observer._image(pid)
+    if (image["argv"][1:] != request["argv"][1:] or
+            Path(image["argv"][0]).resolve() != Path(request["argv"][0]).resolve()):
+        raise ValueError("live Node command differs from request")
+    selection = node_group_for_argv(repository, image["argv"])
+    if selection is None:
+        raise ValueError("Node command is not a selected test runner")
+    group_id, payload = selection
+    if Path(request["execPath"]).resolve() != Path(image["executable_path"]).resolve():
+        raise ValueError("live Node image path differs from request")
+    ancestry = []
+    current = pid
+    for _ in range(32):
+        identity = independent_linux_observer._stat(current)
+        ancestry.append({"pid": current, **identity})
+        if current == gradle_pid:
+            if identity["start_ticks"] != gradle_start_ticks:
+                raise ValueError("Gradle process start identity differs")
+            break
+        if identity["parent_pid"] <= 1:
+            raise ValueError("Node test process is outside selected Gradle tree")
+        current = identity["parent_pid"]
+    else:
+        raise ValueError("Node test ancestry exceeds bound")
+    if ancestry[0]["start_ticks"] != image["start_ticks"]:
+        raise ValueError("Node start identity changed during observation")
+    executable = Path(image["executable_path"])
+    if digest(executable.read_bytes()) != image["executable_sha256"]:
+        raise ValueError("live Node executable bytes changed")
+    version_env = os.environ.copy()
+    version_env.pop("NODE_OPTIONS", None)
+    version_env.pop("DYN4K_NODE_OBSERVATION_DIR", None)
+    version = subprocess.run([str(executable), "--version"], env=version_env,
+                             capture_output=True, text=True, timeout=3, check=True).stdout.strip()
+    if version != request["version"] or not re.fullmatch(r"v\d+\.\d+\.\d+", version):
+        raise ValueError("live Node version differs from executable version")
+    if digest(executable.read_bytes()) != image["executable_sha256"]:
+        raise ValueError("Node executable bytes changed after version check")
+    payload_stat = payload.stat()
+    if not started_ns <= payload_stat.st_mtime_ns <= observed_ns:
+        raise ValueError("Node test payload predates invocation")
+    relative_payload = payload.relative_to(repository).as_posix()
+    return {"group_id": group_id, "task": node_task(group_id),
+            "pid": pid, "start_ticks": image["start_ticks"],
+            "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+            "observed_ns": observed_ns, "ancestry": ancestry,
+            "executable_path": image["executable_path"],
+            "executable_sha256": image["executable_sha256"],
+            "version": version, "argv": image["argv"],
+            "requested_argv": request["argv"],
+            "requested_exec_path": request["execPath"],
+            "payload_path": relative_payload, "payload_sha256": digest(payload.read_bytes()),
+            "request_name": request_file.name, "request_sha256": digest(raw),
+            "nonce": nonce}
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 TOKEN = re.compile(r"\bclass\s+([A-Za-z_]\w*)|@Test\b|\bfun\s+([A-Za-z_]\w*)|[{}]")
 PACKAGE = re.compile(r"(?m)^\s*package\s+([A-Za-z_][\w.]*)\s*$")
@@ -178,6 +285,120 @@ def capture_environment(repository):
             "android_home": os.environ.get("ANDROID_HOME"),
             "android_sdk_source_sha256": digest(sdk.read_bytes()) if sdk and sdk.is_file() else None,
             "executables": executables, "gradle_wrapper": wrapper}
+
+
+def node_observation_problems(repository, evidence_root, binding, started, finished):
+    if binding.get("schema", 1) == 1:
+        return []
+    if binding.get("schema") != 2:
+        return ["unknown common corpus binding schema"]
+    repository, evidence_root = Path(repository), Path(evidence_root)
+    observations = binding.get("node_observations")
+    if not isinstance(observations, list):
+        return ["actual Node process observations are absent"]
+    problems = []
+    if binding.get("observation_platform") != "linux":
+        problems.append("actual Node process observation is unsupported on this host")
+    if binding.get("node_observation_errors"):
+        problems.append("Node process observation failed during capture")
+    probe = repository / NODE_PROBE_PATH
+    if (not probe.is_file() or
+            binding.get("node_probe_sha256") != digest(probe.read_bytes())):
+        problems.append("Node startup probe source hash differs")
+    directory = (evidence_root / "node-observations" if evidence_root != repository else
+                 Path(binding.get("node_observation_dir", "")))
+    if not directory.is_dir() or directory.is_symlink():
+        return [*problems, "Node observation raw directory is absent or linked"]
+    seen_groups, seen_processes, expected_files = set(), set(), set()
+    for row in observations:
+        try:
+            group_id = row["group_id"]
+            if group_id not in NODE_GROUPS or group_id in seen_groups:
+                raise ValueError("missing, wrong, or duplicate Node group")
+            seen_groups.add(group_id)
+            pid, start_ticks = row["pid"], row["start_ticks"]
+            if (type(pid) is not int or type(start_ticks) is not int or
+                    pid <= 0 or start_ticks <= 0 or
+                    (row["boot_id"], pid, start_ticks) in seen_processes):
+                raise ValueError("duplicate or invalid Node process identity")
+            seen_processes.add((row["boot_id"], pid, start_ticks))
+            if (type(started) is not int or type(finished) is not int or
+                    not started <= row["observed_ns"] <= finished):
+                raise ValueError("stale Node process observation")
+            if row["task"] != node_task(group_id):
+                raise ValueError("Node task differs from group")
+            selection = node_group_for_argv(repository, row["argv"])
+            if selection is None or selection[0] != group_id:
+                raise ValueError("Node command differs from selected group")
+            payload = selection[1]
+            relative_payload = payload.relative_to(repository).as_posix()
+            if row["payload_path"] != relative_payload:
+                raise ValueError("Node payload path differs from command")
+            evidence_payload = evidence_root / relative_payload
+            if (not evidence_payload.is_file() or evidence_payload.is_symlink() or
+                    digest(evidence_payload.read_bytes()) != row["payload_sha256"]):
+                raise ValueError("Node test payload bytes differ")
+            if not started <= evidence_payload.stat().st_mtime_ns <= finished:
+                raise ValueError("Node test payload is outside invocation window")
+            if row["report_sha256"] != canonical_digest(binding["reports"][group_id]):
+                raise ValueError("Node group raw report binding differs")
+            ancestry = row["ancestry"]
+            if (not isinstance(ancestry, list) or not ancestry or len(ancestry) > 32 or
+                    ancestry[0]["pid"] != pid or
+                    ancestry[0]["start_ticks"] != start_ticks or
+                    ancestry[-1]["pid"] != binding["gradle_pid"] or
+                    ancestry[-1]["start_ticks"] != binding["gradle_start_ticks"] or
+                    any(first["parent_pid"] != second["pid"] for first, second in
+                        zip(ancestry, ancestry[1:]))):
+                raise ValueError("Node process is outside observed Gradle ancestry")
+            request_name = row["request_name"]
+            if (request_name != f'{pid}-{row["nonce"]}.json' or
+                    not re.fullmatch(r"[0-9a-f]{32}", row["nonce"])):
+                raise ValueError("Node request name or nonce differs")
+            ack_name = request_name.removesuffix(".json") + ".ack"
+            expected_files.update((request_name, ack_name))
+            request_file, ack_file = directory / request_name, directory / ack_name
+            if (request_file.is_symlink() or ack_file.is_symlink() or
+                    digest(request_file.read_bytes()) != row["request_sha256"] or
+                    ack_file.read_text() != row["nonce"] or
+                    digest(ack_file.read_bytes()) != row["ack_sha256"]):
+                raise ValueError("Node startup request or acknowledgement differs")
+            if (not started <= request_file.stat().st_mtime_ns <= finished or
+                    not started <= ack_file.stat().st_mtime_ns <= finished):
+                raise ValueError("Node startup request or acknowledgement is stale")
+            request = json.loads(request_file.read_text())
+            if (request != {"pid": pid, "nonce": row["nonce"],
+                            "argv": row["requested_argv"],
+                            "execPath": row["requested_exec_path"],
+                            "version": row["version"]}):
+                raise ValueError("Node startup request differs from live observation")
+            if (row["requested_argv"][1:] != row["argv"][1:] or
+                    Path(row["requested_argv"][0]).resolve() !=
+                    Path(row["argv"][0]).resolve() or
+                    Path(row["requested_exec_path"]).resolve() !=
+                    Path(row["executable_path"]).resolve()):
+                raise ValueError("Node request command or executable differs")
+            executable = Path(row["executable_path"])
+            if (not executable.is_file() or executable.is_symlink() or
+                    digest(executable.read_bytes()) != row["executable_sha256"]):
+                raise ValueError("observed Node executable bytes changed")
+            version_env = os.environ.copy()
+            version_env.pop("NODE_OPTIONS", None)
+            version_env.pop("DYN4K_NODE_OBSERVATION_DIR", None)
+            actual_version = subprocess.run([str(executable), "--version"],
+                                            env=version_env, capture_output=True,
+                                            text=True, timeout=3, check=True).stdout.strip()
+            if row["version"] != actual_version:
+                raise ValueError("observed Node version differs from executable")
+            if digest(executable.read_bytes()) != row["executable_sha256"]:
+                raise ValueError("observed Node executable changed during replay")
+        except (KeyError, OSError, TypeError, ValueError, subprocess.SubprocessError) as error:
+            problems.append(f"Node process binding differs: {error}")
+    if seen_groups != NODE_GROUPS:
+        problems.append(f"actual Node process groups missing: {sorted(NODE_GROUPS - seen_groups)}")
+    if {path.name for path in directory.iterdir()} != expected_files:
+        problems.append("Node observation raw file inventory differs")
+    return problems
 
 
 def capture_artifacts(repository, started_ns, finished_ns):
@@ -641,6 +862,8 @@ def verify_reports(repository, manifest, candidate_sha, binding, reports,
         problems.append("candidate SHA differs from report binding")
     if binding.get("manifest_sha256") != canonical_digest(manifest):
         problems.append("manifest hash differs from report binding")
+    if binding.get("schema", 1) not in (1, 2):
+        problems.append("unknown common corpus binding schema")
     started = binding.get("started_ns")
     finished = binding.get("finished_ns")
     if (type(started) is not int or type(finished) is not int
@@ -829,7 +1052,22 @@ def verify_reports(repository, manifest, candidate_sha, binding, reports,
                                                   and group["host"] in c["hosts"]),
                        "failures": failures, "errors": errors, "skipped": skipped,
                        "report_sha256": hashes})
-    result = {"schema": 1, "kind": "full-common-corpus-verification",
+        if binding.get("schema") == 2 and group_id in NODE_GROUPS:
+            observed_nodes = binding.get("node_observations")
+            observed_nodes = observed_nodes if isinstance(observed_nodes, list) else []
+            matches = [row for row in observed_nodes if isinstance(row, dict)
+                       and row.get("group_id") == group_id]
+            groups[-1]["node_runtime"] = ({"status": "OBSERVED_UNSIGNED",
+                                            "version": matches[0]["version"],
+                                            "executable_path": matches[0]["executable_path"],
+                                            "executable_sha256": matches[0]["executable_sha256"],
+                                            "pid": matches[0]["pid"],
+                                            "start_ticks": matches[0]["start_ticks"]}
+                                           if len(matches) == 1 else {"status": "UNPASSED"})
+    problems.extend(node_observation_problems(repository, evidence_root, binding,
+                                              started, finished))
+    result = {"schema": 2 if binding.get("schema") == 2 else 1,
+              "kind": "full-common-corpus-verification",
               "candidate_sha": candidate_sha, "source_tree_sha256": manifest.get("source_tree_sha256"),
               "manifest_sha256": canonical_digest(manifest),
               "status": "UNPASSED" if problems else "PASSED", "problems": problems,
@@ -914,6 +1152,12 @@ def package_archive(repository, archive, manifest, mapping, candidate_sha, bindi
     for bound in binding["reports"].values():
         for name in bound:
             copy(name, repository / archive_relative(name))
+    if binding.get("schema") == 2:
+        observation_dir = Path(binding["node_observation_dir"])
+        for row in binding["node_observations"]:
+            for name in (row["request_name"], row["request_name"].removesuffix(".json") + ".ack"):
+                copy("node-observations/" + name, observation_dir / name)
+            copy(row["payload_path"], repository / archive_relative(row["payload_path"]))
 
     files = {}
     for path in sorted(archive.rglob("*")):
@@ -984,8 +1228,17 @@ def verify_archive(archive, repository, candidate_sha, upstream=None, require_ch
             problems.append("archive binding inventory differs")
         expected.update(artifacts)
         expected.update(name for bound in bound_reports.values() for name in bound)
+        if binding.get("schema") == 2:
+            for row in binding["node_observations"]:
+                expected.add(row["payload_path"])
+                expected.add("node-observations/" + row["request_name"])
+                expected.add("node-observations/" +
+                             row["request_name"].removesuffix(".json") + ".ack")
         started, finished = binding.get("started_ns"), binding.get("finished_ns")
-        for name in [*artifacts, *(name for bound in bound_reports.values() for name in bound)]:
+        timed = [*artifacts, *(name for bound in bound_reports.values() for name in bound)]
+        if binding.get("schema") == 2:
+            timed.extend(row["payload_path"] for row in binding["node_observations"])
+        for name in timed:
             mtime = recorded.get("evidence/" + name, {}).get("mtime_ns")
             if (type(started) is not int or type(finished) is not int
                     or type(mtime) is not int or not started <= mtime <= finished):
@@ -1155,24 +1408,66 @@ def main():
             for path in repository.glob(group["pattern"]):
                 path.unlink()
         started = time.time_ns()
-        completed = subprocess.run(command, cwd=repository, text=True,
-                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                   check=False)
+        observation_dir = args.binding.resolve().with_suffix(".node-observations")
+        observation_dir.mkdir(mode=0o700)
+        gradle_env = os.environ.copy()
+        gradle_env.pop("NODE_OPTIONS", None)
+        gradle_env.pop("DYN4K_NODE_OBSERVATION_DIR", None)
+        if sys.platform == "linux":
+            gradle_env["NODE_OPTIONS"] = "--require=" + str(repository / NODE_PROBE_PATH)
+            gradle_env["DYN4K_NODE_OBSERVATION_DIR"] = str(observation_dir)
+        node_observations, observation_errors, seen_requests = [], [], set()
+        with args.log.open("wb") as log_stream:
+            process = subprocess.Popen(command, cwd=repository, env=gradle_env,
+                                       stdout=log_stream, stderr=subprocess.STDOUT)
+            gradle_pid = process.pid
+            gradle_start_ticks = (independent_linux_observer._stat(gradle_pid)["start_ticks"]
+                                  if sys.platform == "linux" else None)
+            deadline = time.monotonic() + 90 * 60
+            while process.poll() is None:
+                if time.monotonic() > deadline:
+                    process.kill()
+                    observation_errors.append("complete Gradle invocation exceeded 90 minutes")
+                    break
+                for request_file in sorted(observation_dir.glob("*.json")):
+                    if request_file.name in seen_requests:
+                        continue
+                    seen_requests.add(request_file.name)
+                    try:
+                        row = observe_node_request(repository, request_file,
+                                                   gradle_pid, gradle_start_ticks, started)
+                        acknowledgement = observation_dir / request_file.name.replace(
+                            ".json", ".ack")
+                        acknowledgement.write_text(row["nonce"])
+                        row["ack_sha256"] = digest(acknowledgement.read_bytes())
+                        node_observations.append(row)
+                    except (OSError, ValueError, KeyError, TypeError,
+                            subprocess.SubprocessError) as error:
+                        observation_errors.append(f"{request_file.name}: {error}")
+                time.sleep(0.01)
+            process.wait()
         finished = time.time_ns()
-        args.log.write_text(completed.stdout)
         report_paths = {group["id"]: sorted(repository.glob(group["pattern"]))
                         for group in GROUPS}
-        binding = {"schema": 1, "candidate_sha": args.candidate_sha,
+        bound_reports = {group_id: {
+            str(path.relative_to(repository)): digest(path.read_bytes())
+            for path in paths} for group_id, paths in report_paths.items()}
+        for row in node_observations:
+            row["report_sha256"] = canonical_digest(bound_reports[row["group_id"]])
+        binding = {"schema": 2, "candidate_sha": args.candidate_sha,
                    "manifest_sha256": canonical_digest(manifest),
                    "source_tree_sha256": manifest["source_tree_sha256"],
                    "started_ns": started, "finished_ns": finished,
-                   "command": command, "exit_code": completed.returncode,
-                   "log": str(args.log), "log_sha256": digest(completed.stdout.encode()),
+                   "command": command, "exit_code": process.returncode,
+                   "log": str(args.log), "log_sha256": digest(args.log.read_bytes()),
                    "environment": capture_environment(repository),
                    "artifacts": capture_artifacts(repository, started, finished),
-                   "reports": {group_id: {
-                       str(path.relative_to(repository)): digest(path.read_bytes())
-                       for path in paths} for group_id, paths in report_paths.items()}}
+                   "reports": bound_reports, "observation_platform": sys.platform,
+                   "node_probe_sha256": digest((repository / NODE_PROBE_PATH).read_bytes()),
+                   "node_observation_dir": str(observation_dir),
+                   "gradle_pid": gradle_pid, "gradle_start_ticks": gradle_start_ticks,
+                   "node_observations": node_observations,
+                   "node_observation_errors": observation_errors}
         args.binding.write_text(json.dumps(binding, indent=2, sort_keys=True) + "\n")
     else:
         binding = json.loads(args.binding.read_text())

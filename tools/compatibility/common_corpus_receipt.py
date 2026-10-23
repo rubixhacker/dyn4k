@@ -26,7 +26,9 @@ def capture(ledger: dict, root: Path, origin: Path, upstream: Path,
             result_path: Path, binding_path: Path) -> dict:
     source = ledger["candidate_source"]
     result = json.loads(result_path.read_text())
-    receipt = {"schema_version": 1, "kind": "full-common-corpus",
+    binding = json.loads(binding_path.read_text())
+    version = 2 if binding.get("schema") == 2 else 1
+    receipt = {"schema_version": version, "kind": "full-common-corpus",
                "candidate_revision": source["revision"], "candidate_tree": source["tree"],
                "candidate_artifact": source["artifact"],
                "candidate_artifact_sha256": source["artifact_sha256"],
@@ -38,6 +40,10 @@ def capture(ledger: dict, root: Path, origin: Path, upstream: Path,
                "total_cases": result.get("total_cases"),
                "groups": [{"id": row["id"], "expected": row["expected"],
                            "reported": row["reported"]} for row in result.get("groups", [])]}
+    if version == 2:
+        receipt["node_runtimes"] = {
+            row["id"]: row.get("node_runtime") for row in result.get("groups", [])
+            if row["id"] in full_corpus.NODE_GROUPS}
     error = verify(receipt, ledger, root)
     if error:
         raise ValueError(error)
@@ -47,11 +53,13 @@ def capture(ledger: dict, root: Path, origin: Path, upstream: Path,
 def verify(receipt: dict, ledger: dict, root: Path) -> str | None:
     try:
         source = ledger["candidate_source"]
-        required = {"schema_version": 1, "kind": "full-common-corpus",
+        version = receipt.get("schema_version")
+        required = {"schema_version": version, "kind": "full-common-corpus",
                     "candidate_revision": source["revision"], "candidate_tree": source["tree"],
                     "candidate_artifact": source["artifact"],
                     "candidate_artifact_sha256": source["artifact_sha256"]}
-        if any(receipt.get(key) != value for key, value in required.items()):
+        if version not in (1, 2) or any(receipt.get(key) != value
+                                        for key, value in required.items()):
             return "full common receipt candidate source or artifact differs"
         if source["artifact"] != ARTIFACT or digest(root / ARTIFACT) != source["artifact_sha256"]:
             return "full common receipt candidate JAR missing or changed"
@@ -79,6 +87,10 @@ def verify(receipt: dict, ledger: dict, root: Path) -> str | None:
             mapping = list(csv.DictReader(stream, delimiter="\t"))
         binding = json.loads(binding_path.read_text())
         recorded = json.loads(result_path.read_text())
+        if version == 2 and (binding.get("schema") != 2 or recorded.get("schema") != 2):
+            return "full common actual Node runtime proof format differs"
+        if version == 1 and binding.get("schema", 1) == 2:
+            return "full common receipt omits actual Node runtime proof format"
         reports = {group["id"]: sorted(origin.glob(group["pattern"]))
                    for group in full_corpus.GROUPS}
         environment = binding["environment"]
@@ -94,6 +106,14 @@ def verify(receipt: dict, ledger: dict, root: Path) -> str | None:
                 manifest_path=manifest_path, mapping_path=map_path)
         if recorded != observed or observed["status"] != "PASSED":
             return "full common report differs from replay or has missing host report"
+        if version == 2:
+            runtimes = {row["id"]: row.get("node_runtime") for row in observed["groups"]
+                        if row["id"] in full_corpus.NODE_GROUPS}
+            if (set(runtimes) != full_corpus.NODE_GROUPS or
+                    receipt.get("node_runtimes") != runtimes or
+                    any(row is None or row.get("status") != "OBSERVED_UNSIGNED"
+                        for row in runtimes.values())):
+                return "full common actual Node runtime proof differs"
         groups = [{"id": row["id"], "expected": row["expected"],
                    "reported": row["reported"]} for row in observed["groups"]]
         required_group_ids = [group["id"] for group in full_corpus.GROUPS]

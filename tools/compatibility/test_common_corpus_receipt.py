@@ -20,7 +20,7 @@ BINDING = Path("/tmp/dyn4k-full-common-corpus-rotation-gate-binding.json")
 
 class CommonCorpusReceiptCountControls(unittest.TestCase):
     def verify_synthetic_manifest(self, total, receipt_total=None, mutate=None,
-                                  report_status="PASSED"):
+                                  report_status="PASSED", runtime_proof=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             origin = root / "origin"
@@ -47,20 +47,26 @@ class CommonCorpusReceiptCountControls(unittest.TestCase):
             result_path = root / "result.json"
             result_path.write_text("{}")
             binding_path = root / "binding.json"
-            binding_path.write_text(json.dumps({"environment": {
-                "java_home": "", "android_home": "", "executables": {}}}))
+            binding_path.write_text(json.dumps({"schema": 2 if runtime_proof else 1,
+                "environment": {"java_home": "", "android_home": "",
+                                "executables": {}}}))
             group_rows = []
             for group in common_corpus_receipt.full_corpus.GROUPS:
                 count = len(common_corpus_receipt.full_corpus.expected_cases(manifest, group))
-                group_rows.append({"id": group["id"], "expected": count,
-                                   "reported": count})
-            observed = {"status": report_status, "groups": group_rows}
+                row = {"id": group["id"], "expected": count, "reported": count}
+                if runtime_proof and group["id"] in common_corpus_receipt.full_corpus.NODE_GROUPS:
+                    row["node_runtime"] = {"status": "OBSERVED_UNSIGNED",
+                                           "version": "v24.16.0"}
+                group_rows.append(row)
+            observed = {"schema": 2 if runtime_proof else 1,
+                        "status": report_status, "groups": group_rows}
             result_path.write_text(json.dumps(observed))
             with patch.object(common_corpus_receipt.full_corpus, "verify_reports",
                               return_value=observed), patch.object(
                                   common_corpus_receipt.candidate_coverage, "git",
                                   side_effect=[source["revision"], source["tree"]]):
-                receipt = {"schema_version": 1, "kind": "full-common-corpus",
+                receipt = {"schema_version": 2 if runtime_proof else 1,
+                           "kind": "full-common-corpus",
                            "candidate_revision": source["revision"],
                            "candidate_tree": source["tree"],
                            "candidate_artifact": source["artifact"],
@@ -73,7 +79,12 @@ class CommonCorpusReceiptCountControls(unittest.TestCase):
                            "manifest_sha256": common_corpus_receipt.digest(manifest_path),
                            "map_sha256": common_corpus_receipt.digest(mapping_path),
                            "total_cases": total if receipt_total is None else receipt_total,
-                           "groups": group_rows}
+                           "groups": [{key: row[key] for key in ("id", "expected", "reported")}
+                                      for row in group_rows]}
+                if runtime_proof:
+                    receipt["node_runtimes"] = {
+                        row["id"]: row["node_runtime"] for row in group_rows
+                        if "node_runtime" in row}
                 if mutate:
                     mutate(receipt)
                 actual_digest = common_corpus_receipt.digest
@@ -94,6 +105,20 @@ class CommonCorpusReceiptCountControls(unittest.TestCase):
     def test_historical_manifest_total_15075_remains_valid(self):
         error, _ = self.verify_synthetic_manifest(15075)
         self.assertIsNone(error)
+
+    def test_actual_runtime_receipt_requires_explicit_version_and_all_six_groups(self):
+        error, receipt = self.verify_synthetic_manifest(15141, runtime_proof=True)
+        self.assertIsNone(error)
+        self.assertEqual(2, receipt["schema_version"])
+        for mutate in (
+                lambda value: value.update(schema_version=1),
+                lambda value: value.pop("node_runtimes"),
+                lambda value: value["node_runtimes"].pop("core-jsNode"),
+                lambda value: value["node_runtimes"]["core-jsNode"].update(
+                    version="v0.0.0")):
+            error, _ = self.verify_synthetic_manifest(
+                15141, runtime_proof=True, mutate=mutate)
+            self.assertIsNotNone(error)
 
     def test_missing_or_extra_group_is_rejected(self):
         for mutate in (lambda receipt: receipt["groups"].pop(),
