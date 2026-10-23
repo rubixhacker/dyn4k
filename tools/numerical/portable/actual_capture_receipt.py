@@ -579,7 +579,7 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
         set(class_paths))
     jdi_files = jdi_bridge.verify_jdi_file_writes(
         helper["legacy_zip"], files["jdi_evidence"], paths[1])
-    sites = jdi_bridge.derive_call_sites(files["artifact"])
+    sites = jdi_bridge.derive_call_sites(files["artifact"], environment=environment)
     identity = {"schema": jdi_witness.SCHEMA, "pid": int(selected[0]),
                 "case_id": _FOCUSED_BOOLEAN_CASE,
                 "source_sha256": sha(files["source"]),

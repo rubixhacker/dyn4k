@@ -1,6 +1,7 @@
 import ast
 import copy
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -1002,6 +1003,17 @@ class ClasspathProviderTest(unittest.TestCase):
 
 
 class EnvironmentSentinelTest(unittest.TestCase):
+    def test_v6_disassembly_receives_receipt_environment(self):
+        body = ast.parse(inspect.getsource(focused_receipt._proof))
+        calls = [node for node in ast.walk(body) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Attribute)
+                 and node.func.attr == "derive_call_sites"]
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(any(keyword.arg == "environment" and
+                            isinstance(keyword.value, ast.Name) and
+                            keyword.value.id == "environment"
+                            for keyword in calls[0].keywords))
+
     def test_legacy_source_git_accepts_selected_environment(self):
         selected = {"HOME": "", "TMPDIR": os.environ["TMPDIR"]}
         with patch.object(actual.subprocess, "run",

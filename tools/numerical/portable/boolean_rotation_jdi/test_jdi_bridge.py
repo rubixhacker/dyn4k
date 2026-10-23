@@ -68,6 +68,26 @@ HELPER_SOCKET_TRACE = (
 
 
 class JdiBridgeTest(unittest.TestCase):
+    def test_disassembly_uses_selected_focused_environment(self):
+        from capture_actual import child_environment
+        inherited = {"TMPDIR": os.environ["TMPDIR"], "HOME": "",
+                     "CODEX_HOME": "", "FAKE_SECRET": "synthetic-test-value",
+                     "JAVA_TOOL_OPTIONS": "-Dfake.value=synthetic-test-value"}
+        with patch.dict(os.environ, inherited, clear=True):
+            selected = child_environment(focused=True)
+            with patch.object(jdi_bridge.subprocess, "run") as launched, \
+                    patch.object(jdi_bridge, "parse_call_sites", return_value=[2, 550, 588]):
+                launched.side_effect = [subprocess.CompletedProcess((), 0, BODY.encode()),
+                                        subprocess.CompletedProcess((), 0, JOINT.encode())]
+                self.assertEqual(jdi_bridge.derive_call_sites(b"artifact", environment=selected),
+                                 [2, 550, 588])
+        self.assertEqual(launched.call_count, 2)
+        for call in launched.call_args_list:
+            child = call.kwargs["env"]
+            self.assertEqual(child, selected)
+            self.assertNotIn("FAKE_SECRET", child)
+            self.assertNotIn("JAVA_TOOL_OPTIONS", child)
+
     def test_version6_fork_child_prelude_has_only_fd_setup(self):
         calls = [
             'close(8<pipe:[91]>) = 0',

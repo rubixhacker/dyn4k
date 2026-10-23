@@ -113,13 +113,13 @@ def parse_call_sites(body_disassembly, joint_disassembly):
     return [body[0][0], joint[2][0], joint[3][0]]
 
 
-def derive_call_sites(artifact):
-    temporary_root = Path(os.environ.get("TMPDIR", ""))
+def derive_call_sites(artifact, environment=None):
+    environment = os.environ.copy() if environment is None else dict(environment)
+    environment.pop("OLLAMA_API_KEY", None)
+    temporary_root = Path(environment.get("TMPDIR", ""))
     if not temporary_root.is_absolute() or not temporary_root.resolve().is_relative_to(
             Path.home().resolve()):
         raise EvidenceRejected("JDI temporary root is not home-backed")
-    environment = os.environ.copy()
-    environment.pop("OLLAMA_API_KEY", None)
     environment["JAVA_HOME"] = str(JDK21)
     environment["TMPDIR"] = str(temporary_root)
     with tempfile.TemporaryDirectory(dir=temporary_root) as scratch:
