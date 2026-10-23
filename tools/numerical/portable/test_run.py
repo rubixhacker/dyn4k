@@ -425,6 +425,8 @@ class ExtractionTest(unittest.TestCase):
             with patch.dict(os.environ, {"DYN4K_TEST_JDK8_HOME": str(home.resolve())}):
                 with self.assertRaisesRegex(RuntimeError, "wrong java version"):
                     selected_test_jdk8_home()
+            with self.assertRaisesRegex(run.Rejected, "wrong runtime"):
+                run.selected_jdk8_home(home.resolve())
 
     def test_java_8_worker_open_proof_requires_staged_jar_in_worker_tree(self):
         with tempfile.TemporaryDirectory() as directory:
