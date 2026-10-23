@@ -8,6 +8,7 @@ import socket
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 from receipt import Rejected
@@ -81,7 +82,29 @@ def _retain_unverified_pilot_traces(evidence, traces, metadata):
         target.write("\n")
 
 
+def _verify_toy_transport(selected_jdk, worker_archive, helper_archive, port,
+                          worker_pid, helper_pid, helper_command):
+    from boolean_rotation_jdi import jdi_bridge
+    with patch.object(jdi_bridge, "JDK21", selected_jdk):
+        return jdi_bridge.verify_jdi_transport_v6(
+            worker_archive, helper_archive, port, worker_pid, helper_pid,
+            helper_command, focused=False)
+
+
 class ClassWitnessTest(unittest.TestCase):
+    def test_toy_transport_uses_selected_jdk_identity(self):
+        from boolean_rotation_jdi import jdi_bridge
+        selected = Path("/opt/test-selected-jdk")
+        command = [str(selected / "bin/java"), "--add-modules", "jdk.jdi",
+                   "-Djava.io.tmpdir=/home/test", "-cp", "/home/test/classes",
+                   "RotationJdiProbe", "attach-loader", "/home/test/output",
+                   "127.0.0.1", "40001", "org.dyn4j.geometry.Transform", "0"]
+        production_jdk = jdi_bridge.JDK21
+        with self.assertRaisesRegex(jdi_bridge.EvidenceRejected,
+                                    "JDI process trace archive is malformed"):
+            _verify_toy_transport(selected, b"", b"", 40001, 101, 102, command)
+        self.assertEqual(jdi_bridge.JDK21, production_jdk)
+
     def test_unverified_pilot_raw_traces_are_retained(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
             evidence = Path(directory)
@@ -175,9 +198,10 @@ class ClassWitnessTest(unittest.TestCase):
             built_agent = build_agent(SOURCE.read_bytes(), JDK, agent, root / "agent-build")
             agent_before = captured_file_identity(agent)
             runtime_before = captured_file_identity(JDK / "bin/java")
-            helper, helper_zip = jdi_bridge.compile_helper(
-                (Path(__file__).parent / "boolean_rotation_jdi/RotationJdiProbe.java").read_bytes(),
-                root / "helper-build")
+            with patch.dict(os.environ, {"DYN4K_JDI_JDK_HOME": str(JDK)}):
+                helper, helper_zip = jdi_bridge.compile_helper(
+                    (Path(__file__).parent / "boolean_rotation_jdi/RotationJdiProbe.java").read_bytes(),
+                    root / "helper-build")
             with zipfile.ZipFile(io.BytesIO(helper_zip)) as compiled_helper:
                 helper_members = {name: compiled_helper.read(name)
                                   for name in compiled_helper.namelist()}
@@ -312,10 +336,10 @@ class ClassWitnessTest(unittest.TestCase):
             helper_pid = int(helper_executions[0][0])
             self.assertEqual(helper_executions[0][1],
                              (helper_command[0], tuple(helper_command)))
-            transport_proof = jdi_bridge.verify_jdi_transport_v6(
+            transport_proof = _verify_toy_transport(
+                JDK,
                 retained_traces["worker-trace"], retained_traces["helper-trace"],
-                port, int(worker[0]), helper_pid, helper_command,
-                focused=False)
+                port, int(worker[0]), helper_pid, helper_command)
             self.assertEqual(transport_proof["status"], "PROVED_JDI_RAW_EXCHANGE")
             helper_after = {}
             helper_input_reads = {}

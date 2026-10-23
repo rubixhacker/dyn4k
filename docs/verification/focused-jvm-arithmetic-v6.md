@@ -18,6 +18,8 @@ The successful socket calls, exact peer tokens and handshake bytes, and live des
 
 The bounded JDI pilot writes the worker and helper raw trace archives and a diagnostic marked `UNVERIFIED` before proof checks. A failed pilot retains those bytes for diagnosis. A separate passing pilot summary records the completed checks; the raw diagnostic alone is not proof.
 
+The source-CI loader toy uses its selected JDK 21 for Java execution, helper compilation, and its strict transport check. The test scopes that JDK identity to the toy verifier call and restores the production pin afterward. Focused capture and public replay still require the pinned production runtime. The published `02e9d287` source run failed at this test configuration boundary; a corrected test needs renewed source review and exact-main CI.
+
 The capture records each rebuilt helper class file's identity before and after execution. Replay checks the selected helper process's complete reads of every class file it accessed. The main helper class must be read. The helper's effective startup log and the worker's effective startup log must contain only their permitted agent options. Both logs are tied to the selected process and their raw file writes.
 
 The class witness records each relevant definition, successful load, provider, and loader label. At the unique Transform class-prepare event, JDI reads the agent's retained loader object, label, and definition ordinal. The verifier compares JVM object IDs with JVM object IDs. It joins the local label and ordinal to the terminal witness record. It also compares the loaded Transform and agent helper code with their source-derived bytes.
