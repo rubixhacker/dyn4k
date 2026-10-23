@@ -276,8 +276,10 @@ class BuildProvenanceArchiveTests(unittest.TestCase):
         (self.root / "README.md").write_bytes(self.source)
         wrapper = self.root / "gradlew"
         wrapper.write_text("#!/bin/sh\nmkdir -p dyn4k-core/build/libs\n"
+                           "mkdir -p dyn4k-core/build/intermediates/aar_main_jar/androidMain/syncAndroidMainLibJars\n"
                            "sha256sum README.md\n"
-                           "cp README.md dyn4k-core/build/libs/dyn4k-core-jvm-0.1.0-alpha.1.jar\n")
+                           "cp README.md dyn4k-core/build/libs/dyn4k-core-jvm-0.1.0-alpha.1.jar\n"
+                           "cp README.md dyn4k-core/build/intermediates/aar_main_jar/androidMain/syncAndroidMainLibJars/classes.jar\n")
         wrapper.chmod(0o755)
         subprocess.run(["git", "-C", str(self.root), "add", "."], check=True)
         self.commit()
@@ -289,6 +291,9 @@ class BuildProvenanceArchiveTests(unittest.TestCase):
         self.artifact = self.root / build_provenance.ARTIFACT
         self.artifact.parent.mkdir(parents=True)
         self.artifact.write_bytes(self.source)
+        self.android_artifact = self.root / build_provenance.ANDROID_ARTIFACT
+        self.android_artifact.parent.mkdir(parents=True)
+        self.android_artifact.write_bytes(self.source)
         subprocess.run(["git", "-C", str(self.root), "config", "core.autocrlf", "true"], check=True)
 
     def commit(self):
@@ -296,16 +301,102 @@ class BuildProvenanceArchiveTests(unittest.TestCase):
                         "-c", "user.email=build-test@example.invalid", "commit", "-qm",
                         "source fixture"], check=True)
 
+    def test_real_jdk_21_options_keep_canonical_identity_for_both_variants(self):
+        with patch.dict(os.environ, {"DYN4K_LEDGER_JAVA_HOME": "/tmp/dyn4k-tools/jdk21"}):
+            os.environ.pop("JAVA_TOOL_OPTIONS", None)
+            plain = {variant: build_provenance.identity_variant(
+                self.root, self.current, artifact, variant)["java_version"]
+                for variant, artifact in (("jvm", self.artifact),
+                                          ("android", self.android_artifact))}
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR", str(Path.home()))) as java_tmp:
+            options = f"-Djava.io.tmpdir={java_tmp} -XX:-UsePerfData"
+            with patch.dict(os.environ, {"DYN4K_LEDGER_JAVA_HOME": "/tmp/dyn4k-tools/jdk21",
+                                         "JAVA_TOOL_OPTIONS": options}):
+                observed = subprocess.run(["/tmp/dyn4k-tools/jdk21/bin/java", "-version"],
+                                          capture_output=True, text=True, check=True)
+                self.assertTrue(observed.stderr.startswith("Picked up JAVA_TOOL_OPTIONS:"))
+                for variant, artifact in (("jvm", self.artifact),
+                                          ("android", self.android_artifact)):
+                    with self.subTest(variant=variant):
+                        record = build_provenance.probe_variant(
+                            self.root, self.current, artifact, variant)
+                        self.assertTrue(record["passed"], record["reason"])
+                        self.assertEqual(record["java_version"],
+                                         'openjdk version "21.0.12.1" 2026-08-18 LTS')
+                        self.assertEqual(record["java_version"], plain[variant])
+
+    def test_wrong_real_java_rejected_for_both_variants(self):
+        with patch.dict(os.environ, {"DYN4K_LEDGER_JAVA_HOME": "/tmp/dyn4k-tools/jdk8"}):
+            for variant, artifact in (("jvm", self.artifact),
+                                      ("android", self.android_artifact)):
+                with self.subTest(variant=variant), self.assertRaisesRegex(
+                        ValueError, "source rebuild requires JDK 21"):
+                    build_provenance.identity_variant(self.root, self.current, artifact, variant)
+
+    def test_forged_notice_cannot_override_wrong_runtime(self):
+        fake_home = self.root / "forged-java"
+        java = fake_home / "bin/java"
+        java.parent.mkdir(parents=True)
+        java.write_text("#!/bin/sh\n"
+                        "printf '%s\\n' 'Picked up JAVA_TOOL_OPTIONS: -Dnote=forged' "
+                        "'openjdk version \"21.0.12.1\" 2026-08-18 LTS' >&2\n"
+                        "exec /tmp/dyn4k-tools/jdk8/bin/java \"$@\"\n")
+        java.chmod(0o755)
+        with patch.dict(os.environ, {"DYN4K_LEDGER_JAVA_HOME": str(fake_home)}):
+            for variant, artifact in (("jvm", self.artifact),
+                                      ("android", self.android_artifact)):
+                with self.subTest(variant=variant), self.assertRaisesRegex(
+                        ValueError, "source rebuild requires JDK 21"):
+                    build_provenance.identity_variant(self.root, self.current, artifact, variant)
+
+    def test_failed_version_probe_cannot_supply_identity(self):
+        fake_home = self.root / "failed-java"
+        java = fake_home / "bin/java"
+        java.parent.mkdir(parents=True)
+        java.write_text("#!/bin/sh\n"
+                        "printf '%s\\n' 'openjdk version \"21.0.12.1\" 2026-08-18 LTS' "
+                        "'OpenJDK Runtime Environment Temurin-21' "
+                        "'OpenJDK 64-Bit Server VM Temurin-21' >&2\n"
+                        "exit 9\n")
+        java.chmod(0o755)
+        with patch.dict(os.environ, {"DYN4K_LEDGER_JAVA_HOME": str(fake_home)}):
+            for variant, artifact in (("jvm", self.artifact),
+                                      ("android", self.android_artifact)):
+                with self.subTest(variant=variant), self.assertRaises(subprocess.CalledProcessError):
+                    build_provenance.identity_variant(self.root, self.current, artifact, variant)
+
+    def test_android_receipt_retains_source_artifact_and_tool_bindings(self):
+        with patch.dict(os.environ, {"DYN4K_LEDGER_JAVA_HOME": "/tmp/dyn4k-tools/jdk21"}):
+            proof = build_provenance.probe_variant(
+                self.root, self.current, self.android_artifact, "android")
+            self.assertTrue(proof["passed"], proof["reason"])
+            source = {"revision": self.current, "tree": proof["source_tree"],
+                      "artifact": build_provenance.ANDROID_ARTIFACT,
+                      "artifact_sha256": proof["artifact_sha256"]}
+            self.assertIsNone(build_provenance.verify_variant(
+                proof, self.root, self.android_artifact, source, "android"))
+            for field in ("revision", "source_tree", "artifact_sha256",
+                          "gradle_wrapper_sha256", "java_sha256", "java_version"):
+                with self.subTest(field=field):
+                    changed = {**proof, field: "0" * 64}
+                    self.assertIsNotNone(build_provenance.verify_variant(
+                        changed, self.root, self.android_artifact, source, "android"))
+            self.android_artifact.write_bytes(b"altered candidate artifact\n")
+            self.assertIsNotNone(build_provenance.verify_variant(
+                proof, self.root, self.android_artifact, source, "android"))
+
     def test_probe_exports_canonical_bytes_for_current_and_historical_source(self):
         expected = hashlib.sha256(self.source).hexdigest()
         for revision in (self.historical, self.current):
-            with self.subTest(revision=revision), \
-                    patch.dict(os.environ, {"DYN4K_LEDGER_JAVA_HOME": "/tmp/dyn4k-tools/jdk21"}):
-                proof = build_provenance.probe(self.root, revision, self.artifact)
-                self.assertTrue(proof["passed"], proof.get("reason"))
-                self.assertEqual(proof["revision"], revision)
-                self.assertEqual(proof["rebuilt_sha256"], expected)
-                self.assertIn(expected + "  README.md", proof["build_stdout"])
+            for variant, artifact in (("jvm", self.artifact),
+                                      ("android", self.android_artifact)):
+                with self.subTest(revision=revision, variant=variant), \
+                        patch.dict(os.environ, {"DYN4K_LEDGER_JAVA_HOME": "/tmp/dyn4k-tools/jdk21"}):
+                    proof = build_provenance.probe_variant(self.root, revision, artifact, variant)
+                    self.assertTrue(proof["passed"], proof.get("reason"))
+                    self.assertEqual(proof["revision"], revision)
+                    self.assertEqual(proof["rebuilt_sha256"], expected)
+                    self.assertIn(expected + "  README.md", proof["build_stdout"])
 
     def test_replayed_build_rejects_changed_source_pin_and_artifact(self):
         with patch.dict(os.environ, {"DYN4K_LEDGER_JAVA_HOME": "/tmp/dyn4k-tools/jdk21"}):
