@@ -900,8 +900,16 @@ class IndependentGateSeamTests(unittest.TestCase):
                 dependencies = (independent_gates.PRIVATE_LAUNCH_CAPTURE_DEPENDENCIES
                                 if candidate == current else
                                 independent_gates.PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES)
-                self.assertEqual(18 + len(dependencies),
-                                 len(bound) - 1)
+                closure = (independent_gates.APPROVED_PROSPECTIVE_PRIVATE_LAUNCH_CHECKERS
+                           if candidate == current else
+                           independent_gates.PROSPECTIVE_REPLAY_SCRATCH_CHECKERS
+                           if candidate == revision else
+                           independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS)
+                self.assertEqual(
+                    {f"tools/numerical/portable/{name}" for name in closure} |
+                    set(independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED) |
+                    set(dependencies) | {independent_gates.PROSPECTIVE_POLICY_PATH},
+                    set(bound))
                 self.assertEqual((independent_gates.APPROVED_P2_PRIVATE_LAUNCH_PRODUCERS
                                   if candidate == current
                                   else independent_gates.APPROVED_P2_LOCAL_PRODUCERS),
