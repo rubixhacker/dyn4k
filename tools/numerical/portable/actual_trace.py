@@ -229,18 +229,16 @@ def _validate_calls(events, protected, strict_outputs=()):
                 raise TraceRejected("protected descriptor creation is unavailable")
             if known in strict_outputs and output_owners.get(known) != tid:
                 raise TraceRejected("protected output crossed a trace thread")
-            if known in strict_outputs and name in (
-                    "writev", "pwrite64", "pwritev") and \
-                    re.search(r'\) = [1-9][0-9]*$', call):
-                raise TraceRejected("protected output write form is unbound")
-            if name == "ftruncate" and known in strict_outputs and call.endswith(" = 0"):
-                if (not re.fullmatch(r'ftruncate\(' + fd + r'<' +
-                                     re.escape(known) + r'>, 0\) = 0', call) or
+            if known in strict_outputs:
+                if name not in ("write", "close", "fstat", "ftruncate"):
+                    raise TraceRejected("protected output operation is unbound")
+                if name == "ftruncate" and (
+                        not re.fullmatch(r'ftruncate\(' + fd + r'<' +
+                                         re.escape(known) + r'>, 0\) = 0', call) or
                         known in written):
                     raise TraceRejected("protected output truncate differs")
-            if name in ("write", "writev", "pwrite64", "pwritev") and \
-                    known in strict_outputs and re.search(r'\) = [1-9][0-9]*$', call):
-                written.add(known)
+                if name == "write" and re.search(r'\) = [1-9][0-9]*$', call):
+                    written.add(known)
         if name in ("openat", "openat2", "newfstatat", "statx", "unlinkat",
                     "renameat", "renameat2"):
             args = _arguments(call)

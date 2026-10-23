@@ -608,8 +608,20 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
                 continue
             closed_range = re.fullmatch(
                 r'close_range\(([0-9]+), ([0-9]+), ([^)]+)\) = 0', call)
-            if closed_range and int(closed_range[1]) <= int(fd) <= int(closed_range[2]):
+            if closed_range and (closed_range[3] != "0" or
+                    int(closed_range[1]) <= int(fd) <= int(closed_range[2])):
                 raise EvidenceRejected("JDI version 6 socket was closed by range")
+            child = (re.match(r'(?:clone|clone3|fork|vfork)\(', call) and
+                     re.search(r'\) = [1-9][0-9]*$', call))
+            flags = re.search(r'\bflags=([A-Z_0-9|]+)', call) if child else None
+            copied = child and (flags is None or
+                    "CLONE_FILES" not in flags[1].split("|"))
+            aliased = (re.match(r'(?:dup|dup2|dup3)\(' + fd + r'(?:<|[,])', call) or
+                       re.match(r'fcntl\(' + fd + r'(?:<|[,]).*?, F_DUPFD', call))
+            if (copied or aliased and re.search(r'\) = [0-9]+(?:<|$)', call) or
+                    call.startswith(("sendmsg(", "recvmsg(")) and
+                    "SCM_RIGHTS" in call and re.search(r'\) = [0-9]+$', call)):
+                raise EvidenceRejected("JDI version 6 socket reference was copied")
             changed = (
                 (re.match(r'(?:close|shutdown)\(' + fd + r'(?:<|[,])', call) or
                  re.match(r'close_range\(', call) and closed_range is None) and

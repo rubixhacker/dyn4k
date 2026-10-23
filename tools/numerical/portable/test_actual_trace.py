@@ -1,8 +1,10 @@
 import io
+from pathlib import Path
 import unittest
 import zipfile
 
 from actual_trace import checked_projection, TraceRejected
+from boolean_rotation_jdi.jdi_bridge import verify_jdi_file_writes
 
 
 def archived(rows):
@@ -201,6 +203,30 @@ class ActualTraceTest(unittest.TestCase):
             with self.subTest(operation=operation), self.assertRaises(TraceRejected):
                 checked_projection(archived({"trace.41": prefix + operation + suffix}),
                                    {"/home/output"}, strict_outputs={"/home/output"})
+
+    def test_strict_output_preserves_file_offset_before_byte_accounting(self):
+        root = str(Path.home() / "focused-jdi-output")
+        target = root + "/complete.txt"
+        prefix = (f'1.000001 openat(AT_FDCWD, "{target}", '
+                  f'O_WRONLY|O_CREAT|O_TRUNC, 0666) = 7<{target}>\n'
+                  f'1.000002 write(7<{target}>, "abc", 3) = 3\n')
+        suffix = (f'1.000004 write(7<{target}>, "def", 3) = 3\n'
+                  f'1.000005 close(7<{target}>) = 0\n'
+                  '1.000006 +++ exited with 0 +++\n')
+        evidence = archived({"complete.txt": b"abcdef"})
+        good = checked_projection(archived({"trace.41": (prefix + suffix).encode()}),
+                                  {target}, strict_outputs={target})
+        self.assertEqual(verify_jdi_file_writes(good["legacy_zip"], evidence, root)[
+                         "files"], 1)
+        for operation in (
+            f'1.000003 lseek(7<{target}>, 0, SEEK_SET) = 0\n',
+            f'1.000003 read(7<{target}>, "abc", 3) = 3\n',
+        ):
+            with self.subTest(operation=operation), self.assertRaises(TraceRejected):
+                projected = checked_projection(
+                    archived({"trace.41": (prefix + operation + suffix).encode()}),
+                    {target}, strict_outputs={target})
+                verify_jdi_file_writes(projected["legacy_zip"], evidence, root)
 
 
 if __name__ == "__main__":

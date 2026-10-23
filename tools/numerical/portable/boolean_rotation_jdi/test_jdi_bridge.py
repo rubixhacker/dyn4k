@@ -9,6 +9,7 @@ import zipfile
 from unittest.mock import patch
 
 import jdi_bridge
+from actual_trace import checked_projection
 from jdi_bridge import (EvidenceRejected, compile_helper, parse_call_sites, verify_body_map,
                         verify_jdi_archive, verify_jdi_file_writes, verify_loader_bridge,
                         verify_jdi_transport, verify_jdi_transport_v6)
@@ -151,6 +152,99 @@ class JdiBridgeTest(unittest.TestCase):
                                              "trace.124": child}),
                                     archive({"trace.456": helper}),
                                     40001, 123, 456, HELPER_ARGS)
+
+        worker_token = b'TCP:[127.0.0.1:40001->127.0.0.1:41000]'
+        helper_token = b'TCP:[127.0.0.1:41000->127.0.0.1:40001]'
+        for side, original, marker, fd, token, child_id, clone_time, action_time in (
+                ("worker", worker, b'1.000012 recvfrom', b'10', worker_token,
+                 b'124', b'1.0000105', b'1.000011'),
+                ("helper", helper, b'1.000011 write', b'7', helper_token,
+                 b'457', b'1.0000105', b'1.0000107')):
+            for shared_flag, operation in (
+                    (b'SIGCHLD', b'shutdown(' + fd + b'<' + token +
+                     b'>, SHUT_RDWR) = 0'),
+                    (b'CLONE_FILES|SIGCHLD', b'shutdown(' + fd + b'<' + token +
+                     b'>, SHUT_RDWR) = 0'),
+                    (b'SIGCHLD', b'close(' + fd + b'<' + token +
+                     b'>) = 0')):
+                parent = original.replace(
+                    marker, clone_time + b' clone(child_stack=NULL, flags=' +
+                    shared_flag + b') = ' + child_id + b'\n' + marker)
+                child = (action_time + b' ' + operation + b'\n'
+                         b'1.000015 +++ exited with 0 +++\n')
+                members = {"trace." + ("123" if side == "worker" else "456"): parent,
+                           "trace." + child_id.decode(): child}
+                changed = archive(members)
+                workers = changed if side == "worker" else archive({"trace.123": worker})
+                helpers = changed if side == "helper" else archive({"trace.456": helper})
+                checked_projection(workers, set())
+                checked_projection(helpers, set())
+                with self.subTest(side=side, flags=shared_flag, operation=operation):
+                    with self.assertRaises(EvidenceRejected):
+                        verify_jdi_transport_v6(workers, helpers, 40001,
+                                                123, 456, HELPER_ARGS)
+
+            for alias in (
+                    b'dup(' + fd + b'<' + token + b'>) = 100<' + token + b'>',
+                    b'dup2(' + fd + b'<' + token + b'>, 100) = 100<' + token + b'>',
+                    b'dup3(' + fd + b'<' + token + b'>, 100, 0) = 100<' + token + b'>',
+                    b'fcntl(' + fd + b'<' + token + b'>, F_DUPFD, 100) = 100<' +
+                    token + b'>',
+                    b'fcntl(' + fd + b'<' + token + b'>, F_DUPFD_CLOEXEC, 100) = 100<' +
+                    token + b'>'):
+                changed = original.replace(
+                    marker, clone_time + b' ' + alias + b'\n' +
+                    action_time + b' shutdown(100<' + token +
+                    b'>, SHUT_RDWR) = 0\n' + marker)
+                workers = archive({"trace.123": changed if side == "worker" else worker})
+                helpers = archive({"trace.456": changed if side == "helper" else helper})
+                checked_projection(workers, set())
+                checked_projection(helpers, set())
+                with self.subTest(side=side, alias=alias), self.assertRaises(EvidenceRejected):
+                    verify_jdi_transport_v6(workers, helpers, 40001,
+                                            123, 456, HELPER_ARGS)
+
+            alias_only = original.replace(
+                marker, clone_time + b' dup3(' + fd + b'<' + token +
+                b'>, 100, 0) = 100<' + token + b'>\n' + marker)
+            workers = archive({"trace.123": alias_only if side == "worker" else worker})
+            helpers = archive({"trace.456": alias_only if side == "helper" else helper})
+            checked_projection(workers, set())
+            checked_projection(helpers, set())
+            with self.subTest(side=side, transition="alias without shutdown"):
+                with self.assertRaises(EvidenceRejected):
+                    verify_jdi_transport_v6(workers, helpers, 40001,
+                                            123, 456, HELPER_ARGS)
+
+            copied_at_last_packet = original.replace(
+                b'1.000013 sendto' if side == "worker" else b'1.000014 read',
+                (b'1.000013' if side == "worker" else b'1.000014') +
+                b' clone(child_stack=NULL, flags=SIGCHLD) = ' + child_id + b'\n' +
+                (b'1.000013 sendto' if side == "worker" else b'1.000014 read'))
+            members = {"trace." + ("123" if side == "worker" else "456"):
+                       copied_at_last_packet,
+                       "trace." + child_id.decode():
+                       b'1.000015 +++ exited with 0 +++\n'}
+            workers = archive(members) if side == "worker" else archive({"trace.123": worker})
+            helpers = archive(members) if side == "helper" else archive({"trace.456": helper})
+            checked_projection(workers, set())
+            checked_projection(helpers, set())
+            with self.subTest(side=side, transition="copy tied to last packet"):
+                with self.assertRaises(EvidenceRejected):
+                    verify_jdi_transport_v6(workers, helpers, 40001,
+                                            123, 456, HELPER_ARGS)
+
+            changed = original.replace(
+                marker, clone_time + b' close_range(100, 200, CLOSE_RANGE_UNSHARE) = 0\n' +
+                marker)
+            workers = archive({"trace.123": changed if side == "worker" else worker})
+            helpers = archive({"trace.456": changed if side == "helper" else helper})
+            checked_projection(workers, set())
+            checked_projection(helpers, set())
+            with self.subTest(side=side, transition="unshare outside selected fd"):
+                with self.assertRaises(EvidenceRejected):
+                    verify_jdi_transport_v6(workers, helpers, 40001,
+                                            123, 456, HELPER_ARGS)
 
     def test_loader_bridge_joins_jvm_ids_and_observer_label_separately(self):
         raw = (b"transform\t41\nobserved\t41\nagent\t7\n"
