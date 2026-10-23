@@ -98,7 +98,7 @@ def verify_stable_input(traces, path, expected_identity, worker, jar):
             worker_started = True
         if tid == worker and call.startswith(("+++ exited with ", "+++ killed by ")):
             worker_finished = True
-        if worker_finished and path in call:
+        if worker_finished and groups[tid] == worker and path in call:
             raise Rejected("agent input access followed worker exit")
         child = re.match(r"(?:clone|clone3|fork|vfork)\(.*\) = ([1-9][0-9]*)$", call)
         if child:

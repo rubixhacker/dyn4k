@@ -184,7 +184,10 @@ class TransportTest(unittest.TestCase):
             replay(['0.900000 ' + stat, *rows])
         with self.assertRaises(Rejected):
             replay([*rows, '1.300000 ' + stat])
-        self.assertEqual(replay(rows[:-1] + ['1.130000 ' + stat, rows[-1]])["reads"], 1)
+        good = ("\n".join(rows[:-1] + ['1.130000 ' + stat, rows[-1]]) + "\n").encode()
+        self.assertEqual(verify_stable_input({"100": good,
+            "99": b'1.300000 write(1</other.log>, "agent /private/agent.jar", 24) = 24\n'},
+            path, identity, "100", b"JAR")["reads"], 1)
 
     def test_agent_input_alias_close_and_reuse(self):
         path = "/private/agent.jar"
