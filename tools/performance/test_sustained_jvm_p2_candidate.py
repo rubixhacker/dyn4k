@@ -16,29 +16,42 @@ STAGING = ROOT / "build/staging-repository/io/github/rubixhacker"
 
 
 class CandidateJvmP2Control(unittest.TestCase):
+    @staticmethod
+    def prepare_empty_directory(path):
+        if path.exists():
+            if not path.is_dir() or any(path.iterdir()):
+                raise AssertionError(f"refusing to reuse nonempty control path: {path}")
+        else:
+            path.mkdir(parents=True)
+        return path
+
     @classmethod
     def build(cls, name, command, cwd=ROOT):
         result = subprocess.run(command, cwd=cwd, env=cls.env, capture_output=True,
                                 text=True, timeout=180)
         (cls.root / f"{name}.stdout.raw").write_text(result.stdout)
         (cls.root / f"{name}.stderr.raw").write_text(result.stderr)
+        (cls.root / f"{name}.result.json").write_text(json.dumps(
+            {"command": command, "exit_code": result.returncode}, indent=2) + "\n")
         if result.returncode:
             raise AssertionError(f"{name} failed: {result.stderr[-2000:]}")
 
     @classmethod
     def setUpClass(cls):
         cls.root = RAW / "candidate-p2"
-        cls.root.mkdir(parents=True, exist_ok=True)
-        tmp = Path.home() / "dyn4k-performance-tmp"
-        tmp.mkdir(exist_ok=True)
+        cls.prepare_empty_directory(cls.root)
+        tmp = cls.prepare_empty_directory(cls.root / "java-gradle-tmp")
         cls.env = os.environ.copy()
-        for name in ("JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "CLASSPATH"):
+        for name in ("OLLAMA_API_KEY", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS",
+                     "_JAVA_OPTIONS", "CLASSPATH", "ANDROID_HOME",
+                     "ANDROID_SDK_ROOT", "GRADLE_OPTS"):
             cls.env.pop(name, None)
         cls.env.update(JAVA_HOME=str(JDK), TMPDIR=str(tmp),
                        PATH=f"{JDK / 'bin'}:{os.environ['PATH']}",
-                       GRADLE_OPTS=f"-Djava.io.tmpdir={tmp}")
+                       GRADLE_OPTS=f"-Djava.io.tmpdir={tmp}",
+                       JAVA_TOOL_OPTIONS=f"-XX:-UsePerfData -Djava.io.tmpdir={tmp}")
         classes = cls.root / "classes"
-        classes.mkdir(exist_ok=True)
+        cls.prepare_empty_directory(classes)
         cls.build("javac", [str(JDK / "bin/javac"), "--release", "21", "-cp",
                             str(BASELINE), "-d", str(classes),
                             str(SOURCE / "SustainedSidecars.java"),
@@ -71,7 +84,7 @@ class CandidateJvmP2Control(unittest.TestCase):
 
     def execute(self, route, mode, disabled_gc=False):
         folder = self.root / f"{route}-{mode}{'-disabled-gc' if disabled_gc else ''}"
-        folder.mkdir(exist_ok=True)
+        self.prepare_empty_directory(folder)
         files = {name: folder / name for name in
                  ("provider.json", "clock-origin.json", "warmup-clock.csv",
                   "memory-v2.jsonl", "allocation-v2.jsonl", "plateau-v2.jsonl",
@@ -93,7 +106,7 @@ class CandidateJvmP2Control(unittest.TestCase):
         prefix = str(self.adapter) if route == "direct_kotlin" else str(self.harness)
         main = "performance.SustainedDirectPilotKt" if route == "direct_kotlin" else "SustainedPilot"
         command = [str(JDK / "bin/java"),
-                   f"-Djava.io.tmpdir={Path.home() / 'dyn4k-performance-tmp'}",
+                   f"-Djava.io.tmpdir={self.root / 'java-gradle-tmp'}",
                    *(["-XX:+DisableExplicitGC"] if disabled_gc else []),
                    "-cp", os.pathsep.join((prefix, self.classpaths[route])),
                    main, "separated", "default", "small", "30", "1", mode, "1", route]
@@ -101,10 +114,21 @@ class CandidateJvmP2Control(unittest.TestCase):
                                 text=True, timeout=90)
         files["steps.csv"].write_text(result.stdout)
         files["stderr.raw"].write_text(result.stderr)
+        files["stdout.raw"].write_text(result.stdout)
+        files["command.json"].write_text(json.dumps(command, indent=2) + "\n")
         files["process-result.json"].write_text(json.dumps(
             {"command": command, "exit_code": result.returncode,
              "nonce": nonce, "source_commit": env["DYN4K_SOURCE_COMMIT"]}, indent=2) + "\n")
         return result, files, nonce
+
+    def test_control_root_rejects_unrelated_nonempty_directory(self):
+        unrelated = self.root / "unrelated"
+        unrelated.mkdir()
+        marker = unrelated / "keep.txt"
+        marker.write_text("preserve this file\n")
+        with self.assertRaisesRegex(AssertionError, "refusing to reuse nonempty"):
+            self.prepare_empty_directory(unrelated)
+        self.assertEqual("preserve this file\n", marker.read_text())
 
     def test_candidate_memory_disabled_gc_fails_closed(self):
         for route in ("direct_kotlin", "compatibility"):
