@@ -75,10 +75,9 @@ jobs:
           set -euo pipefail
           unset OLLAMA_API_KEY
           evidence="$RUNNER_TEMP/numeric-class-witness"
-          mkdir -p "$evidence/home" "$evidence/tmp"
-          export HOME="$evidence/home"
+          mkdir -p "$evidence/tmp"
           export TMPDIR="$evidence/tmp"
-          export JAVA_TOOL_OPTIONS="-XX:-UsePerfData"
+          export JAVA_TOOL_OPTIONS="-XX:-UsePerfData -Djava.io.tmpdir=$TMPDIR"
           test -n "${JAVA_HOME_21_X64:-}"
           test -d "$JAVA_HOME_21_X64"
           test -x "$JAVA_HOME_21_X64/bin/java"

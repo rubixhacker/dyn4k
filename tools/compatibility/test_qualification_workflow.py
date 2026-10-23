@@ -401,10 +401,9 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 ("name: Test numeric class witness on JDK 21",
                  "set -euo pipefail unset OLLAMA_API_KEY "
                  "evidence=\"$RUNNER_TEMP/numeric-class-witness\" "
-                 "mkdir -p \"$evidence/home\" \"$evidence/tmp\" "
-                 "export HOME=\"$evidence/home\" "
+                 "mkdir -p \"$evidence/tmp\" "
                  "export TMPDIR=\"$evidence/tmp\" "
-                 "export JAVA_TOOL_OPTIONS=\"-XX:-UsePerfData\" "
+                 "export JAVA_TOOL_OPTIONS=\"-XX:-UsePerfData -Djava.io.tmpdir=$TMPDIR\" "
                  "test -n \"${JAVA_HOME_21_X64:-}\" "
                  "test -d \"$JAVA_HOME_21_X64\" "
                  "test -x \"$JAVA_HOME_21_X64/bin/java\" "
@@ -832,9 +831,9 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         self.assertEqual(
             "set -euo pipefail unset OLLAMA_API_KEY "
             "evidence=\"$RUNNER_TEMP/numeric-class-witness\" "
-            "mkdir -p \"$evidence/home\" \"$evidence/tmp\" "
-            "export HOME=\"$evidence/home\" export TMPDIR=\"$evidence/tmp\" "
-            "export JAVA_TOOL_OPTIONS=\"-XX:-UsePerfData\" "
+            "mkdir -p \"$evidence/tmp\" "
+            "export TMPDIR=\"$evidence/tmp\" "
+            "export JAVA_TOOL_OPTIONS=\"-XX:-UsePerfData -Djava.io.tmpdir=$TMPDIR\" "
             "test -n \"${JAVA_HOME_21_X64:-}\" test -d \"$JAVA_HOME_21_X64\" "
             "test -x \"$JAVA_HOME_21_X64/bin/java\" "
             "test -x \"$JAVA_HOME_21_X64/bin/javac\" "
@@ -864,6 +863,14 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("observer failure suppressed", "python3 -B -m unittest -v test_numeric_class_witness",
              "python3 -B -m unittest -v test_numeric_class_witness || true"),
             ("explicit JDK input omitted", "DYN4K_CLASS_WITNESS_JDK_HOME=\"$JAVA_HOME_21_X64\" ", ""),
+            ("HOME reset to scratch", "          export TMPDIR=\"$evidence/tmp\"\n",
+             "          export TMPDIR=\"$evidence/tmp\"\n"
+             "          export HOME=\"$evidence/home\"\n"),
+            ("scratch home directory created", "          mkdir -p \"$evidence/tmp\"\n",
+             "          mkdir -p \"$evidence/home\" \"$evidence/tmp\"\n"),
+            ("Java temp directory override omitted",
+             "          export JAVA_TOOL_OPTIONS=\"-XX:-UsePerfData -Djava.io.tmpdir=$TMPDIR\"\n",
+             "          export JAVA_TOOL_OPTIONS=\"-XX:-UsePerfData\"\n"),
             ("configured JDK directory check omitted", "          test -d \"$JAVA_HOME_21_X64\"\n", "          true\n"),
             ("Java major check omitted", "grep -Eq 'version \"21\\.'", "cat"),
             ("javac major check omitted", "grep -Eq '^javac 21\\.'", "cat"),
