@@ -480,6 +480,70 @@ def verify_jdi_transport(worker_archive, helper_archive, port, worker_pid,
             "helper_connector": connected[0][0], "port": port}
 
 
+def _verify_fork_child_prelude(worker, java_index, worker_pid, protected_paths):
+    if (type(protected_paths) is not set or not protected_paths or
+            any(type(path) is not str or not path.startswith("/")
+                for path in protected_paths)):
+        raise EvidenceRejected("JDI version 6 fork prelude scope differs")
+    targets = set()
+    directory_fd = None
+    stat_done = False
+    directory_closed = False
+    final_option = False
+    opened = re.compile(
+        r'openat\(AT_FDCWD(?:<[^<>]+>)?, "/proc/self/fd", '
+        r'O_RDONLY\|O_NONBLOCK\|O_CLOEXEC\|O_DIRECTORY\) = '
+        r'([0-9]+)</proc/' + str(worker_pid) + r'/fd>$')
+    duplicate = re.compile(
+        r'dup2\(([0-9]+)<pipe:\[([0-9]+)\]>, ([0-3])'
+        r'(?:<.*>)?\) = \3<pipe:\[\2\]>$')
+    for _, index, call in worker:
+        if index >= java_index:
+            break
+        if any(('"' + path + '"') in call or ('<' + path + '>') in call
+               for path in protected_paths):
+            raise EvidenceRejected("JDI version 6 fork prelude used protected input")
+        closed = re.fullmatch(r'close\(([0-9]+)(?:<.*>)?\) = 0$', call)
+        if closed is not None:
+            fd = int(closed[1])
+            if fd < 4 or final_option:
+                raise EvidenceRejected("JDI version 6 fork descriptor close differs")
+            if directory_fd == fd and stat_done:
+                if directory_closed:
+                    raise EvidenceRejected("JDI version 6 fork directory closed twice")
+                directory_closed = True
+            continue
+        copied = duplicate.fullmatch(call)
+        if copied is not None:
+            source, _, target = copied.groups()
+            if (int(source) < 4 or int(target) in targets or
+                    directory_fd is not None or final_option):
+                raise EvidenceRejected("JDI version 6 fork descriptor mapping differs")
+            targets.add(int(target))
+            continue
+        directory = opened.fullmatch(call)
+        if directory is not None:
+            if targets != {0, 1, 2, 3} or directory_fd is not None:
+                raise EvidenceRejected("JDI version 6 fork directory open differs")
+            directory_fd = int(directory[1])
+            if directory_fd < 4:
+                raise EvidenceRejected("JDI version 6 fork directory descriptor differs")
+            continue
+        if (directory_fd is not None and not stat_done and
+                re.fullmatch(r'fstat\(' + str(directory_fd) + r'</proc/' +
+                             str(worker_pid) + r'/fd>, \{.*S_IFDIR.*\}\) = 0$', call)):
+            stat_done = True
+            continue
+        if (directory_closed and not final_option and
+                re.fullmatch(r'fcntl\(3<pipe:\[[0-9]+\]>, F_SETFD, FD_CLOEXEC\) = 0$',
+                             call)):
+            final_option = True
+            continue
+        raise EvidenceRejected("JDI version 6 fork prelude operation differs")
+    if targets != {0, 1, 2, 3} or not directory_closed or not final_option:
+        raise EvidenceRejected("JDI version 6 fork prelude is incomplete")
+
+
 def verify_worker_launch_v6(events, worker_pid, *, focused=True,
                             launcher_sha256=None, protected_paths=None):
     from numeric_producer_trace import WORKER_MAIN, successful_execve
@@ -499,7 +563,10 @@ def verify_worker_launch_v6(events, worker_pid, *, focused=True,
         raise EvidenceRejected("JDI version 6 selected Java execution differs")
     if len(executions) == 1:
         if java_index != 0:
-            raise EvidenceRejected("JDI version 6 Java start differs")
+            if not focused:
+                raise EvidenceRejected("JDI version 6 Java start differs")
+            _verify_fork_child_prelude(worker, java_index, worker_pid,
+                                       protected_paths)
         return java_at, java_index
     if (not focused or len(executions) != 2 or
             type(protected_paths) is not set or not protected_paths or

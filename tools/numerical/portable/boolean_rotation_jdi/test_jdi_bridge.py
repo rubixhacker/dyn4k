@@ -68,6 +68,42 @@ HELPER_SOCKET_TRACE = (
 
 
 class JdiBridgeTest(unittest.TestCase):
+    def test_version6_fork_child_prelude_has_only_fd_setup(self):
+        calls = [
+            'close(8<pipe:[91]>) = 0',
+            'dup2(9<pipe:[92]>, 0</dev/null>) = 0<pipe:[92]>',
+            'dup2(10<pipe:[93]>, 1</dev/null>) = 1<pipe:[93]>',
+            'dup2(11<pipe:[94]>, 2</dev/null>) = 2<pipe:[94]>',
+            'dup2(12<pipe:[95]>, 3) = 3<pipe:[95]>',
+            'openat(AT_FDCWD</project>, "/proc/self/fd", '
+            'O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 4</proc/123/fd>',
+            'fstat(4</proc/123/fd>, {st_mode=S_IFDIR|0700, st_size=0}) = 0',
+            'close(4</proc/123/fd>) = 0',
+            'fcntl(3<pipe:[95]>, F_SETFD, FD_CLOEXEC) = 0',
+            'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+            '["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], '
+            '0x1) = 0',
+        ]
+
+        def prove(rows):
+            events = [(Decimal("1.0") + Decimal(index) / 1000, "123", index, call)
+                      for index, call in enumerate(rows)]
+            return jdi_bridge.verify_worker_launch_v6(
+                events, 123, protected_paths={"/private/agent.jar"})
+
+        self.assertEqual(prove(calls)[1], 9)
+        for label, altered in (
+                ("read", calls[:8] + ['read(4</proc/123/fd>, "x", 1) = 1'] + calls[8:]),
+                ("socket", calls[:8] + ['socket(AF_INET, SOCK_STREAM, 0) = 5'] + calls[8:]),
+                ("other open", [call.replace('"/proc/self/fd"',
+                                             '"/private/other"') for call in calls]),
+                ("protected close", [call.replace('close(8<pipe:[91]>)',
+                     'close(8</private/agent.jar>)') for call in calls]),
+                ("wrong dup target", [call.replace('2</dev/null>', '5</dev/null>')
+                                       for call in calls])):
+            with self.subTest(label=label), self.assertRaises(jdi_bridge.EvidenceRejected):
+                prove(altered)
+
     def test_version6_fork_parent_binds_daemon_and_thread_ancestry(self):
         events = [
             (Decimal("1.0"), "10", 0, 'execve("/project/gradlew", ["gradlew"], 0x1) = 0'),
