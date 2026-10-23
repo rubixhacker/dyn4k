@@ -454,7 +454,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "PYTHONDONTWRITEBYTECODE=1 "
                  "PYTHONPATH=tools/qualification python3 -B -m unittest -v "
                  "test_collection test_compiler_modes test_full_corpus "
-                 "test_independent_adapter"),
+                 "test_node_runtime_binding test_independent_adapter"),
                 ("name: Check migration guide links and claims",
                  "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
                  "python3 -B docs/guide/check_links.py"),
@@ -716,8 +716,9 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("suite command replaced by no-op", "python3 -B -m unittest -v",
              "true # python3 -B -m unittest -v"),
             ("one module omitted", "test_collection test_compiler_modes test_full_corpus "
-             "test_independent_adapter", "test_collection test_compiler_modes "
-             "test_full_corpus"),
+             "test_node_runtime_binding test_independent_adapter", "test_collection "
+             "test_compiler_modes test_full_corpus test_node_runtime_binding"),
+            ("Node runtime binding module omitted", "test_node_runtime_binding ", ""),
             ("secret not removed", "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
              "PYTHONPATH=tools/qualification", "PYTHONDONTWRITEBYTECODE=1 "
              "PYTHONPATH=tools/qualification"),

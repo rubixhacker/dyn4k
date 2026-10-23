@@ -111,7 +111,7 @@ jobs:
       - name: Test independent qualification gate seams
         run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/qualification python3 -B -m unittest -v test_independent_gates
       - name: Test portable qualification source modules
-        run: env -u OLLAMA_API_KEY -u DYN4K_UPSTREAM_SOURCE -u DYN4K_RETAINED_FULL_JVM_ARCHIVE -u DYN4K_JVM_MODE_PUBLICATION -u DYN4K_RETAINED_BROWSER_PRODUCER -u DYN4K_RETAINED_BROWSER_ARCHIVES PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/qualification python3 -B -m unittest -v test_collection test_compiler_modes test_full_corpus test_independent_adapter
+        run: env -u OLLAMA_API_KEY -u DYN4K_UPSTREAM_SOURCE -u DYN4K_RETAINED_FULL_JVM_ARCHIVE -u DYN4K_JVM_MODE_PUBLICATION -u DYN4K_RETAINED_BROWSER_PRODUCER -u DYN4K_RETAINED_BROWSER_ARCHIVES PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/qualification python3 -B -m unittest -v test_collection test_compiler_modes test_full_corpus test_node_runtime_binding test_independent_adapter
       - name: Check migration guide links and claims
         run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 python3 -B docs/guide/check_links.py
       - name: Test migration guide checks
