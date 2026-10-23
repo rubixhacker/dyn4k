@@ -1,11 +1,14 @@
 import hashlib
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
 
 from receipt import Rejected
 from numeric_class_witness import build_agent, read_witness
+from numeric_producer_trace import verify_stable_input
 
 
 SOURCE = Path(__file__).with_name("class_witness") / "NumericClassWitness.java"
@@ -87,6 +90,36 @@ class ClassWitnessTest(unittest.TestCase):
             self.assertEqual(len(records["definitions"]), 3)
             self.assertIn("portable.PortableMatrixTest source:",
                           (root / "loads.log").read_text())
+            tracer = shutil.which("strace")
+            self.assertIsNotNone(tracer)
+            witness_path.unlink()
+            traced = subprocess.run([tracer, "-ff", "-ttt", "-yy", "-e",
+                                     "abbrev=!fstat,newfstatat,statx", "-s", "131072",
+                                     "-e", "trace=process,open,openat,openat2,close,read,pread64,"
+                                     "fstat,newfstatat,statx,write,mmap,rename,unlink,truncate",
+                                     "-o", str(root / "trace"), *command],
+                                    capture_output=True, check=False, timeout=30)
+            self.assertEqual(traced.returncode, 0, traced.stderr.decode())
+            traces = {path.name.split(".")[-1]: path.read_bytes()
+                      for path in root.glob("trace.*")}
+            worker = next(tid for tid, data in traces.items()
+                          if b"execve(" in data and b'"Main"' in data)
+            status = agent.stat()
+            identity = {"device_major": os.major(status.st_dev),
+                        "device_minor": os.minor(status.st_dev),
+                        "inode": status.st_ino, "size": status.st_size}
+            try:
+                input_proof = verify_stable_input(traces, str(agent), identity, worker)
+            except Exception as error:
+                count = sum(str(agent) in line for data in traces.values()
+                            for line in data.decode().splitlines())
+                kinds = [(line.split(" ", 1)[-1].split("(", 1)[0],
+                          "PROT_WRITE" in line, "MAP_PRIVATE" in line)
+                         for data in traces.values() for line in data.decode().splitlines()
+                         if str(agent) in line and line.split(" ", 1)[-1].startswith(
+                             ("write", "mmap", "rename", "unlink", "truncate"))]
+                self.fail(str(error) + f"; relevant trace records: {count}; operations: {kinds[:10]}")
+            self.assertGreater(input_proof["reads"], 0)
             broken = classes / "portable" / "PortableMatrixTest.class"
             bad = broken.read_bytes()
             broken.write_bytes(b"XXXX" + bad[4:])

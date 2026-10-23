@@ -13,7 +13,7 @@ from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
-from numeric_producer_trace import verify_transport, Unbound
+from numeric_producer_trace import verify_transport, verify_stable_input, Unbound
 from receipt import Rejected
 
 
@@ -50,6 +50,26 @@ class TracePrivacyTest(unittest.TestCase):
 
 
 class TransportTest(unittest.TestCase):
+    def test_agent_input_requires_worker_read_and_stable_identity(self):
+        path = "/private/agent.jar"
+        trace = {"100": (
+            b'1.000000 execve("/jdk/bin/java", ["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0) = 0\n'
+            b'1.100000 openat(AT_FDCWD, "/private/agent.jar", O_RDONLY) = 4</private/agent.jar>\n'
+            b'1.110000 fstat(4</private/agent.jar>, {st_mode=S_IFREG|0644, st_size=3, st_dev=makedev(0, 1), st_ino=44}) = 0\n'
+            b'1.120000 read(4</private/agent.jar>, "JAR", 3) = 3\n'
+            b'1.130000 close(4</private/agent.jar>) = 0\n'
+            b'1.200000 +++ exited with 0 +++\n')}
+        identity = {"device_major": 0, "device_minor": 1, "inode": 44, "size": 3}
+        self.assertEqual(verify_stable_input(trace, path, identity, "100")["reads"], 1)
+        with self.assertRaises(Rejected):
+            verify_stable_input({"100": trace["100"].replace(b'"JAR", 3', b'"JAR", 3')
+                                 .replace(b'O_RDONLY', b'O_RDWR')}, path, identity, "100")
+        with self.assertRaises(Rejected):
+            verify_stable_input(trace, path, {**identity, "inode": 45}, "100")
+        with self.assertRaises(Unbound):
+            verify_stable_input({"100": trace["100"].replace(b'1.120000 read(4</private/agent.jar>, "JAR", 3) = 3\n', b'')},
+                                path, identity, "100")
+
     def trace(self, read=True):
         calls = [
             '1.000000 execve("/jdk/bin/java", ["/jdk/bin/java", "@/work/args.txt", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], 0x0 /* 0 vars */) = 0',
@@ -301,6 +321,24 @@ class OutputTest(unittest.TestCase):
 
 
 class StartupTest(unittest.TestCase):
+    def test_witness_worker_requires_one_agent_and_guard_flags(self):
+        from numeric_producer import verify_startup_log
+        def raw(flags):
+            rows = ("VM Arguments:", "jvm_args: " + flags,
+                    "java_command: worker.org.gradle.process.internal.worker.GradleWorkerMain executor",
+                    "java_class_path (initial): /bootstrap.jar", "Launcher Type: SUN_STANDARD")
+            return "".join("[100][info][arguments] " + row + "\n" for row in rows).encode()
+        agent = "-javaagent:/private/observer.jar=/private/witness.log"
+        flags = agent + " -XX:+DisableAttachMechanism -Xshare:off -Xmx512m"
+        verify_startup_log(raw(flags), "100", "/bootstrap.jar",
+                           "/private/observer.jar", "/private/witness.log")
+        for changed in (flags.replace("-Xshare:off", ""), flags.replace(agent, ""),
+                        flags + " -agentlib:jdwp", flags + " -Xrunjdwp", flags + " " + agent,
+                        flags + " --patch-module=java.base=/tmp/shadow"):
+            with self.subTest(changed=changed), self.assertRaises(Rejected):
+                verify_startup_log(raw(changed), "100", "/bootstrap.jar",
+                                   "/private/observer.jar", "/private/witness.log")
+
     def test_executed_startup_log_rejects_classpath_and_agent_substitution(self):
         from numeric_producer import verify_startup_log
         def raw(classpath="/bootstrap.jar", flags="-Xmx512m"):
@@ -368,13 +406,24 @@ class ArchiveTest(unittest.TestCase):
             (lane / "numeric-probe").mkdir()
             (lane / "numeric-probe" / "synthetic").write_bytes(b"x")
             (lane / "numeric-probe-receipt.json").write_bytes(encoded(receipt))
+            with self.assertRaisesRegex(Rejected, "numeric producer proof schema"):
+                verify_numeric_probe(lane, "commit", "source", "trace",
+                                     {"target": artifact}, runtime)
+            proof["class_witness"] = {"schema": "class-witness/1",
+                                      "source_sha256": "0" * 64, "agent_sha256": "0" * 64,
+                                      "witness_sha256": "0" * 64,
+                                      "definition_count": 3,
+                                      "definition_inventory_sha256": "0" * 64,
+                                      "helper_provider": "file:///private/agent.jar", "input_reads": 1,
+                                      "writer_tid": "100", "writer_fd": "5",
+                                      "destination": "/private/witness.log"}
+            (lane / "numeric-probe-receipt.json").write_bytes(encoded(receipt))
             with patch("numeric_producer.load_raw", return_value={}), \
                     patch("numeric_producer._proof", return_value=proof), \
                     patch("numeric_producer.inventory", return_value=receipt["files"]):
                 result = verify_numeric_probe(lane, "commit", "source", "trace",
                                               {"target": artifact}, runtime)
-            self.assertEqual(result["status"], "UNPASSED_UNBOUND_PRODUCER")
-            self.assertIn("loaded class bytes", result["reason"])
+            self.assertEqual(result["status"], "PASSED_BOUND_PRODUCER")
             for changed in ({**proof, "worker_exit": "0"},
                             {**proof, "worker_exit": 1},
                             {**proof, "parent_pids": [True]},
