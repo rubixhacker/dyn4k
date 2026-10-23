@@ -115,24 +115,30 @@ GENERATED_PREFIXES = tuple(root + directory + b"/" for root in GENERATED_ROOTS
 GENERATED_FILES = {b"tools/numerical/portable/kotlin-js-store/yarn.lock"}
 
 
-def git(*args):
-    return subprocess.run(("git", *args), cwd=ROOT, check=True, capture_output=True).stdout
+def git(*args, environment=None):
+    return subprocess.run(("git", *args), cwd=ROOT, check=True,
+                          capture_output=True, env=environment).stdout
 
 
-def clean_identity():
-    status = git("--no-replace-objects", "status", "--porcelain",
-                 "--untracked-files=all").decode()
+def clean_identity(environment=None):
+    def selected_git(*args):
+        return git(*args) if environment is None else git(*args,
+                                                         environment=environment)
+
+    status = selected_git("--no-replace-objects", "status", "--porcelain",
+                          "--untracked-files=all").decode()
     dirty = status.splitlines()
-    ignored = git("--no-replace-objects", "ls-files", "--others", "--ignored",
-                  "--exclude-standard", "-z")
+    ignored = selected_git("--no-replace-objects", "ls-files", "--others", "--ignored",
+                           "--exclude-standard", "-z")
     dirty.extend("ignored " + os.fsdecode(path) for path in ignored.split(b"\0")
                  if path and path not in GENERATED_FILES
                  and not path.startswith(GENERATED_PREFIXES))
     if dirty:
         raise Rejected("source tree is dirty: " + ", ".join(dirty[:5]))
-    return (git("--no-replace-objects", "rev-parse", "HEAD").decode().strip(),
-            hashlib.sha256(git("--no-replace-objects", "-c", "core.autocrlf=false",
-                               "archive", "--format=tar", "HEAD")).hexdigest())
+    return (selected_git("--no-replace-objects", "rev-parse", "HEAD").decode().strip(),
+            hashlib.sha256(selected_git("--no-replace-objects", "-c",
+                                        "core.autocrlf=false", "archive",
+                                        "--format=tar", "HEAD")).hexdigest())
 
 
 def artifacts(host):

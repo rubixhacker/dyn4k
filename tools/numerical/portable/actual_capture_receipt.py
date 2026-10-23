@@ -379,9 +379,10 @@ def verify_helper_startup(raw, helper_pid, argv, argument_path):
 
 
 def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
-           aborted):
-    from capture_actual import child_environment
-    environment = child_environment(focused=True)
+           aborted, environment=None):
+    if environment is None:
+        from capture_actual import child_environment
+        environment = child_environment(focused=True)
     require(type(metadata) is dict and set(metadata) == {
         "schema", "command", "trace_arguments", "response_path", "agent_path",
         "witness_path", "mirror_path", "class_load_path", "argument_path",
@@ -629,7 +630,9 @@ def make_version6_receipt(files, commit, runtime_executable=_PINNED_JAVA):
             "version 6 source file inventory differs")
     require(runtime_executable == _PINNED_JAVA,
             "focused runtime executable differs")
-    require(clean_identity() == (commit, sha(files["source"])),
+    from capture_actual import child_environment
+    environment = child_environment(focused=True)
+    require(clean_identity(environment=environment) == (commit, sha(files["source"])),
             "focused source is not the clean running revision")
     metadata = decoded(files["metadata"])
     require(type(metadata) is dict and set(metadata) == {
@@ -673,9 +676,10 @@ def make_version6_receipt(files, commit, runtime_executable=_PINNED_JAVA):
     legacy_files = _legacy_files(files, worker)
     legacy = make_capture_receipt(
         legacy_files, _FOCUSED_BOOLEAN_METHOD, commit,
-        [_FOCUSED_BOOLEAN_CASE], runtime_executable, TEST_CLASS)
+        [_FOCUSED_BOOLEAN_CASE], runtime_executable, TEST_CLASS,
+        environment=environment)
     proof = _proof(files, legacy, metadata, raw_traces, traces, events,
-                   worker, helper, aborted)
+                   worker, helper, aborted, environment)
     return {"schema": SCHEMA, "candidate_commit": commit,
             "method": _FOCUSED_BOOLEAN_METHOD,
             "source_archive_sha256": sha(files["source"]),

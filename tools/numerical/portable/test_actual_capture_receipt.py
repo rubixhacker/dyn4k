@@ -11,6 +11,7 @@ import unittest
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import actual_arithmetic as actual
@@ -1001,6 +1002,28 @@ class ClasspathProviderTest(unittest.TestCase):
 
 
 class EnvironmentSentinelTest(unittest.TestCase):
+    def test_legacy_source_git_accepts_selected_environment(self):
+        selected = {"HOME": "", "TMPDIR": os.environ["TMPDIR"]}
+        with patch.object(actual.subprocess, "run",
+                          return_value=SimpleNamespace(returncode=0,
+                                                        stdout=b"source")) as launched:
+            self.assertEqual(actual._source_archive("a" * 40,
+                                                    environment=selected), b"source")
+        self.assertEqual(launched.call_args.kwargs["env"], selected)
+
+    def test_v6_identity_uses_focused_environment(self):
+        files = {key: b"safe" for key in FILE_NAMES}
+        files.update(worker_class_load=b"safe", worker_arguments=b"safe")
+        selected = {"TMPDIR": os.environ["TMPDIR"]}
+        with patch.object(capture_actual, "child_environment",
+                          return_value=selected) as chosen, \
+                patch.object(focused_receipt, "clean_identity",
+                             return_value=("wrong", "digest")) as identity:
+            with self.assertRaises(FocusedRejected):
+                focused_receipt.make_version6_receipt(files, "a" * 40)
+        chosen.assert_called_once_with(focused=True)
+        identity.assert_called_once_with(environment=selected)
+
     def test_receipt_rebuild_uses_focused_child_environment(self):
         with patch.object(capture_actual, "child_environment",
                           return_value={"TMPDIR": os.environ["TMPDIR"]}) as selected:

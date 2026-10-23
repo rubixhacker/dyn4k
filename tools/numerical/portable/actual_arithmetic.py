@@ -629,10 +629,10 @@ def _sha(value):
     return hashlib.sha256(value).hexdigest()
 
 
-def _source_archive(commit):
+def _source_archive(commit, environment=None):
     if type(commit) is not str or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise CaptureRejected("candidate commit identity differs")
-    environment = os.environ.copy()
+    environment = os.environ.copy() if environment is None else dict(environment)
     environment.pop("OLLAMA_API_KEY", None)
     result = subprocess.run(("git", "-c", "core.autocrlf=false",
                              "--no-replace-objects", "archive", "--format=tar",
@@ -1272,7 +1272,7 @@ def _verify_boolean_jdi(files, summary, worker_pid):
 
 
 def make_capture_receipt(files, method, commit, expected_ids, runtime_executable,
-                         boolean_test_class=_FOCUSED_BOOLEAN_CLASS):
+                         boolean_test_class=_FOCUSED_BOOLEAN_CLASS, environment=None):
     requires_writes = method in ("captureWheelActive", "captureRotationPremises",
                                  _FOCUSED_BOOLEAN_METHOD)
     required_files = _RECEIPT_FILES | ({"worker_write_traces"}
@@ -1287,7 +1287,7 @@ def make_capture_receipt(files, method, commit, expected_ids, runtime_executable
             any(type(value) is not bytes or not value for value in files.values()) or \
             type(commit) is not str or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise CaptureRejected("receipt input identity differs")
-    if files["source"] != _source_archive(commit):
+    if files["source"] != _source_archive(commit, environment=environment):
         raise CaptureRejected("source archive differs from candidate commit")
     if method == _FOCUSED_BOOLEAN_METHOD:
         _verify_boolean_source(files["source"])

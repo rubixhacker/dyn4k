@@ -18,6 +18,16 @@ from cases import declared_cases
 
 
 class ExtractionTest(unittest.TestCase):
+    def test_clean_identity_uses_selected_child_environment(self):
+        selected = {"HOME": "", "TMPDIR": os.environ["TMPDIR"]}
+        with patch.object(run, "git", side_effect=[b"", b"", b"a" * 40,
+                                                b"source"]) as git:
+            self.assertEqual(run.clean_identity(environment=selected),
+                             ("a" * 40, hashlib.sha256(b"source").hexdigest()))
+        self.assertEqual(git.call_count, 4)
+        for call in git.call_args_list:
+            self.assertEqual(call.kwargs, {"environment": selected})
+
     def test_prospective_cli_requires_external_attestation_before_execution(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "capture"
