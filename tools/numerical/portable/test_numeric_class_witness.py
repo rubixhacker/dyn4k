@@ -1,0 +1,102 @@
+import hashlib
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+from receipt import Rejected
+from numeric_class_witness import build_agent, read_witness
+
+
+SOURCE = Path(__file__).with_name("class_witness") / "NumericClassWitness.java"
+JDK = Path("/tmp/dyn4k-tools/jdk21")
+
+
+def record(name="portable/PortableMatrixTest", value=b"class", origin="file:/fixture/"):
+    return ("CLASS\t1\t" + name + "\t" + hashlib.sha256(value).hexdigest()
+            + "\tL1\t" + origin + "\tjava:1\n").encode()
+
+
+def witness(rows=None, status="OK"):
+    body = b"BEGIN\tclass-witness/1\n" + (record() if rows is None else rows)
+    end = f"END\t{status}\t1\t"
+    return body + (end + f"{len(body) + len(end) + 21:020d}\n").encode()
+
+
+class ClassWitnessTest(unittest.TestCase):
+    def test_rebuild_is_deterministic_and_capabilities_are_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            one = build_agent(SOURCE.read_bytes(), JDK, root / "one.jar", root / "one")
+            two = build_agent(SOURCE.read_bytes(), JDK, root / "two.jar", root / "two")
+            self.assertEqual(one, two)
+            self.assertEqual((root / "one.jar").read_bytes(), one)
+            self.assertNotIn(b"Can-Redefine-Classes", one)
+            self.assertNotIn(b"Can-Retransform-Classes", one)
+
+    def test_records_are_strict_and_complete(self):
+        expected = {"portable/PortableMatrixTest": b"class"}
+        good = witness()
+        self.assertEqual(read_witness(good, expected)["definitions"][0]["thread"], "java:1")
+        failures = (good.replace(b"END\tOK", b"END\tFAIL"), good[:-31],
+                    good.replace(hashlib.sha256(b"class").hexdigest().encode(), b"0" * 64),
+                    good.replace(b"file:/fixture/", b"file:/shadow/"),
+                    good.replace(b"java:1", b"os:1"),
+                    witness(record() + record().replace(b"CLASS\t1", b"CLASS\t2")))
+        for invalid in failures:
+            with self.subTest(invalid=invalid[:40]), self.assertRaises(Rejected):
+                read_witness(invalid, expected, {"portable/PortableMatrixTest": "file:/fixture/"})
+
+    def test_real_jvm_callback_precedes_successful_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            agent = root / "agent.jar"
+            build_agent(SOURCE.read_bytes(), JDK, agent, root / "build-agent")
+            classes = root / "classes"
+            package = root / "source" / "portable"
+            classes.mkdir()
+            package.mkdir(parents=True)
+            sources = {
+                "NumericProbeMatrixTest": "public class NumericProbeMatrixTest {}",
+                "PortableMatrixTest": "public class PortableMatrixTest { public static int answer() { return 75; } }",
+                "NumericalRecorder": "public class NumericalRecorder {}",
+            }
+            for name, body in sources.items():
+                (package / (name + ".java")).write_text("package portable; " + body)
+            main = root / "source" / "Main.java"
+            main.write_text("public class Main { public static void main(String[] a) throws Exception { "
+                            "Class.forName(\"portable.NumericProbeMatrixTest\"); "
+                            "Class.forName(\"portable.NumericalRecorder\"); "
+                            "System.out.println(portable.PortableMatrixTest.answer()); } }")
+            javac = subprocess.run([str(JDK / "bin/javac"), "--release", "8", "-d", str(classes),
+                                    str(main), *map(str, sorted(package.glob("*.java")))],
+                                   capture_output=True, check=False)
+            self.assertEqual(javac.returncode, 0, javac.stderr.decode())
+            expected = {"portable/" + path.stem: path.read_bytes()
+                        for path in package.glob("*.java")
+                        for path in [classes / "portable" / (path.stem + ".class")]}
+            witness_path = root / "witness.log"
+            command = [str(JDK / "bin/java"), "-XX:+DisableAttachMechanism", "-Xshare:off",
+                       "-javaagent:" + str(agent) + "=" + str(witness_path),
+                       "-Xlog:class+load=info:file=" + str(root / "loads.log"),
+                       "-cp", str(classes), "Main"]
+            successful = subprocess.run(command, capture_output=True, check=False, timeout=30)
+            self.assertEqual(successful.returncode, 0, successful.stderr.decode())
+            self.assertEqual(successful.stdout, b"75\n")
+            records = read_witness(witness_path.read_bytes(), expected)
+            self.assertEqual(len(records["definitions"]), 3)
+            self.assertIn("portable.PortableMatrixTest source:",
+                          (root / "loads.log").read_text())
+            broken = classes / "portable" / "PortableMatrixTest.class"
+            bad = broken.read_bytes()
+            broken.write_bytes(b"XXXX" + bad[4:])
+            witness_path.unlink()
+            failed = subprocess.run(command, capture_output=True, check=False, timeout=30)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn(b"CLASS\t", witness_path.read_bytes())
+            with self.assertRaises(Rejected):
+                read_witness(witness_path.read_bytes(), expected)
+
+
+if __name__ == "__main__":
+    unittest.main()
