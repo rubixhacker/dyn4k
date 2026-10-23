@@ -136,6 +136,116 @@ class JdiBridgeTest(unittest.TestCase):
                                         40001, 123, 456, HELPER_ARGS)
         self.assertEqual(multi["worker_packets"], {"send": 2, "receive": 1})
         self.assertEqual(multi["helper_packets"], {"send": 1, "receive": 1})
+        first_clone = shared_clones.splitlines(keepends=True)[0]
+        late_worker = worker_multi.replace(first_clone, b'').replace(
+            b'1.000013 sendto',
+            first_clone.replace(b'1.000010', b'1.0000128', 1) +
+            b'1.000013 sendto')
+        late_helper_clone = next(row for row in helper_multi.splitlines(keepends=True)
+                                 if b'clone3(' in row)
+        late_helper = (helper_multi.replace(late_helper_clone, b'') +
+                       late_helper_clone.replace(b'1.0000105', b'1.000015', 1))
+        nested_clone = (b'1.000011 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|'
+                        b'CLONE_SIGHAND|CLONE_THREAD, exit_signal=0}, 88) = 126\n')
+        nested_workers = {**worker_members, "trace.124": nested_clone,
+                          "trace.126": worker_packet}
+        for label, workers, helpers in (
+                ("worker packet precedes creation",
+                 {**worker_members, "trace.123": late_worker}, helper_members),
+                ("helper packet precedes creation", worker_members,
+                 {**helper_members, "trace.456": late_helper}),
+                ("packet precedes intermediate parent clone",
+                 {**nested_workers, "trace.124": nested_clone.replace(
+                     b'1.000011', b'1.0000128', 1)}, helper_members)):
+            with self.subTest(birth=label):
+                with self.assertRaises(EvidenceRejected):
+                    verify_jdi_transport_v6(archive(workers), archive(helpers),
+                                            40001, 123, 456, HELPER_ARGS)
+        self.assertEqual(verify_jdi_transport_v6(
+            archive(nested_workers), archive(helper_members),
+            40001, 123, 456, HELPER_ARGS)["status"],
+            "PROVED_JDI_RAW_EXCHANGE")
+        during_clone = {**worker_members, "trace.124": worker_packet.replace(
+            b'1.000012', b'1.00001005', 1)}
+        self.assertEqual(verify_jdi_transport_v6(
+            archive(during_clone), archive(helper_members),
+            40001, 123, 456, HELPER_ARGS)["status"],
+            "PROVED_JDI_RAW_EXCHANGE")
+        tied_clone = worker_multi.replace(
+            b'1.000010 clone3',
+            b'1.0000095 fstat(1</dev/null>, {st_mode=S_IFCHR}) = 0\n'
+            b'1.000010 clone3').replace(b') = 124\n', b') = 122\n')
+        tied_workers = {"trace.123": tied_clone,
+                        "trace.122": worker_packet.replace(
+                            b'1.000012', b'1.000010', 1),
+                        "trace.125": worker_members["trace.125"]}
+        self.assertEqual(verify_jdi_transport_v6(
+            archive(tied_workers), archive(helper_members),
+            40001, 123, 456, HELPER_ARGS)["status"],
+            "PROVED_JDI_RAW_EXCHANGE")
+
+        early_clones = shared_clones.replace(b'1.0000101', b'1.0000072').replace(
+            b'1.000010 clone3', b'1.0000071 clone3')
+        split_parent = worker.replace(worker_packet, b'').replace(
+            b'1.000008 recvfrom', early_clones + b'1.000008 recvfrom')
+        packet_call = worker_packet.split(b' ', 1)[1].rstrip(b'\n')
+        packet_start, packet_result = packet_call.rsplit(b') = ', 1)
+        split_packet = (b'1.000011 ' + packet_start + b' <unfinished ...>\n'
+                        b'1.000014 <... recvfrom resumed>) = ' +
+                        packet_result + b'\n')
+        split_workers = {
+            "trace.123": split_parent,
+            "trace.124": split_packet,
+            "trace.125": worker_members["trace.125"].replace(
+                b'1.0000125', b'1.0000145', 1),
+        }
+        split_clone = (b'1.000010 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|'
+                       b'CLONE_SIGHAND|CLONE_THREAD, exit_signal=0}, 88 '
+                       b'<unfinished ...>\n'
+                       b'1.000011 <... clone3 resumed>) = 124\n')
+        split_clone_parent = worker.replace(worker_packet, b'').replace(
+            b'1.000013 sendto', split_clone + b'1.000013 sendto')
+        split_socket = worker.replace(
+            b'1.0000011 socket(AF_INET, SOCK_STREAM, IPPROTO_TCP) = 9<TCP:[90]>\n',
+            b'1.0000011 socket(AF_INET, SOCK_STREAM, IPPROTO_TCP '
+            b'<unfinished ...>\n'
+            b'1.0000015 <... socket resumed>) = 9<TCP:[90]>\n')
+        split_close_parent = worker.replace(
+            b'1.000008 recvfrom', first_clone.replace(
+                b'1.000010', b'1.0000071', 1) + b'1.000008 recvfrom')
+        split_close_child = (
+            b'1.0000115 close(10<TCP:[127.0.0.1:40001->127.0.0.1:41000]> '
+            b'<unfinished ...>\n'
+            b'1.000014 <... close resumed>) = 0\n')
+        for label, workers in (
+                ("packet entry precedes phase witness", split_workers),
+                ("completed split clone has mixed time",
+                 {"trace.123": split_clone_parent, "trace.124": worker_packet}),
+                ("completed split socket provider has mixed time",
+                 {"trace.123": split_socket}),
+                ("completed split close has mixed lifetime time",
+                 {"trace.123": split_close_parent,
+                  "trace.124": split_close_child})):
+            with self.subTest(split=label):
+                with self.assertRaises(EvidenceRejected):
+                    verify_jdi_transport_v6(archive(workers),
+                                            archive({"trace.456": helper}),
+                                            40001, 123, 456, HELPER_ARGS)
+        helper_call = helper_packet.split(b' ', 1)[1].rstrip(b'\n')
+        helper_start, helper_result = helper_call.rsplit(b') = ', 1)
+        split_helper_packet = (
+            b'1.0000105 ' + helper_start + b' <unfinished ...>\n'
+            b'1.000015 <... read resumed>) = ' + helper_result + b'\n')
+        split_helper_parent = helper.replace(helper_packet, b'').replace(
+            b'1.0000072 write',
+            b'1.00000715 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|'
+            b'CLONE_SIGHAND|CLONE_THREAD, exit_signal=0}, 88) = 457\n'
+            b'1.0000072 write')
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport_v6(archive({"trace.123": worker}),
+                                    archive({"trace.456": split_helper_parent,
+                                             "trace.457": split_helper_packet}),
+                                    40001, 123, 456, HELPER_ARGS)
         no_phase_helper = helper.replace(
             b'1.000011 write(7<TCP:[127.0.0.1:41000->127.0.0.1:40001]>, '
             b'"request", 7) = 7\n', b'').replace(helper_packet, b'').replace(

@@ -322,23 +322,33 @@ def _helper_descendants(helpers, root):
         raise EvidenceRejected("JDI helper trace has an unrelated process")
 
 
-def _worker_thread_ids(workers, root, *, shared=False):
+def _worker_thread_ids(workers, root, *, shared=False, timed_events=None,
+                       births=None):
     parents = {}
-    for parent, trace in workers.items():
-        for line in trace.splitlines():
-            if not line.startswith(("clone(", "clone3(")):
-                continue
-            child = re.search(r"\)\s+= ([1-9][0-9]*)$", line)
-            if child is None:
-                continue
-            identity = int(child.group(1))
-            if identity not in workers or identity in parents or identity == root:
-                raise EvidenceRejected("JDI worker clone ancestry differs")
-            flags = re.search(r"\bflags=([A-Z_0-9|]+)", line)
-            names = set(flags.group(1).split("|")) if flags else set()
-            same_process = {"CLONE_THREAD", "CLONE_VM", "CLONE_SIGHAND",
-                            "CLONE_FILES"} <= names
-            parents[identity] = (parent, same_process, "CLONE_FILES" in names)
+    if timed_events is None:
+        records = ((parent, None, line) for parent, trace in workers.items()
+                   for line in trace.splitlines())
+    else:
+        records = ((int(tid), stamp, call) for stamp, tid, _, call in timed_events)
+    for parent, stamp, line in records:
+        if not line.startswith(("clone(", "clone3(")):
+            continue
+        child = re.search(r"\)\s+= ([1-9][0-9]*)$", line)
+        if child is None:
+            continue
+        identity = int(child.group(1))
+        if identity not in workers or identity in parents or identity == root:
+            raise EvidenceRejected("JDI worker clone ancestry differs")
+        flags = re.search(r"\bflags=([A-Z_0-9|]+)", line)
+        names = set(flags.group(1).split("|")) if flags else set()
+        same_process = {"CLONE_THREAD", "CLONE_VM", "CLONE_SIGHAND",
+                        "CLONE_FILES"} <= names
+        shares_files = "CLONE_FILES" in names
+        parents[identity] = (parent, same_process, shares_files)
+        if births is not None:
+            if stamp is None:
+                raise EvidenceRejected("JDI thread birth time is missing")
+            births[identity] = (parent, stamp)
     if set(parents) != set(workers) - {root}:
         raise EvidenceRejected("JDI worker trace has an unrelated descendant")
     threads = {root}
@@ -500,6 +510,9 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
 
     def records(raw):
         original = {str(pid): trace.encode() for pid, trace in _trace_members(raw).items()}
+        if any(re.match(rb'[0-9]+\.[0-9]+ <\.\.\. [a-z][a-z0-9_]* resumed>', line)
+               for trace in original.values() for line in trace.splitlines()):
+            raise EvidenceRejected("JDI version 6 split completion lacks entry time")
         normalized, _ = normalize_rich_traces(original)
         events = _events(normalized, ())
         plain = {int(pid): "\n".join(line.split(" ", 1)[1]
@@ -511,11 +524,32 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
     helper_events, helpers = records(helper_archive)
     if worker_pid not in workers or helper_pid not in helpers:
         raise EvidenceRejected("JDI version 6 selected process trace differs")
-    worker_threads = _worker_thread_ids(workers, worker_pid)
-    worker_owners = _worker_thread_ids(workers, worker_pid, shared=True)
+    worker_births = {}
+    worker_threads = _worker_thread_ids(workers, worker_pid,
+                                        timed_events=worker_events,
+                                        births=worker_births)
+    worker_owners = _worker_thread_ids(workers, worker_pid, shared=True,
+                                       timed_events=worker_events)
     _helper_descendants(helpers, helper_pid)
-    helper_threads = _worker_thread_ids(helpers, helper_pid)
-    helper_owners = _worker_thread_ids(helpers, helper_pid, shared=True)
+    helper_births = {}
+    helper_threads = _worker_thread_ids(helpers, helper_pid,
+                                        timed_events=helper_events,
+                                        births=helper_births)
+    helper_owners = _worker_thread_ids(helpers, helper_pid, shared=True,
+                                       timed_events=helper_events)
+
+    def check_births(events, births, root):
+        for stamp, tid, _, _ in events:
+            owner = int(tid)
+            bound = stamp
+            while owner != root:
+                edge = births.get(owner)
+                if edge is None or edge[1] > bound:
+                    raise EvidenceRejected("JDI version 6 thread birth is unproved")
+                owner, bound = edge
+
+    check_births(worker_events, worker_births, worker_pid)
+    check_births(helper_events, helper_births, helper_pid)
     worker_exec = [(tid, successful_execve(call)) for _, tid, _, call in worker_events
                    if call.startswith(("execve(", "execveat(")) and call.endswith(" = 0")]
     helper_exec = [(tid, successful_execve(call)) for _, tid, _, call in helper_events
