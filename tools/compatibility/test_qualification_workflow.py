@@ -119,6 +119,165 @@ def _yaml_structural_entries_at_indent(source, indentation):
 
 
 class QualificationWorkflowContractTest(unittest.TestCase):
+    def assert_staged_guide_check_contract(self, workflow):
+        ubuntu = workflow_jobs(workflow)["staged-jvm-and-linux"]
+        step_names = (
+            "Stage all target publications",
+            "Check staged migration guide example",
+            "Upload staged migration guide evidence",
+            "Execute staged Kotlin and Java consumer",
+        )
+        blocks = {}
+        for name in step_names:
+            match = re.search(rf"(?m)^      - name: {re.escape(name)}\n", ubuntu)
+            self.assertIsNotNone(match, name)
+            next_step = re.search(r"(?m)^      - (?:name|uses): ", ubuntu[match.end():])
+            end = match.end() + next_step.start() if next_step else len(ubuntu)
+            blocks[name] = ubuntu[match.start():end]
+
+        stage_at = ubuntu.index("- name: Stage all target publications")
+        check_at = ubuntu.index("- name: Check staged migration guide example")
+        upload_at = ubuntu.index("- name: Upload staged migration guide evidence")
+        consumer_at = ubuntu.index("- name: Execute staged Kotlin and Java consumer")
+        self.assertLess(stage_at, check_at)
+        self.assertLess(check_at, upload_at)
+        self.assertLess(upload_at, consumer_at)
+
+        check = blocks["Check staged migration guide example"]
+        self.assertRegex(check, r"(?m)^        run: \|\n")
+        script_match = re.search(
+            r"(?ms)^        run: \|\n((?:          .*\n)+)", check
+        )
+        self.assertIsNotNone(script_match)
+        script = textwrap.dedent(script_match.group(1))
+        normalized = " ".join(script.split())
+        self.assertIn("set -euo pipefail", script)
+        self.assertIn("unset OLLAMA_API_KEY", script)
+        self.assertIn("export PYTHONDONTWRITEBYTECODE=1", script)
+        self.assertIn('evidence="$RUNNER_TEMP/staged-guide-example"', script)
+        self.assertIn('export TMPDIR="$evidence/tmp"', script)
+        self.assertIn('source_commit="$(git rev-parse HEAD)"', script)
+        self.assertIn('test "$source_commit" = "$GITHUB_SHA"', script)
+        self.assertIn('> "$evidence/source-identity.txt"', script)
+        self.assertIn(
+            "sha256sum docs/guide/migration.md docs/guide/check_examples.py "
+            "docs/guide/check_links.py "
+            '> "$evidence/guide-checker-sha256.txt"',
+            normalized,
+        )
+        self.assertIn(
+            'io/github/rubixhacker/dyn4k/0.1.0-alpha.1/dyn4k-0.1.0-alpha.1.module',
+            script,
+        )
+        self.assertIn(
+            'io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.module',
+            script,
+        )
+        self.assertIn(
+            'io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.jar',
+            script,
+        )
+        self.assertIn(
+            'io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/'
+            'dyn4k-core-jvm-0.1.0-alpha.1.jar',
+            script,
+        )
+        self.assertIn('> "$evidence/staged-jvm-artifacts-sha256.txt"', script)
+        self.assertIn(
+            'env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 '
+            'python3 -B docs/guide/check_examples.py '
+            '"$GITHUB_WORKSPACE/build/staging-repository" --run',
+            normalized,
+        )
+        self.assertIn('> "$evidence/stdout.log" 2> "$evidence/stderr.log"', script)
+        self.assertIn('checker_status=$?', script)
+        self.assertIn('printf \'%s\\n\' "$checker_status" > "$evidence/exit-code.txt"', script)
+        self.assertIn('exit "$checker_status"', script)
+        self.assertNotRegex(check, r"(?m)^        (?:if|continue-on-error):")
+
+        upload = blocks["Upload staged migration guide evidence"]
+        self.assertIn("        if: always()\n", upload)
+        self.assertIn("        uses: actions/upload-artifact@v4\n", upload)
+        self.assertIn("name: staged-guide-example-${{ github.sha }}", upload)
+        self.assertIn("${{ runner.temp }}/staged-guide-example/", upload)
+        self.assertIn("if-no-files-found: warn", upload)
+
+    def test_ubuntu_staged_guide_check_is_auditable_and_fail_closed(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assert_staged_guide_check_contract(workflow)
+
+        checker = re.search(
+            r"(?ms)^      - name: Check staged migration guide example\n"
+            r".*?(?=^      - (?:name|uses): |\Z)",
+            workflow,
+        )
+        self.assertIsNotNone(checker)
+        checker_block = checker.group(0)
+        mutations = (
+            ("secret inherited by shell", "unset OLLAMA_API_KEY", "true"),
+            ("bytecode writes enabled", "export PYTHONDONTWRITEBYTECODE=1",
+             "export PYTHONDONTWRITEBYTECODE=0"),
+            ("exact checker path changed",
+             'python3 -B docs/guide/check_examples.py '
+             '"$GITHUB_WORKSPACE/build/staging-repository" --run',
+             'python3 -B docs/guide/check_links.py '
+             '"$GITHUB_WORKSPACE/build/staging-repository" --run'),
+            ("run mode removed", " --run", ""),
+            ("stdout not retained", '> "$evidence/stdout.log"', '> /dev/null'),
+            ("stderr not retained", '2> "$evidence/stderr.log"', '2> /dev/null'),
+            ("actual exit code discarded", "checker_status=$?", "checker_status=0"),
+            ("failure propagation removed", 'exit "$checker_status"', "exit 0"),
+            ("source commit shortened", "git rev-parse HEAD",
+             "git rev-parse --short HEAD"),
+            ("guide identity omitted", "docs/guide/migration.md",
+             "docs/guide/migration-removed.md"),
+            ("staged jar identity omitted", "dyn4k-core-jvm-0.1.0-alpha.1.jar",
+             "dyn4k-core-jvm-0.1.0-alpha.1.module"),
+        )
+        for name, old, new in mutations:
+            with self.subTest(mutation=name):
+                self.assertEqual(1, checker_block.count(old), name)
+                mutated = workflow.replace(
+                    checker_block, checker_block.replace(old, new, 1), 1
+                )
+                with self.assertRaises(AssertionError):
+                    self.assert_staged_guide_check_contract(mutated)
+
+        self.assertEqual(1, workflow.count(checker_block), "checker step removed")
+        with self.assertRaises(AssertionError):
+            self.assert_staged_guide_check_contract(workflow.replace(checker_block, "", 1))
+
+        upload = re.search(
+            r"(?ms)^      - name: Upload staged migration guide evidence\n"
+            r".*?(?=^      - (?:name|uses): |\Z)",
+            workflow,
+        )
+        self.assertIsNotNone(upload)
+        upload_block = upload.group(0)
+        upload_mutations = (
+            ("evidence upload removed", "      - name: Upload staged migration guide evidence\n",
+             "      - name: Upload omitted staged migration guide evidence\n"),
+            ("upload no longer runs after failure", "if: always()", "if: success()"),
+            ("missing evidence treated as error", "if-no-files-found: warn",
+             "if-no-files-found: error"),
+        )
+        for name, old, new in upload_mutations:
+            with self.subTest(mutation=name):
+                self.assertEqual(1, upload_block.count(old), name)
+                mutated = workflow.replace(
+                    upload_block, upload_block.replace(old, new, 1), 1
+                )
+                with self.assertRaises(AssertionError):
+                    self.assert_staged_guide_check_contract(mutated)
+
+        staged_before_check = workflow.replace(checker_block, "", 1)
+        stage_at = staged_before_check.index("      - name: Stage all target publications\n")
+        staged_before_check = (
+            staged_before_check[:stage_at] + checker_block + staged_before_check[stage_at:]
+        )
+        with self.assertRaises(AssertionError):
+            self.assert_staged_guide_check_contract(staged_before_check)
+
     def assert_source_checks_job_contract(self, source):
         self.assertEqual(
             [("name", "Qualification workflow source checks"),

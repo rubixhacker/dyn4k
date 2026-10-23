@@ -151,6 +151,48 @@ jobs:
           --target watchosSimulatorArm64
           --output build/staging-repository/.qualification/ubuntu/receipt.json
           --console build/staging-repository/.qualification/ubuntu/stage.log
+      - name: Check staged migration guide example
+        run: |
+          set -euo pipefail
+          unset OLLAMA_API_KEY
+          export PYTHONDONTWRITEBYTECODE=1
+          evidence="$RUNNER_TEMP/staged-guide-example"
+          export TMPDIR="$evidence/tmp"
+          mkdir -p "$evidence" "$TMPDIR"
+          source_commit="$(git rev-parse HEAD)"
+          printf 'source_commit=%s\nworkflow_sha=%s\n' "$source_commit" "$GITHUB_SHA" > "$evidence/source-identity.txt"
+          test "$source_commit" = "$GITHUB_SHA"
+          sha256sum docs/guide/migration.md docs/guide/check_examples.py docs/guide/check_links.py > "$evidence/guide-checker-sha256.txt"
+          (
+            cd "$GITHUB_WORKSPACE/build/staging-repository"
+            for artifact in \
+              io/github/rubixhacker/dyn4k/0.1.0-alpha.1/dyn4k-0.1.0-alpha.1.module \
+              io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.module \
+              io/github/rubixhacker/dyn4k-jvm/0.1.0-alpha.1/dyn4k-jvm-0.1.0-alpha.1.jar \
+              io/github/rubixhacker/dyn4k-core-jvm/0.1.0-alpha.1/dyn4k-core-jvm-0.1.0-alpha.1.jar; do
+              if test -f "$artifact"; then
+                sha256sum "$artifact"
+              else
+                printf 'MISSING %s\n' "$artifact"
+              fi
+            done
+          ) > "$evidence/staged-jvm-artifacts-sha256.txt"
+          if env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 python3 -B docs/guide/check_examples.py "$GITHUB_WORKSPACE/build/staging-repository" --run > "$evidence/stdout.log" 2> "$evidence/stderr.log"; then
+            checker_status=0
+          else
+            checker_status=$?
+          fi
+          printf '%s\n' "$checker_status" > "$evidence/exit-code.txt"
+          cat "$evidence/stdout.log"
+          cat "$evidence/stderr.log" >&2
+          exit "$checker_status"
+      - name: Upload staged migration guide evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staged-guide-example-${{ github.sha }}
+          path: ${{ runner.temp }}/staged-guide-example/
+          if-no-files-found: warn
       - name: Execute staged Kotlin and Java consumer
         run: >-
           ./gradlew -p consumers/qualification --no-daemon --console=plain run
