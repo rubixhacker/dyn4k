@@ -42,6 +42,10 @@ class TransportTest(unittest.TestCase):
                                  "/work/args.txt", b"-cp\n/a\n")
         self.assertEqual(proof["worker_pid"], "100")
         self.assertEqual(proof["mirror_writer_tid"], "100")
+        without_no_follow = self.trace()["100"].replace(b"O_EXCL|O_NOFOLLOW", b"O_EXCL")
+        proof = verify_transport({"100": without_no_follow}, "/work/mirror.log", b"hello\n",
+                                 "/work/args.txt", b"-cp\n/a\n")
+        self.assertEqual(proof["mirror_writer_tid"], "100")
 
     def test_substitutions_cannot_bind_transport(self):
         mutations = {
@@ -100,6 +104,24 @@ class TransportTest(unittest.TestCase):
                 verify_transport({"100": trace}, "/work/mirror.log", b"hello\n",
                                  "/work/args.txt", b"-cp\n/a\n")
 
+    def test_auxiliary_log_may_reset_empty_file_before_first_write(self):
+        trace = self.trace()["100"].replace(
+            b'1.210000 write',
+            b'1.205000 lseek(4</work/mirror.log>, 0, SEEK_END) = 0\n'
+            b'1.206000 ftruncate(4</work/mirror.log>, 0) = 0\n'
+            b'1.210000 write')
+        verify_transport({"100": trace}, "/work/mirror.log", b"hello\n",
+                         "/work/args.txt", b"-cp\n/a\n", exclusive=False, ordered=False)
+        with self.assertRaisesRegex(Rejected, "mirror seek"):
+            verify_transport({"100": trace.replace(b'0, SEEK_END) = 0', b'1, SEEK_END) = 1')},
+                             "/work/mirror.log", b"hello\n", "/work/args.txt", b"-cp\n/a\n",
+                             exclusive=False, ordered=False)
+        with self.assertRaisesRegex(Rejected, "unsupported access"):
+            changed = trace.replace(b'1.220000 close',
+                                    b'1.215000 ftruncate(4</work/mirror.log>, 0) = 0\n1.220000 close')
+            verify_transport({"100": changed}, "/work/mirror.log", b"hello\n",
+                             "/work/args.txt", b"-cp\n/a\n", exclusive=False, ordered=False)
+
     def test_close_range_and_untraced_writer_cannot_leave_valid_descriptor(self):
         for call in (b'1.205000 close_range(3, 10, 0) = 0\n',
                      b'1.205000 pwrite64(4</work/mirror.log>, "hello\\n", 6, 0) = 6\n'):
@@ -152,6 +174,10 @@ class TransportTest(unittest.TestCase):
             b'1.220000 close')
         expected = {"device_major": 0, "device_minor": 1, "inode": 13, "size": 6}
         proof = verify_transport({"100": trace}, "/work/mirror.log", b"hello\n",
+                                 "/work/args.txt", b"-cp\n/a\n", mirror_identity=expected)
+        self.assertEqual(proof["mirror_sha256"], hashlib.sha256(b"hello\n").hexdigest())
+        hexadecimal_device = trace.replace(b"makedev(0, 1)", b"makedev(0, 0x1)")
+        proof = verify_transport({"100": hexadecimal_device}, "/work/mirror.log", b"hello\n",
                                  "/work/args.txt", b"-cp\n/a\n", mirror_identity=expected)
         self.assertEqual(proof["mirror_sha256"], hashlib.sha256(b"hello\n").hexdigest())
         with self.assertRaisesRegex(Rejected, "mirror file identity differs"):

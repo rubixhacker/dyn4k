@@ -124,7 +124,7 @@ def verify_transport(traces, destination, mirror, response_path=None, response=N
                 if path == destination:
                     if opened or worker is None or groups[tid] != worker:
                         raise Rejected("mirror is replaced or created outside worker")
-                    if exclusive and not all(flag in args for flag in ("O_CREAT", "O_EXCL", "O_NOFOLLOW")):
+                    if exclusive and not all(flag in args for flag in ("O_CREAT", "O_EXCL")):
                         raise Unbound("mirror exclusive creation unavailable")
                     opened = True
                 tables[tid][fd] = {"path": path, "position": 0, "identity": None}
@@ -156,7 +156,11 @@ def verify_transport(traces, destination, mirror, response_path=None, response=N
         seek_descriptor = re.match(r'lseek\(([0-9]+)(?:<([^>]+)>)?,', call)
         if seek_descriptor and (seek_descriptor[2] == destination or
                 tables[tid].get(seek_descriptor[1], {}).get("path") == destination):
-            raise Rejected("mirror seek invalidates sequential output proof")
+            initial_log_seek = (not exclusive and not ordered and not outputs and
+                tables[tid].get(seek_descriptor[1], {}).get("path") == destination and
+                re.fullmatch(r'lseek\(' + FD + r', 0, SEEK_END\) = 0', call) is not None)
+            if not initial_log_seek:
+                raise Rejected("mirror seek invalidates sequential output proof")
         if response_path is not None and call.startswith("lseek(") and seek_descriptor and (
                 seek_descriptor[2] == response_path or
                 tables[tid].get(seek_descriptor[1], {}).get("path") == response_path):
@@ -205,7 +209,11 @@ def verify_transport(traces, destination, mirror, response_path=None, response=N
             raise Unbound("protected descriptor close range is unsupported")
         if response_path and response_path in call and call.startswith(("unlink(", "unlinkat(")) and exits.get(worker) == 0:
             continue
-        if any(name in call for name in (destination, response_path) if name) and any(
+        initial_log_truncate = (not exclusive and not ordered and not outputs and
+            (match := re.fullmatch(r'ftruncate\(' + FD + r', 0\) = 0', call)) is not None and
+            match[2] == destination and
+            tables[tid].get(match[1], {}).get("path") == destination)
+        if not initial_log_truncate and any(name in call for name in (destination, response_path) if name) and any(
                 call.startswith(name + "(") for name in
                 ("rename", "renameat", "renameat2", "unlink", "unlinkat", "truncate", "ftruncate",
                  "mmap", "pwrite64", "pwritev", "sendfile", "copy_file_range", "splice")):
@@ -238,7 +246,11 @@ def verify_transport(traces, destination, mirror, response_path=None, response=N
         if final_mirror_identity is None or final_mirror_stat_index <= last_mirror_write_index:
             raise Unbound("mirror file identity unavailable after final write")
         dev, inode, size = final_mirror_identity
-        major, minor = (int(part.strip()) for part in dev.split(","))
+        parts = [part.strip() for part in dev.split(",")]
+        if len(parts) != 2 or any(re.fullmatch(r"(?:0x[0-9a-f]+|[0-9]+)", part) is None
+                                   for part in parts):
+            raise Unbound("mirror device identity is malformed")
+        major, minor = (int(part, 16 if part.startswith("0x") else 10) for part in parts)
         observed = {"device_major": major, "device_minor": minor,
                     "inode": int(inode), "size": size}
         if observed != mirror_identity or size != len(mirror):
