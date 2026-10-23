@@ -216,6 +216,41 @@ class JdiBridgeTest(unittest.TestCase):
                     verify_jdi_transport_v6(workers, helpers, 40001,
                                             123, 456, HELPER_ARGS)
 
+            for source in (fd, fd + b'<' + token + b'>'):
+                for operation in (
+                        b'dup(' + source + b') = 100<' + token + b'>',
+                        b'dup2(' + source + b', 100) = 100<' + token + b'>',
+                        b'dup3(' + source + b', 100, 0) = 100<' + token + b'>',
+                        b'fcntl(' + source + b', F_DUPFD, 100) = 100<' + token + b'>',
+                        b'fcntl(' + source + b', F_DUPFD_CLOEXEC, 100) = 100<' + token + b'>',
+                        b'shutdown(' + source + b', SHUT_RDWR) = 0',
+                        b'close(' + source + b') = 0'):
+                    changed = original.replace(
+                        marker, action_time + b' ' + operation + b'\n' + marker)
+                    workers = archive({"trace.123": changed if side == "worker" else worker})
+                    helpers = archive({"trace.456": changed if side == "helper" else helper})
+                    checked_projection(workers, set())
+                    checked_projection(helpers, set())
+                    with self.subTest(side=side, operation=operation):
+                        with self.assertRaises(EvidenceRejected):
+                            verify_jdi_transport_v6(workers, helpers, 40001,
+                                                    123, 456, HELPER_ARGS)
+
+            other_fd = fd + b'0'
+            for operation in (
+                    b'dup(' + other_fd + b'</home/other>) = 200</home/other>',
+                    b'close(' + other_fd + b'</home/other>) = 0'):
+                changed = original.replace(
+                    marker, action_time + b' ' + operation + b'\n' + marker)
+                workers = archive({"trace.123": changed if side == "worker" else worker})
+                helpers = archive({"trace.456": changed if side == "helper" else helper})
+                checked_projection(workers, set())
+                checked_projection(helpers, set())
+                with self.subTest(side=side, other_operation=operation):
+                    self.assertEqual(verify_jdi_transport_v6(
+                        workers, helpers, 40001, 123, 456, HELPER_ARGS)[
+                        "status"], "PROVED_JDI_RAW_EXCHANGE")
+
             copied_at_last_packet = original.replace(
                 b'1.000013 sendto' if side == "worker" else b'1.000014 read',
                 (b'1.000013' if side == "worker" else b'1.000014') +
