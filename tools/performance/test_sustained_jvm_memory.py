@@ -15,6 +15,17 @@ BASELINE = Path("/tmp/dyn4k-performance-dyn4j-6.0.0.jar")
 SOURCE = ROOT / "tools/performance/sustained_jvm"
 RAW = Path(os.environ.get("DYN4K_JVM_CONTROL_ROOT",
                           Path.home() / "dyn4k-evidence/jvm-memory-plateau-p2-controls"))
+CONTROL_ROOT = RAW / "memory-control"
+JAVA_TMP = CONTROL_ROOT / "java-tmp"
+
+
+def prepare_empty_directory(path):
+    if path.exists():
+        if not path.is_dir() or any(path.iterdir()):
+            raise AssertionError(f"refusing to reuse nonempty control path: {path}")
+    else:
+        path.mkdir(parents=True)
+    return path
 
 
 def rows(path):
@@ -106,27 +117,53 @@ class SustainedJvmMemoryTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         assert JDK.is_dir() and BASELINE.is_file()
-        RAW.mkdir(parents=True, exist_ok=True)
-        classes = RAW / "classes"
-        classes.mkdir(exist_ok=True)
-        subprocess.run([str(JDK / "bin/javac"), "--release", "21", "-cp", str(BASELINE),
-                        "-d", str(classes), str(SOURCE / "SustainedSidecars.java"),
-                        str(SOURCE / "SustainedPilot.java"),
-                        str(SOURCE / "SustainedAllocationProbeControl.java")], check=True)
-        cls.harness = RAW / "sustained-harness.jar"
-        subprocess.run([str(JDK / "bin/jar"), "--create", "--file", str(cls.harness),
-                        "-C", str(classes), "."], check=True)
+        prepare_empty_directory(CONTROL_ROOT)
+        prepare_empty_directory(JAVA_TMP)
+        classes = CONTROL_ROOT / "classes"
+        prepare_empty_directory(classes)
+        cls.build_records = []
+        for name, command in (
+                ("javac", [str(JDK / "bin/javac"), "--release", "21", "-cp",
+                            str(BASELINE), "-d", str(classes),
+                            str(SOURCE / "SustainedSidecars.java"),
+                            str(SOURCE / "SustainedPilot.java"),
+                            str(SOURCE / "SustainedAllocationProbeControl.java")]),
+                ("harness-jar", [str(JDK / "bin/jar"), "--create", "--file",
+                                 str(CONTROL_ROOT / "sustained-harness.jar"),
+                                 "-C", str(classes), "."])):
+            env = os.environ.copy()
+            for key in ("OLLAMA_API_KEY", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS",
+                        "_JAVA_OPTIONS", "CLASSPATH", "ANDROID_HOME",
+                        "ANDROID_SDK_ROOT", "GRADLE_OPTS"):
+                env.pop(key, None)
+            env.update(JAVA_HOME=str(JDK), TMPDIR=str(JAVA_TMP),
+                       JAVA_TOOL_OPTIONS=f"-XX:-UsePerfData -Djava.io.tmpdir={JAVA_TMP}")
+            result = subprocess.run(command, env=env, capture_output=True, text=True)
+            cls.build_records.append({"name": name, "command": command,
+                                      "exit_code": result.returncode,
+                                      "stdout": result.stdout, "stderr": result.stderr})
+            (CONTROL_ROOT / "build-results.json").write_text(
+                json.dumps(cls.build_records, indent=2) + "\n")
+            if result.returncode:
+                raise AssertionError(f"{name} failed: {result.stderr}")
+        cls.harness = CONTROL_ROOT / "sustained-harness.jar"
 
     def execute(self, mode, extra_flags=(), label=None):
-        folder = RAW / (label or mode)
-        folder.mkdir(exist_ok=True)
+        folder = CONTROL_ROOT / (label or mode)
+        prepare_empty_directory(folder)
         outputs = {name: folder / name for name in
                    ("provider.json", "clock-origin.json", "warmup-clock.csv", "memory-v2.jsonl",
-                    "allocation-v2.jsonl", "plateau-v2.jsonl", "steps.csv", "stderr.raw",
+                    "allocation-v2.jsonl", "plateau-v2.jsonl", "steps.csv", "stdout.raw",
+                    "stderr.raw", "command.json",
                     "process-result.json")}
-        env = {**os.environ,
+        env = os.environ.copy()
+        for key in ("OLLAMA_API_KEY", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS",
+                    "_JAVA_OPTIONS", "CLASSPATH", "ANDROID_HOME",
+                    "ANDROID_SDK_ROOT", "GRADLE_OPTS"):
+            env.pop(key, None)
+        env.update({
                "JAVA_HOME": str(JDK),
-               "TMPDIR": str(Path.home() / "dyn4k-performance-tmp"),
+               "TMPDIR": str(JAVA_TMP),
                "DYN4K_PROVIDER_JSON": str(outputs["provider.json"]),
                "DYN4K_CLOCK_ORIGIN_JSON": str(outputs["clock-origin.json"]),
                "DYN4K_WARMUP_CLOCK_CSV": str(outputs["warmup-clock.csv"]),
@@ -138,8 +175,7 @@ class SustainedJvmMemoryTest(unittest.TestCase):
                    ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                "DYN4K_ARTIFACT_HASHES_JSON": json.dumps({"core": "b" * 64, "kotlin": "c" * 64}),
                "DYN4K_BASELINE_SHA256": hashlib.sha256(BASELINE.read_bytes()).hexdigest(),
-               "JAVA_TOOL_OPTIONS": f"-Djava.io.tmpdir={Path.home() / 'dyn4k-performance-tmp'}"}
-        Path(env["TMPDIR"]).mkdir(exist_ok=True)
+               "JAVA_TOOL_OPTIONS": f"-XX:-UsePerfData -Djava.io.tmpdir={JAVA_TMP}"})
         command = [str(JDK / "bin/java"), *extra_flags, "-cp",
                    os.pathsep.join((str(self.harness), str(BASELINE))),
                    "SustainedPilot", "separated", "default", "small", "30", "1",
@@ -147,6 +183,8 @@ class SustainedJvmMemoryTest(unittest.TestCase):
         result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=90)
         outputs["steps.csv"].write_text(result.stdout)
         outputs["stderr.raw"].write_text(result.stderr)
+        outputs["stdout.raw"].write_text(result.stdout)
+        outputs["command.json"].write_text(json.dumps(command, indent=2) + "\n")
         outputs["process-result.json"].write_text(json.dumps(
             {"command": command, "exit_code": result.returncode,
              "source_commit": env["DYN4K_SOURCE_COMMIT"],
@@ -245,9 +283,24 @@ class SustainedJvmMemoryTest(unittest.TestCase):
     def test_unsupported_and_negative_allocation_probe_fail_closed(self):
         for kind in ("unsupported", "negative"):
             with self.subTest(kind=kind):
-                result = subprocess.run([str(JDK / "bin/java"), "-cp", str(self.harness),
-                                         "performance.SustainedAllocationProbeControl", kind],
-                                        capture_output=True, text=True, timeout=10)
+                folder = CONTROL_ROOT / f"allocation-probe-{kind}"
+                prepare_empty_directory(folder)
+                command = [str(JDK / "bin/java"), "-Djava.io.tmpdir=" + str(JAVA_TMP),
+                           "-cp", str(self.harness),
+                           "performance.SustainedAllocationProbeControl", kind]
+                env = os.environ.copy()
+                for key in ("OLLAMA_API_KEY", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS",
+                            "_JAVA_OPTIONS", "CLASSPATH", "ANDROID_HOME",
+                            "ANDROID_SDK_ROOT", "GRADLE_OPTS"):
+                    env.pop(key, None)
+                env.update(JAVA_HOME=str(JDK), TMPDIR=str(JAVA_TMP),
+                           JAVA_TOOL_OPTIONS=f"-XX:-UsePerfData -Djava.io.tmpdir={JAVA_TMP}")
+                result = subprocess.run(command, env=env, capture_output=True,
+                                        text=True, timeout=10)
+                (folder / "command.json").write_text(json.dumps(command, indent=2) + "\n")
+                (folder / "stdout.raw").write_text(result.stdout)
+                (folder / "stderr.raw").write_text(result.stderr)
+                (folder / "exit-code.txt").write_text(str(result.returncode) + "\n")
                 self.assertEqual(0, result.returncode, result.stderr)
                 self.assertIn("allocation", result.stdout)
 

@@ -18,32 +18,87 @@ SOURCE = Path(__file__).with_name("reference_study_producer.py")
 JDK = Path("/tmp/dyn4k-tools/jdk21")
 GRADLE = Path("/tmp/dyn4k-tools/gradle-9.5.0/bin/gradle")
 BASELINE = Path("/tmp/dyn4k-performance-dyn4j-6.0.0.jar")
+HISTORICAL_ARCHIVE_ENV = "DYN4K_HISTORICAL_REFERENCE_ARCHIVE"
+DEFAULT_HISTORICAL_ARCHIVE = Path(
+    "dyn4k-evidence/session-control/reference-study-real-producer-34914323/archive")
+
+
+def historical_protocol_path(environment, home):
+    selected_archive = environment.get(HISTORICAL_ARCHIVE_ENV)
+    archive = (Path(selected_archive).expanduser() if selected_archive is not None else
+               home / DEFAULT_HISTORICAL_ARCHIVE)
+    protocol_path = archive / "protocol.json"
+    if protocol_path.is_file():
+        return protocol_path
+    if selected_archive is not None:
+        raise FileNotFoundError(f"selected historical archive has no protocol.json: {protocol_path}")
+    return None
+
+
+class HistoricalArchiveSelectionTest(unittest.TestCase):
+    def test_explicit_archive_is_selected_and_missing_selection_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            self.assertIsNone(historical_protocol_path({}, home))
+            archive = home / "selected"
+            archive.mkdir()
+            protocol = archive / "protocol.json"
+            protocol.write_text("{}\n")
+            self.assertEqual(protocol,
+                             historical_protocol_path(
+                                 {HISTORICAL_ARCHIVE_ENV: str(archive)}, home))
+            protocol.unlink()
+            with self.assertRaisesRegex(FileNotFoundError, "selected historical archive"):
+                historical_protocol_path({HISTORICAL_ARCHIVE_ENV: str(archive)}, home)
 
 
 class ReferenceStudyProducerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.temporary = tempfile.TemporaryDirectory(dir=Path.home())
-        cls.root = Path(cls.temporary.name)
+        selected_root = os.environ.get("DYN4K_REFERENCE_CONTROL_ROOT")
+        cls.retained = selected_root is not None
+        if cls.retained:
+            cls.root = Path(selected_root)
+            if cls.root.exists():
+                if not cls.root.is_dir() or any(cls.root.iterdir()):
+                    raise AssertionError(
+                        f"refusing to reuse nonempty control path: {cls.root}")
+            else:
+                cls.root.mkdir(parents=True)
+            cls.temporary = None
+        else:
+            cls.temporary = tempfile.TemporaryDirectory(dir=Path.home())
+            cls.root = Path(cls.temporary.name)
         cls.output = cls.root / "production"
         cls.key = cls.root / "operator.key"
         cls.key.write_bytes(b"independent-reference-study-test-key-" * 2)
         cls.env = os.environ.copy()
-        cls.env.pop("OLLAMA_API_KEY", None)
+        for name in ("OLLAMA_API_KEY", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS",
+                     "CLASSPATH", "GRADLE_OPTS", "ANDROID_HOME", "ANDROID_SDK_ROOT"):
+            cls.env.pop(name, None)
         cls.env.update(JAVA_HOME=str(JDK), TMPDIR=str(cls.root),
-                       JAVA_TOOL_OPTIONS=f"-Djava.io.tmpdir={cls.root}",
+                       JAVA_TOOL_OPTIONS=(f"-Djava.io.tmpdir={cls.root} "
+                                          "-Dorg.gradle.workers.max=1"),
                        PYTHONDONTWRITEBYTECODE="1")
         cls.keyed_env = dict(cls.env, OLLAMA_API_KEY="synthetic-reference-study-key")
+        cls.capture_command = [sys.executable, str(SOURCE), "capture", "--output-root",
+                               str(cls.output), "--trusted-key", str(cls.key), "--java",
+                               str(JDK / "bin/java"), "--javac", str(JDK / "bin/javac"),
+                               "--gradle", str(GRADLE), "--baseline", str(BASELINE),
+                               "--seconds", "1", "--warmup-seconds", "1"]
         cls.result = subprocess.run(
-            [sys.executable, str(SOURCE), "capture", "--output-root", str(cls.output),
-             "--trusted-key", str(cls.key), "--java", str(JDK / "bin/java"),
-             "--javac", str(JDK / "bin/javac"), "--gradle", str(GRADLE),
-             "--baseline", str(BASELINE), "--seconds", "1", "--warmup-seconds", "1"],
+            cls.capture_command,
             env=cls.keyed_env, capture_output=True, text=True, timeout=240)
+        (cls.root / "capture.command.json").write_text(
+            json.dumps(cls.capture_command, indent=2) + "\n")
+        (cls.root / "capture.stdout.raw").write_text(cls.result.stdout)
+        (cls.root / "capture.stderr.raw").write_text(cls.result.stderr)
+        (cls.root / "capture.exit-code.txt").write_text(str(cls.result.returncode) + "\n")
 
     @classmethod
     def tearDownClass(cls):
-        cls.temporary.cleanup()
+        if cls.temporary is not None:
+            cls.temporary.cleanup()
 
     def test_real_frozen_pair_set_keeps_unpassed(self):
         self.assertEqual(self.result.returncode, 0, self.result.stdout + self.result.stderr)
@@ -90,9 +145,14 @@ class ReferenceStudyProducerTest(unittest.TestCase):
                 {"path": protocol["controls"][0][name + "_source_path"],
                  "sha256": protocol["controls"][0][name + "_sha256"]}
                 for name in ("probe", "artifact")])
-        audit = subprocess.run([sys.executable, str(SOURCE), "audit", "--output-root",
-                                str(self.output), "--trusted-key", str(self.key)],
+        command = [sys.executable, str(SOURCE), "audit", "--output-root",
+                   str(self.output), "--trusted-key", str(self.key)]
+        audit = subprocess.run(command,
                                env=self.env, capture_output=True, text=True)
+        (self.root / "audit.command.json").write_text(json.dumps(command, indent=2) + "\n")
+        (self.root / "audit.stdout.raw").write_text(audit.stdout)
+        (self.root / "audit.stderr.raw").write_text(audit.stderr)
+        (self.root / "audit.exit-code.txt").write_text(str(audit.returncode) + "\n")
         self.assertEqual(audit.returncode, 0, audit.stdout + audit.stderr)
         marker = self.keyed_env["OLLAMA_API_KEY"].encode()
         self.assertFalse(any(marker in path.read_bytes()
@@ -102,11 +162,18 @@ class ReferenceStudyProducerTest(unittest.TestCase):
         self.assertEqual(self.result.returncode, 0, self.result.stdout + self.result.stderr)
         relocated = self.root / "relocated-archive"
         shutil.copytree(self.output / "archive", relocated)
-        result = subprocess.run([sys.executable, str(producer.ROOT /
-                                 "tools/performance/reference_study.py"), "verify",
-                                 "--archive", str(relocated), "--trusted-key", str(self.key),
-                                 "--expected-source-commit", producer.SOURCE_COMMIT],
+        command = [sys.executable, str(producer.ROOT /
+                   "tools/performance/reference_study.py"), "verify",
+                   "--archive", str(relocated), "--trusted-key", str(self.key),
+                   "--expected-source-commit", producer.SOURCE_COMMIT]
+        result = subprocess.run(command,
                                 env=self.env, capture_output=True, text=True)
+        (self.root / "relocated-verify.command.json").write_text(
+            json.dumps(command, indent=2) + "\n")
+        (self.root / "relocated-verify.stdout.raw").write_text(result.stdout)
+        (self.root / "relocated-verify.stderr.raw").write_text(result.stderr)
+        (self.root / "relocated-verify.exit-code.txt").write_text(
+            str(result.returncode) + "\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)["qualification"], "unpassed")
 
@@ -191,8 +258,11 @@ class ReferenceStudyProducerTest(unittest.TestCase):
     def test_historical_349_context_hash_rejected_without_mutation(self):
         from reference_study import load_unique_json, validate_protocol
 
-        historical = Path.home() / "dyn4k-evidence/session-control/reference-study-real-producer-34914323/archive"
-        protocol_path = historical / "protocol.json"
+        protocol_path = historical_protocol_path(os.environ, Path.home())
+        if protocol_path is None:
+            self.skipTest(
+                f"historical archive unavailable: {Path.home() / DEFAULT_HISTORICAL_ARCHIVE / 'protocol.json'}")
+        historical = protocol_path.parent
         before = hashlib.sha256(protocol_path.read_bytes()).hexdigest()
         self.assertEqual(before,
                          "1c51d8c517d85a1a8c9dabfffd9fb30b043655378a04f9fa1e7f4a6f8f7ce60a")
