@@ -355,6 +355,10 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(2, joint["required_cases"])
         self.assertEqual(36000, joint["steps_per_case"])
         self.assertEqual("NOT_RUN", joint["candidate_status"])
+        legacy = gates["physical-correctness"]["profiles"]["legacy-weld-pulley"]
+        self.assertEqual("NOT_RUN", legacy["candidate_status"])
+        self.assertEqual(4, legacy["required_cases"])
+        self.assertIn("old four", legacy["reason"])
         self.assertEqual("NOT_RUN", gates["physical-correctness"]["profiles"]["nominal"]["candidate_status"])
 
     def test_nominal_route_needs_36000_step_capture_and_all_profiles_to_pass(self):
@@ -368,11 +372,42 @@ class IndependentGateSeamTests(unittest.TestCase):
             {"dyn4k-core": "a" * 64}, "b" * 64, ROOT)["candidate_status"])
         passed = {name: {"candidate_status": "PASSED"} for name in
                   ("default-sleep-wake", "configured-sleep-wake", "weld-pulley", "nominal")}
-        self.assertEqual("PASSED", independent_gates.physical_status(passed))
+        passed["legacy-weld-pulley"] = {"candidate_status": "NOT_RUN"}
+        self.assertEqual("NOT_RUN", independent_gates.physical_status(passed))
+        passed["invented-passing-profile"] = {"candidate_status": "PASSED"}
+        self.assertEqual("NOT_RUN", independent_gates.physical_status(passed))
+        passed["legacy-weld-pulley"]["candidate_status"] = "PASSED"
+        with self.assertRaisesRegex(ValueError, "legacy"):
+            independent_gates.physical_status(passed)
+        passed["legacy-weld-pulley"]["candidate_status"] = "NOT_RUN"
         passed["nominal"]["candidate_status"] = "NOT_RUN"
         self.assertEqual("NOT_RUN", independent_gates.physical_status(passed))
         passed["nominal"]["candidate_status"] = "FAILED"
         self.assertEqual("FAILED", independent_gates.physical_status(passed))
+
+    def test_verified_physical_result_keeps_legacy_disposition_out_of_receipt_control(self):
+        receipt = {"fixtures": [], "legacy-weld-pulley": {"candidate_status": "PASSED"},
+                   "profiles": {"legacy-weld-pulley": {"candidate_status": "PASSED"}}}
+        with (mock.patch.object(independent_gates, "_json", return_value={"fixtures": []}),
+              mock.patch.object(independent_gates, "_numerical_modules",
+                                return_value=(mock.Mock(), mock.Mock())),
+              mock.patch.object(independent_gates, "verified_numerical_source_sha256",
+                                return_value="a" * 64),
+              mock.patch.object(independent_gates, "verify_joint_physical_cases",
+                                return_value={"candidate_status": "PASSED", "required_cases": 2}),
+              mock.patch.object(independent_gates, "verify_nominal_physical_case",
+                                return_value={"candidate_status": "PASSED"})):
+            profiles = independent_gates._numerical_entries(
+                ROOT, receipt, BASE, {"dyn4k-core": "b" * 64}, ROOT,
+                physical_only=True)
+        self.assertEqual({"PASSED"}, {profiles[name]["candidate_status"] for name in
+                         ("default-sleep-wake", "configured-sleep-wake", "weld-pulley", "nominal")})
+        self.assertEqual("NOT_RUN", profiles["legacy-weld-pulley"]["candidate_status"])
+        self.assertEqual(4, profiles["legacy-weld-pulley"]["required_cases"])
+        self.assertEqual("NOT_RUN", independent_gates.physical_status(profiles))
+        del profiles["legacy-weld-pulley"]
+        with self.assertRaisesRegex(ValueError, "legacy"):
+            independent_gates.physical_status(profiles)
 
     @unittest.skipUnless(
         Path("/tmp/dyn4k-candidate-current-nominal/L-free-s1.0-o0.0_0.0-hz60-0.jsonl.gz").is_file(),
