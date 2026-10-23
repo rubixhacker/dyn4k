@@ -800,6 +800,12 @@ def _missing_numerical_subgates(repository):
                 "cases": cases}}
 
 
+def _legacy_joint_physical_profile():
+    return {"candidate_status": "NOT_RUN", "required_cases": 4,
+            "reason": "old four Weld/Pulley physical residual disposition is unresolved; "
+                      "parity traces and newer cases do not establish physical acceptance"}
+
+
 def _missing_physical_profiles():
     return {"default-sleep-wake": {"candidate_status": "NOT_RUN",
                                    "approved_reference_status": "FAILED_125847_OF_126000"},
@@ -811,6 +817,7 @@ def _missing_physical_profiles():
                             "approved_reference_status": "PASSED_BASELINE_ONLY",
                             "legacy_pulley_diagnostic": "39 old-reference samples exceeded the 0.005 m solver tolerance; observed maximum extension 0.1208278904872957 m",
                             "reason": "candidate Weld and Pulley physical traces are absent"},
+            "legacy-weld-pulley": _legacy_joint_physical_profile(),
             "nominal": {"candidate_status": "NOT_RUN",
                         "reason": "candidate nominal physical quality evidence is absent"}}
 
@@ -1026,8 +1033,12 @@ def physical_status(profiles):
     statuses = [profiles[name]["candidate_status"] for name in required]
     if any(status not in ("PASSED", "FAILED", "NOT_RUN") for status in statuses):
         raise ValueError("physical profile status differs")
-    return "FAILED" if "FAILED" in statuses else "PASSED" if all(
-        status == "PASSED" for status in statuses) else "NOT_RUN"
+    if "FAILED" in statuses:
+        return "FAILED"
+    legacy = profiles.get("legacy-weld-pulley")
+    if not isinstance(legacy, dict) or legacy.get("candidate_status") != "NOT_RUN":
+        raise ValueError("legacy Weld/Pulley physical disposition is not approved")
+    return "NOT_RUN"
 
 
 def verify_joint_physical_cases(root, receipt, candidate_sha,
@@ -2303,6 +2314,7 @@ def _numerical_entries(root, receipt, candidate_sha, expected_artifact_hashes, r
             "FAILED" if physical_profiles["configured-sleep-wake"]["failures"] else "PASSED")
         physical_profiles["weld-pulley"] = verify_joint_physical_cases(
             root, receipt, candidate_sha, expected_artifact_hashes, source_sha, repository)
+        physical_profiles["legacy-weld-pulley"] = _legacy_joint_physical_profile()
         physical_profiles["nominal"] = verify_nominal_physical_case(
             root, receipt, candidate_sha, expected_artifact_hashes, source_sha, repository)
         return physical_profiles
