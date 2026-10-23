@@ -147,7 +147,7 @@ APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS = {
 }
 PROSPECTIVE_V6_SOURCE_REVISION = "0d5799e1c84f76c504b53f3eaf7468bca20a60eb"
 FAILED_PRIVATE_LAUNCH_SOURCE_REVISION = "e451ccf010c8f1c11a428d63806795f455086af0"
-PRIVATE_LAUNCH_SOURCE_REVISION = "9f62b631394453d03c5d95b8daf68c9f397849c6"
+PRIVATE_LAUNCH_SOURCE_REVISION = "9ab252e8e4e4f6e6a74abc66cfed3a92ad9dd85b"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -374,7 +374,7 @@ PRIVATE_LAUNCH_CAPTURE_DEPENDENCIES = {
     "tools/numerical/portable/capture_actual.py":
         "1c6807ff810007d20ebd7dc7ba30f6f0ceee279d047447dcba699c5a7456303a",
     "tools/numerical/portable/actual_capture_receipt.py":
-        "f124c1c638b35d1e70e6bd6c95fae30a80af84ebecccd6eefcd92d3347c41388",
+        "589654f86172d39c1f8352be0391706987f5ea12abf0046517b438f8a2e12005",
     "tools/numerical/portable/actual_trace.py":
         "ffbeb99676677cb1b619160ef8f11b6858291580322de16097c862f930f83709",
     "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
@@ -404,7 +404,7 @@ P2_PRIVATE_LAUNCH_DEPENDENCIES = {
     "tools/numerical/portable/numeric_producer_trace.py":
         "dd2f58083654079745000b1673e7c0dc4c214a772e8f81117c8699ff968e03fe",
     "tools/numerical/portable/actual_capture_receipt.py":
-        "f124c1c638b35d1e70e6bd6c95fae30a80af84ebecccd6eefcd92d3347c41388",
+        "589654f86172d39c1f8352be0391706987f5ea12abf0046517b438f8a2e12005",
     "tools/numerical/portable/actual_trace.py":
         "ffbeb99676677cb1b619160ef8f11b6858291580322de16097c862f930f83709",
     "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
