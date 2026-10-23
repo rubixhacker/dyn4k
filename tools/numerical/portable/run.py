@@ -34,6 +34,7 @@ ROOT = Path(__file__).resolve().parents[3]
 PORTABLE = Path(__file__).resolve().parent
 STAGED = ROOT / "build/staging-repository/io/github/rubixhacker"
 VERSION = "0.1.0-alpha.1"
+BUILD_JDK = Path("/tmp/dyn4k-tools/jdk21")
 HOST_TASKS = {
     "jvm": "jvmTest",
     "jvm8": "jvmTest",
@@ -151,8 +152,7 @@ def artifact_relative_paths(host):
 
 def stage(output, commit, source_sha256):
     started = __import__("time").time()
-    env = os.environ.copy()
-    env.setdefault("ANDROID_HOME", str(Path.home() / "Android/Sdk"))
+    env = controlled_java_environment()
     command = [str(ROOT / "gradlew"), *STAGE_TASKS, "--rerun-tasks", "--no-daemon",
                "--console=plain", "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"]
     with (output / "publication.log").open("x", encoding="utf-8") as log:
@@ -173,6 +173,18 @@ def stage(output, commit, source_sha256):
     return manifest
 
 
+def controlled_java_environment():
+    env = os.environ.copy()
+    for key in ("OLLAMA_API_KEY", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "JAVA_TOOL_OPTIONS",
+                "CLASSPATH", "JAVA_OPTS", "GRADLE_OPTS", "JDK_HOME", "JRE_HOME",
+                "ANDROID_SDK_ROOT", "GRADLE_JAVA_HOME", "KOTLIN_JAVA_HOME"):
+        env.pop(key, None)
+    env["JAVA_HOME"] = str(BUILD_JDK)
+    env["ANDROID_HOME"] = "/var/home/stewart/Android/Sdk"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
 def _provider_classes(path):
     path = Path(path)
     if path.is_dir():
@@ -186,11 +198,13 @@ def _provider_classes(path):
                 if name.startswith("org/dyn4j/") and name.endswith(".class")}
 
 
-def _java_classpath(command):
+def _java_classpath(command, host=None):
     tokens = []
     argfiles = []
     for token in command[1:]:
         if token.startswith("@"):
+            if host == "jvm8":
+                raise Rejected("Java 8 worker argument file is unsupported")
             path = Path(token[1:]).resolve()
             if not path.is_file():
                 raise Rejected("executed Java worker argument file is absent")
@@ -273,7 +287,7 @@ def _java_worker_open_proof(command, dependency, execution_log):
 
 def _java_dependency_proof(host, command, dependency, log_path, proof_dir=None,
                            require_loaded=False, execution_log=None):
-    entries, argfiles = _java_classpath(command)
+    entries, argfiles = _java_classpath(command, host)
     if not dependency.is_file():
         raise Rejected("staged dependency artifact is absent")
     if host == "android-host":
@@ -892,7 +906,22 @@ def check_exact_consistency(lane):
     return result
 
 
-def method_command(host, method, lane):
+def selected_jdk8_home(home):
+    if home is None:
+        raise Rejected("explicit Java 8 home is required")
+    path = Path(home)
+    if (not path.is_absolute() or path.resolve() != path or not path.is_dir() or
+            not (path / "bin/java").is_file() or not (path / "bin/javac").is_file()):
+        raise Rejected("explicit Java 8 home must be a real JDK directory")
+    version = subprocess.run([str(path / "bin/java"), "-version"], capture_output=True,
+                             text=True, timeout=10, check=False,
+                             env=controlled_java_environment())
+    if version.returncode or 'version "1.8.' not in _java_version_line(version):
+        raise Rejected("explicit Java 8 home has the wrong runtime")
+    return path
+
+
+def method_command(host, method, lane, jdk8_home=None, trace_jvm8=True):
     if method not in MATRIX_METHODS:
         raise Rejected(f"unknown numerical matrix method: {method}")
     task = (":linkDebugTestLinuxX64" if host == "linux-x64" else
@@ -909,12 +938,13 @@ def method_command(host, method, lane):
                "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g",
                "--init-script", str(PROVENANCE_SCRIPT)))
     if host == "jvm8":
+        jdk8_home = selected_jdk8_home(jdk8_home)
         command.extend(("-PportableJvm8=true",
-                        "-Dorg.gradle.java.installations.paths=/tmp/dyn4k-tools/jdk8"))
+                        "-Dorg.gradle.java.installations.paths=" + str(jdk8_home)))
     execution_log = None
     if host == "linux-x64" or host in WASM_HOSTS:
         command.append("-Pkotlin.compiler.execution.strategy=in-process")
-    if host == "jvm8":
+    if host == "jvm8" and trace_jvm8:
         tracer = shutil.which("strace")
         if tracer is None:
             raise Rejected("strace is unavailable for native process binding")
@@ -1455,12 +1485,14 @@ def load_native_bundle(output, publication, commit, source_sha256, result):
 def execute(host, output, commit, source_sha256, reference_dirs,
             prospective_baseline=None, frozen_baseline=None,
             frozen_attestation=None, prospective_attestation=None,
-            arithmetic_captures=None, node_modules=None):
+            arithmetic_captures=None, node_modules=None, jdk8_home=None):
     lane = output / host
     lane.mkdir(parents=True, exist_ok=False)
     target_artifacts = artifacts(host)
     artifact_sha256 = {name: digest(path) for name, path in target_artifacts.items()}
-    env = os.environ.copy()
+    env = controlled_java_environment() if host == "jvm8" else os.environ.copy()
+    if host == "jvm8":
+        jdk8_home = selected_jdk8_home(jdk8_home)
     env.setdefault("ANDROID_HOME", str(Path.home() / "Android/Sdk"))
     if host in ("jvm", "jvm8", "android-host"):
         env["JAVA_TOOL_OPTIONS"] = (env.get("JAVA_TOOL_OPTIONS", "") +
@@ -1494,7 +1526,7 @@ def execute(host, output, commit, source_sha256, reference_dirs,
                 execution_log = None
             else:
                 started = time.time_ns()
-                command, execution_log = method_command(host, method, lane)
+                command, execution_log = method_command(host, method, lane, jdk8_home)
                 log_path = lane / f"gradle-{method}.log"
                 with log_path.open("x", encoding="utf-8") as log:
                     if host == "linux-x64":
@@ -1567,6 +1599,8 @@ def execute(host, output, commit, source_sha256, reference_dirs,
                                    lane / "process-proof" / method,
                                    node_modules=(node_modules or PORTABLE / "build/js/node_modules")
                                    if host == "node-js" else None)
+                if host == "jvm8" and executed["executable"] != str(jdk8_home / "bin/java"):
+                    raise Rejected("Java 8 worker differs from selected JDK home")
                 method_result["process"] = executed
                 if bundle_manifest is not None:
                     retain_native_method(lane / "producer-bundle", bundle_manifest,
@@ -1972,6 +2006,7 @@ def main():
     parser.add_argument("--expected-bundle-sha256")
     parser.add_argument("--expected-core-sha256")
     parser.add_argument("--hosts", nargs="+", choices=HOST_TASKS, default=list(HOST_TASKS))
+    parser.add_argument("--jdk8-home", type=Path)
     parser.add_argument("--reference-dir", type=Path, action="append", default=[])
     parser.add_argument("--prospective-baseline", type=Path)
     parser.add_argument("--prospective-attestation", type=Path)
@@ -1981,6 +2016,13 @@ def main():
     parser.add_argument("--frozen-baseline", type=Path)
     parser.add_argument("--frozen-attestation", type=Path)
     args = parser.parse_args()
+    if ("jvm8" in args.hosts and not (args.verify_linux_native_existing or
+            args.verify_wasm_existing or args.node_method or
+            args.verify_node_method_existing)):
+        try:
+            args.jdk8_home = selected_jdk8_home(args.jdk8_home)
+        except Rejected as error:
+            parser.error(str(error))
     if args.prospective_baseline is not None and args.prospective_attestation is None:
         parser.error("--prospective-baseline requires --prospective-attestation")
     if args.prospective_attestation is not None and args.prospective_baseline is None:
@@ -2049,7 +2091,7 @@ def main():
         results = [execute(host, output, commit, source_sha256, reference_dirs,
                            args.prospective_baseline, args.frozen_baseline,
                            args.frozen_attestation, args.prospective_attestation,
-                           args.arithmetic_captures, args.node_modules)
+                           args.arithmetic_captures, args.node_modules, args.jdk8_home)
                    for host in args.hosts]
         for host in HOST_TASKS:
             if host not in args.hosts:

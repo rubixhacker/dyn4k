@@ -349,7 +349,8 @@ class ExtractionTest(unittest.TestCase):
                 patch.object(run.shutil, "which", return_value="/usr/bin/strace"):
             lane = Path(directory)
             method = "freeMotionForcesDampingAndRestitution"
-            command, execution_log = run.method_command("jvm8", method, lane)
+            jdk8 = Path("/var/home/stewart/dyn4k-resume-20261022-yZgd7q/jdk8-preparation/jdk8u504-b01")
+            command, execution_log = run.method_command("jvm8", method, lane, jdk8)
             self.assertEqual(command[:7], ["/usr/bin/strace", "-f", "-s", "65535",
                                            "-e", "trace=process,openat", "-o"])
             self.assertEqual(command[7], str(execution_log))
@@ -357,7 +358,7 @@ class ExtractionTest(unittest.TestCase):
             self.assertEqual(command.count("-Pkotlin.compiler.execution.strategy=in-process"), 1)
             self.assertIn(f"portable.PortableMatrixTest.{method}", command)
             self.assertIn("-PportableJvm8=true", command)
-            self.assertIn("-Dorg.gradle.java.installations.paths=/tmp/dyn4k-tools/jdk8", command)
+            self.assertIn("-Dorg.gradle.java.installations.paths=" + str(jdk8), command)
             self.assertIn("--init-script", command)
             ordinary, ordinary_log = run.method_command("jvm", method, lane)
             self.assertIsNone(ordinary_log)
@@ -385,9 +386,25 @@ class ExtractionTest(unittest.TestCase):
         with patch.object(run.shutil, "which", return_value=None):
             with self.assertRaisesRegex(run.Rejected, "strace is unavailable"):
                 run.method_command("jvm8", "freeMotionForcesDampingAndRestitution",
-                                   Path("/tmp/unused"))
+                                   Path("/tmp/unused"), Path("/var/home/stewart/dyn4k-resume-20261022-yZgd7q/jdk8-preparation/jdk8u504-b01"))
         with self.assertRaisesRegex(run.Rejected, "unknown numerical matrix method"):
             run.method_command("jvm8", "unrecorded", Path("/tmp/unused"))
+        with self.assertRaisesRegex(run.Rejected, "explicit Java 8 home"):
+            run.method_command("jvm8", "freeMotionForcesDampingAndRestitution",
+                               Path("/tmp/unused"))
+
+    def test_java8_requires_real_home_and_direct_classpath(self):
+        jdk8 = Path("/var/home/stewart/dyn4k-resume-20261022-yZgd7q/jdk8-preparation/jdk8u504-b01")
+        self.assertEqual(run.selected_jdk8_home(jdk8), jdk8)
+        for invalid in (None, Path("relative"), Path("/missing-jdk8"),
+                        Path("/tmp/dyn4k-tools/jdk21")):
+            with self.subTest(invalid=invalid), self.assertRaises(run.Rejected):
+                run.selected_jdk8_home(invalid)
+        with tempfile.TemporaryDirectory() as directory:
+            response = Path(directory) / "worker.args"
+            response.write_text("-cp /classes")
+            with self.assertRaisesRegex(run.Rejected, "argument file is unsupported"):
+                run._java_classpath([str(jdk8 / "bin/java"), "@" + str(response)], "jvm8")
 
     def test_java_8_worker_open_proof_requires_staged_jar_in_worker_tree(self):
         with tempfile.TemporaryDirectory() as directory:

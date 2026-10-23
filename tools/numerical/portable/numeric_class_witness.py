@@ -8,7 +8,7 @@ import zipfile
 from receipt import Rejected
 
 
-SCHEMA = "class-witness/1"
+SCHEMA = "class-witness/2"
 AGENT_CLASS = "dyn4k.witness.NumericClassWitness"
 MANIFEST = b"Manifest-Version: 1.0\r\nPremain-Class: " + AGENT_CLASS.encode() + b"\r\n\r\n"
 SOURCE_NAME = "NumericClassWitness.java"
@@ -65,7 +65,13 @@ def read_witness(raw: bytes, expected_classes: dict[str, bytes],
         raise Rejected("class witness terminal record differs")
     definitions = []
     seen = set()
-    for ordinal, line in enumerate(lines[1:-1], 1):
+    try:
+        seal_index = next(index for index, line in enumerate(lines) if line.startswith("SEALED\t"))
+    except StopIteration as error:
+        raise Rejected("class witness seal is absent") from error
+    if lines[seal_index] != "SEALED\t" + str(seal_index - 1):
+        raise Rejected("class witness seal count differs")
+    for ordinal, line in enumerate(lines[1:seal_index], 1):
         fields = line.split("\t")
         if len(fields) != 7 or fields[0] != "CLASS" or fields[1] != str(ordinal):
             raise Rejected("class witness sequence differs")
@@ -84,4 +90,21 @@ def read_witness(raw: bytes, expected_classes: dict[str, bytes],
                             "origin": origin, "thread": thread, "sequence": ordinal})
     if len(definitions) != int(end[2]):
         raise Rejected("class witness count differs")
-    return {"schema": SCHEMA, "definitions": definitions, "sha256": _sha(raw)}
+    loaded = []
+    for ordinal, line in enumerate(lines[seal_index + 1:-1], 1):
+        fields = line.split("\t")
+        if len(fields) != 5 or fields[:2] != ["LOADED", str(ordinal)]:
+            raise Rejected("class witness successful-load sequence differs")
+        _, _, name, loader, origin = fields
+        if not re.fullmatch(r"(?:bootstrap|system|L[1-9][0-9]*)", loader):
+            raise Rejected("class witness successful loader differs")
+        loaded.append({"name": name, "loader": loader, "origin": origin})
+    by_name = {row["name"]: row for row in definitions}
+    if (len(loaded) != len(definitions) or len({row["name"] for row in loaded}) != len(loaded) or
+            {row["name"] for row in loaded} != seen or
+            any((row["loader"], row["origin"]) !=
+                (by_name[row["name"]]["loader"], by_name[row["name"]]["origin"])
+                for row in loaded)):
+        raise Rejected("class witness successful loads differ from callbacks")
+    return {"schema": SCHEMA, "definitions": definitions, "loaded": loaded,
+            "sha256": _sha(raw)}

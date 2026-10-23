@@ -658,6 +658,37 @@ class StartupTest(unittest.TestCase):
             changed[index]["loader"] = "L12345"
             with self.subTest(name=names[index]), self.assertRaisesRegex(Rejected, "loader"):
                 verify_witness_loaders(changed, loaded, helper)
+        java8 = [{"name": name, "loader": "L1" if name.startswith("portable/") else "L2"}
+                 for name in names]
+        verify_witness_loaders(java8, loaded, helper, "jvm8")
+        changed = deepcopy(java8)
+        changed[1]["loader"] = "L3"
+        with self.assertRaisesRegex(Rejected, "loader"):
+            verify_witness_loaders(changed, loaded, helper, "jvm8")
+
+    def test_java8_rejects_unread_response_transport(self):
+        from numeric_producer import _startup
+        with self.assertRaisesRegex(Rejected, "Java 8 worker response transport"):
+            _startup({"worker-classpath.txt": b"-cp\n/a\n"},
+                     ("100", "/jdk8/bin/java", ("/jdk8/bin/java", "@/args.txt",
+                      "worker.org.gradle.process.internal.worker.GradleWorkerMain", "executor")),
+                     "jvm8")
+
+    def test_java8_requires_major_52_for_every_selected_class(self):
+        from numeric_producer import require_java8_classes
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            jar = root / "engine.jar"
+            agent = io.BytesIO()
+            major52 = b"\xca\xfe\xba\xbe\x00\x00\x004"
+            major65 = b"\xca\xfe\xba\xbe\x00\x00\x00A"
+            with zipfile.ZipFile(jar, "w") as archive:
+                archive.writestr("org/dyn4j/geometry/Geometry.class", major52)
+            with zipfile.ZipFile(agent, "w") as archive:
+                archive.writestr("dyn4k/witness/NumericClassWitness.class", major52)
+            require_java8_classes({"test/portable/Test.class": major52}, jar, agent.getvalue())
+            with self.assertRaisesRegex(Rejected, "class major"):
+                require_java8_classes({"test/portable/Test.class": major65}, jar, agent.getvalue())
 
     def test_witness_worker_requires_one_agent_and_guard_flags(self):
         from numeric_producer import verify_startup_log
@@ -773,12 +804,13 @@ class ArchiveTest(unittest.TestCase):
             with self.assertRaisesRegex(Rejected, "numeric producer proof schema"):
                 verify_numeric_probe(lane, "commit", "source", "trace",
                                      {"target": artifact}, runtime)
-            proof["class_witness"] = {"schema": "class-witness/1",
+            proof["class_witness"] = {"schema": "class-witness/2",
                                       "source_sha256": "0" * 64, "agent_sha256": "0" * 64,
                                       "witness_sha256": "0" * 64,
                                       "definition_count": 3,
                                       "definition_inventory_sha256": "0" * 64,
                                       "helper_provider": "file:///private/agent.jar", "input_reads": 1,
+                                      "provider_reads": {},
                                       "writer_tids": ["100"], "writer_fd": "5",
                                       "destination": "/private/witness.log"}
             (lane / "numeric-probe-receipt.json").write_bytes(encoded(receipt))
@@ -891,13 +923,13 @@ class ArchiveTest(unittest.TestCase):
                     "mirror_destination": "/work/mirror.log", "mirror_sha256": "0" * 64,
                     "xml_sha256": "0" * 64, "gradle_log_sha256": "0" * 64,
                     "trace_manifest_sha256": "0" * 64,
-                    "class_witness": {"schema": "class-witness/1",
+                    "class_witness": {"schema": "class-witness/2",
                                        "source_sha256": "0" * 64, "agent_sha256": "0" * 64,
                                        "witness_sha256": "0" * 64,
                                        "definition_count": 3,
                                        "definition_inventory_sha256": "0" * 64,
                                        "helper_provider": "file:///private/agent.jar",
-                                       "input_reads": 1, "writer_tids": ["100"],
+                                       "input_reads": 1, "provider_reads": {}, "writer_tids": ["100"],
                                        "writer_fd": "5", "destination": "/private/witness.log"}}
 
         with tempfile.TemporaryDirectory(dir=Path.home()) as temporary:

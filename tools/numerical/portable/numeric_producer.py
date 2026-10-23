@@ -32,7 +32,7 @@ PORTABLE = Path(__file__).resolve().parent
 WRAPPER = "tools/numerical/portable/src/jvmTest/kotlin/portable/NumericProbeMatrixTest.kt"
 WRAPPER_SHA256 = "6e9d5a3436f2d10f0a40606a21b8cafafb548f8911e993725b2fda97f12a260a"
 OBSERVER = "tools/numerical/portable/class_witness/NumericClassWitness.java"
-OBSERVER_SHA256 = "493d57d0635c6c5b519b6009250df0d82d0d97e0b065aa80160fe053b20d8983"
+OBSERVER_SHA256 = "de1dd91ff31438814dc542144d01699ba6e721a90a59f8a07eb00073ea851fd2"
 WITNESS_JDK = Path("/tmp/dyn4k-tools/jdk21")
 KEYS = {"schema", "candidate_commit", "source_sha256", "fixture_source_sha256",
         "trace_sha256", "primary_receipt_sha256", "geometry_case_sha256", "artifact_sha256",
@@ -46,6 +46,12 @@ REQUIRED = {"gradle.log", "selected.xml", "mirror.log", "compiled-classes.zip",
             "runtime-version.log", "trace-command.json", "source.tar",
             "worker-arguments.log", "class-load.log", "classpath-inventory.json",
             "class-witness-agent.jar", "class-witness.log"}
+REQUIRED_JVM8 = REQUIRED - {"worker-arguments.log", "class-load.log"}
+CRITICAL_CLASS_FILES = {
+    "portable/NumericProbeMatrixTest": "test/portable/NumericProbeMatrixTest.class",
+    "portable/PortableMatrixTest": "test/portable/PortableMatrixTest.class",
+    "portable/NumericalRecorder": "main/portable/NumericalRecorder.class",
+}
 MAX_MEMBER = 128 * 1024 * 1024
 MAX_TOTAL = 512 * 1024 * 1024
 MAX_TRACE_MEMBER = 512 * 1024 * 1024
@@ -94,7 +100,8 @@ def verify_sidecar_identity(sidecar, lane, artifact):
     require(isinstance(sidecar, dict) and set(sidecar) == fields and
             all(type(sidecar[field]) is str and sidecar[field] for field in fields) and
             all(sidecar[field] == lane.get(field) for field in fields) and
-            sidecar["host"] == "jvm" and sidecar["dependency_sha256"] == digest(artifact),
+            sidecar["host"] in ("jvm", "jvm8") and
+            sidecar["dependency_sha256"] == digest(artifact),
             "sidecar runtime identity differs from full lane")
 
 
@@ -179,6 +186,27 @@ def class_map(raw):
              "main/portable/NumericalRecorder.class"} <= set(result),
             "compiled fixture payload is incomplete")
     return result
+
+
+def require_java8_classes(payload, artifact, agent):
+    for name, data in payload.items():
+        require(data[:4] == b"\xca\xfe\xba\xbe" and
+                int.from_bytes(data[6:8], "big") == 52,
+                "Java 8 compiled class major differs: " + name)
+    with zipfile.ZipFile(artifact) as archive:
+        for name in archive.namelist():
+            if name.startswith("org/dyn4j/") and name.endswith(".class"):
+                data = archive.read(name)
+                require(data[:4] == b"\xca\xfe\xba\xbe" and
+                        int.from_bytes(data[6:8], "big") == 52,
+                        "Java 8 engine class major differs: " + name)
+    with zipfile.ZipFile(io.BytesIO(agent)) as archive:
+        for name in archive.namelist():
+            if name.endswith(".class"):
+                data = archive.read(name)
+                require(data[:4] == b"\xca\xfe\xba\xbe" and
+                        int.from_bytes(data[6:8], "big") == 52,
+                        "Java 8 observer class major differs: " + name)
 
 
 def verify_call_edge(raw):
@@ -275,7 +303,7 @@ def _raw_budget(name, size, ordinary, total):
     return ordinary, total
 
 
-def load_raw(directory, expected):
+def load_raw(directory, expected, host="jvm"):
     require(isinstance(expected, dict) and expected and len(expected) <= MAX_MEMBERS,
             "raw inventory is malformed")
     ordinary, total = 0, 0
@@ -293,7 +321,9 @@ def load_raw(directory, expected):
     names = set(expected)
     process = {name for name in names if re.fullmatch(r"process/trace\.[1-9][0-9]*", name)}
     transport = names & {"worker-classpath.txt", "direct-classpath.json"}
-    require(len(transport) == 1 and process and names == REQUIRED | process | transport,
+    required = REQUIRED_JVM8 if host == "jvm8" else REQUIRED
+    require(host in ("jvm", "jvm8") and len(transport) == 1 and process and
+            names == required | process | transport,
             "raw member set differs")
     raw = {name: (Path(directory) / name).read_bytes() for name in names}
     require(all(sha(raw[name]) == expected[name]["sha256"] and
@@ -305,10 +335,12 @@ def load_raw(directory, expected):
 def environment(scratch):
     result = os.environ.copy()
     for key in ("OLLAMA_API_KEY", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS",
-                "CLASSPATH", "JAVA_OPTS", "GRADLE_OPTS"):
+                "CLASSPATH", "JAVA_OPTS", "GRADLE_OPTS", "JDK_HOME", "JRE_HOME",
+                "ANDROID_SDK_ROOT", "GRADLE_JAVA_HOME", "KOTLIN_JAVA_HOME"):
         result.pop(key, None)
     result["PYTHONDONTWRITEBYTECODE"] = "1"
-    result["TMPDIR"] = str(scratch)
+    result["JAVA_HOME"] = str(WITNESS_JDK)
+    result["ANDROID_HOME"] = "/var/home/stewart/Android/Sdk"
     result["JAVA_TOOL_OPTIONS"] = "-Djava.io.tmpdir=" + str(scratch) + " -XX:-UsePerfData"
     return result
 
@@ -373,11 +405,12 @@ def _source(raw, commit, expected_sha):
     return source
 
 
-def _startup(raw, selected_exec):
+def _startup(raw, selected_exec, host="jvm"):
     _, executable, selected_argv = selected_exec
     argv = list(selected_argv)
     response_paths = [token[1:] for token in argv if token.startswith("@")]
     if response_paths:
+        require(host != "jvm8", "Java 8 worker response transport is unsupported")
         require(len(response_paths) == 1 and "worker-classpath.txt" in raw and
                 "direct-classpath.json" not in raw, "worker response transport differs")
         response = raw["worker-classpath.txt"]
@@ -398,7 +431,8 @@ def _startup(raw, selected_exec):
     return executable, argv, classpaths[0], response_path, response, tokens
 
 
-def _providers(raw, observation, startup, payload, artifact, class_root, worker):
+def _providers(raw, observation, startup, payload, artifact, class_root, worker,
+               host="jvm", successful=None):
     from actual_arithmetic import _inspect_worker_classpath
     require(observation["classpath"] == startup, "executed startup classpath differs")
     maps = {source_set: {name.split("/", 1)[1]: sha(data) for name, data in payload.items()
@@ -411,12 +445,17 @@ def _providers(raw, observation, startup, payload, artifact, class_root, worker)
                 "org.dyn4j.dynamics.Body": artifact, "org.dyn4j.geometry.Geometry": artifact}
     require(set(origins) == set(required), "actual provider inventory differs")
     loaded = {}
-    for line in raw["class-load.log"].decode().splitlines():
-        match = re.fullmatch(r"\[([0-9]+)\]\[info\]\[class,load\] ([^ ]+) source: (.*)", line)
-        require(match is not None and match[1] == worker, "class-load worker identity differs")
-        if match[2] in required:
-            require(match[2] not in loaded, "duplicate selected class provider")
-            loaded[match[2]] = match[3]
+    if host == "jvm8":
+        require(successful is not None, "Java 8 successful classes are absent")
+        loaded = {row["name"].replace("/", "."): row["origin"] for row in successful
+                  if row["name"].replace("/", ".") in required}
+    else:
+        for line in raw["class-load.log"].decode().splitlines():
+            match = re.fullmatch(r"\[([0-9]+)\]\[info\]\[class,load\] ([^ ]+) source: (.*)", line)
+            require(match is not None and match[1] == worker, "class-load worker identity differs")
+            if match[2] in required:
+                require(match[2] not in loaded, "duplicate selected class provider")
+                loaded[match[2]] = match[3]
     require(loaded == origins, "loaded and executed provider origins differ")
     for name, location in origins.items():
         url = urlparse(location)
@@ -466,18 +505,21 @@ def verify_startup_log(raw, worker, startup, agent=None, witness=None,
             require(flags.count(expected) == 1, "worker observed output option differs")
 
 
-def verify_witness_loaders(definitions, loaded, helper):
+def verify_witness_loaders(definitions, loaded, helper, host="jvm"):
     critical = {"portable/NumericProbeMatrixTest", "portable/PortableMatrixTest",
                 "portable/NumericalRecorder"}
     names = {row["name"] for row in definitions}
+    labels = {row["name"]: row["loader"] for row in definitions}
+    selected = {labels[name] for name in critical if name in labels}
     require(critical <= names and names == set(loaded) and
             any(name.startswith("org/dyn4j/") for name in names) and helper and
-            all(row["loader"] == "system" for row in definitions),
+            (all(row["loader"] == "system" for row in definitions)
+             if host == "jvm" else len(selected) == 1 and "bootstrap" not in selected),
             "class witness focused worker loader relationship differs")
 
 
 def _witness(raw, source, metadata, traces, worker, payload, artifact, class_root,
-             classpath_entries, selected_exec, scratch):
+             classpath_entries, selected_exec, scratch, host="jvm"):
     agent_path = Path(metadata["agent_path"])
     witness_path = Path(metadata["witness_path"])
     require(agent_path.is_absolute() and witness_path.is_absolute() and
@@ -490,8 +532,8 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
         entry = archive.extractfile(OBSERVER)
         require(entry is not None, "class witness committed source is absent")
         java_source = entry.read()
-    compiler = Path(selected_exec[1]).parents[1]
-    require(compiler.resolve() == WITNESS_JDK.resolve(),
+    compiler = WITNESS_JDK
+    require(compiler.is_dir(),
             "class witness compiler runtime differs")
     rebuilt = build_agent(java_source, compiler, scratch / "witness-rebuilt.jar",
                           scratch / "witness-compile")
@@ -499,6 +541,17 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
             "class witness complete JAR differs from committed source")
     input_proof = verify_stable_input(traces, str(agent_path), metadata["agent_identity"],
                                       worker, rebuilt, selected_exec[1:])
+    provider_reads = {}
+    if host == "jvm8":
+        paths = {"engine": (artifact, artifact.read_bytes())}
+        paths.update({name: (class_root / relative, payload[relative])
+                      for name, relative in CRITICAL_CLASS_FILES.items()})
+        require(set(metadata["provider_inputs"]) == set(paths),
+                "Java 8 provider input inventory differs")
+        for name, (path, data) in paths.items():
+            proof = verify_stable_input(traces, str(path), metadata["provider_inputs"][name],
+                                        worker, data, selected_exec[1:])
+            provider_reads[name] = proof["reads"]
     output_proof = verify_transport(traces, str(witness_path), raw["class-witness.log"],
                                     selected_exec,
                                     mirror_identity=metadata["witness_identity"],
@@ -524,23 +577,29 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
     require(required <= witnessed, "class witness critical definition is absent")
     loaded = {}
     helper = {}
-    for line in raw["class-load.log"].decode().splitlines():
-        match = re.fullmatch(r"\[([0-9]+)\]\[info\]\[class,load\] ([^ ]+) source: (.*)", line)
-        require(match is not None and match[1] == worker, "class witness load record differs")
-        name = match[2].replace(".", "/")
-        if name.startswith("dyn4k/witness/"):
-            require(name not in helper, "duplicate class witness helper load")
-            helper[name] = match[3]
-        elif name.startswith(("portable/", "org/dyn4j/")) and "$$Lambda/" not in name:
-            require(name in expected and name not in loaded,
-                    "class witness loaded provider inventory differs")
-            loaded[name] = match[3]
+    if host == "jvm8":
+        loaded = {row["name"]: row["origin"] for row in result["loaded"]}
+        helper = {"dyn4k/witness/NumericClassWitness": agent_path.as_uri(),
+                  "dyn4k/witness/NumericClassWitness$Observer": agent_path.as_uri()}
+    else:
+        for line in raw["class-load.log"].decode().splitlines():
+            match = re.fullmatch(r"\[([0-9]+)\]\[info\]\[class,load\] ([^ ]+) source: (.*)", line)
+            require(match is not None and match[1] == worker, "class witness load record differs")
+            name = match[2].replace(".", "/")
+            if name.startswith("dyn4k/witness/"):
+                require(name not in helper, "duplicate class witness helper load")
+                helper[name] = match[3]
+            elif name.startswith(("portable/", "org/dyn4j/")) and "$$Lambda/" not in name:
+                require(name in expected and name not in loaded,
+                        "class witness loaded provider inventory differs")
+                loaded[name] = match[3]
     require(set(loaded) == witnessed, "class witness callbacks and successful loads differ")
     with zipfile.ZipFile(io.BytesIO(rebuilt)) as jar:
         helpers = {name.removesuffix(".class") for name in jar.namelist()
                    if name.endswith(".class")}
-    require(set(helper) == helpers, "class witness helper class inventory differs")
-    verify_witness_loaders(result["definitions"], loaded, helper)
+    if host == "jvm":
+        require(set(helper) == helpers, "class witness helper class inventory differs")
+    verify_witness_loaders(result["definitions"], loaded, helper, host)
     for entry in classpath_entries:
         path = Path(entry["path"])
         if path.is_dir():
@@ -562,31 +621,38 @@ def _witness(raw, source, metadata, traces, worker, payload, artifact, class_roo
                 not location.query and not location.fragment and
                 Path(unquote(location.path)).resolve() == origins[row["name"]].resolve(),
                 "class witness callback provider differs")
-    for entry in raw["class-load.log"].decode().splitlines():
-        if "[class,redefine]" in entry or "[class,retransform]" in entry:
-            raise Rejected("class witness later definition differs")
+    if host == "jvm":
+        for entry in raw["class-load.log"].decode().splitlines():
+            if "[class,redefine]" in entry or "[class,retransform]" in entry:
+                raise Rejected("class witness later definition differs")
     return {"schema": WITNESS_SCHEMA, "source_sha256": sha(java_source),
             "agent_sha256": sha(rebuilt), "witness_sha256": result["sha256"],
             "definition_count": len(witnessed),
             "definition_inventory_sha256": sha(encoded(result["definitions"])),
             "helper_provider": agent_path.as_uri(), "input_reads": input_proof["reads"],
+            "provider_reads": provider_reads,
             "writer_tids": output_proof["writer_tids"],
             "writer_fd": output_proof["mirror_fd"],
             "destination": output_proof["mirror_destination"]}
 
 
 def _proof(raw, receipt, cases, artifacts, scratch):
+    from run import selected_jdk8_home
+    host = receipt["selected_test"]["host"]
+    require(host in ("jvm", "jvm8"), "numeric producer host differs")
     source = _source(raw, receipt["candidate_commit"], receipt["source_sha256"])
     payload = class_map(raw["compiled-classes.zip"])
     verify_call_edge(payload["test/portable/NumericProbeMatrixTest.class"])
     probe, observation = verify_output(raw["mirror.log"], raw["selected.xml"], cases)
     require(exact(probe, receipt["probe"]), "receipt probe differs from executed marker")
     metadata = decode(raw["trace-command.json"])
-    require(isinstance(metadata, dict) and set(metadata) == {
+    metadata_keys = {
         "command", "tracer", "tracer_version", "trace_arguments", "exit", "mirror", "class_root",
         "arguments_log", "class_load_log", "seconds", "bytes", "members", "compiled_before_sha256",
         "compiled_after_sha256", "mirror_identity", "sidecar_runtime", "agent_path",
-        "witness_path", "agent_identity", "witness_identity", "agent_sha256"},
+        "witness_path", "agent_identity", "witness_identity", "agent_sha256"}
+    require(isinstance(metadata, dict) and set(metadata) ==
+            (metadata_keys | {"jdk8_home", "provider_inputs"} if host == "jvm8" else metadata_keys),
             "trace command schema differs")
     require(type(metadata["exit"]) is int and metadata["exit"] == 0 and
             metadata["seconds"] == 900 and metadata["bytes"] == MAX_CAPTURE_TOTAL and
@@ -610,13 +676,16 @@ def _proof(raw, receipt, cases, artifacts, scratch):
     traces = {name.split(".")[-1]: data for name, data in raw.items() if name.startswith("process/")}
     runtime = receipt["runtime"]
     expected_executable = runtime.get("executable")
+    selected_home = Path(metadata["jdk8_home"]) if host == "jvm8" else WITNESS_JDK
     require(type(expected_executable) is str and
-            expected_executable == str(WITNESS_JDK / "bin/java") and
+            expected_executable == str(selected_home / "bin/java") and
+            (selected_jdk8_home(selected_home) == selected_home if host == "jvm8" else
+             selected_home == WITNESS_JDK) and
             Path(expected_executable).is_file() and
             digest(expected_executable) == runtime.get("executable_sha256"),
             "worker runtime executable differs")
     selected_exec = select_worker_exec(traces, expected_executable)
-    executable, argv, startup, response_path, response, tokens = _startup(raw, selected_exec)
+    executable, argv, startup, response_path, response, tokens = _startup(raw, selected_exec, host)
     proof = verify_transport(traces, metadata["mirror"], raw["mirror.log"], selected_exec,
                              response_path, response, mirror_identity=mirror_identity)
     require(proof["worker_pid"] == selected_exec[0], "selected worker transport identity differs")
@@ -635,19 +704,41 @@ def _proof(raw, receipt, cases, artifacts, scratch):
             "-PportableClassWitnessAgent=" + metadata["agent_path"] in command and
             "-PportableClassWitnessOutput=" + metadata["witness_path"] in command,
             "capture command or selected task differs")
+    if host == "jvm8":
+        require("-PportableJvm8=true" in command and
+                "-Dorg.gradle.java.installations.paths=" + str(selected_home) in command and
+                "-PportableWorkerClassLoadLog=" not in " ".join(command),
+                "Java 8 selected launcher differs")
     require(any("execve(" + json.dumps(command[0]) + ", " + json.dumps(command) + ", " in line and
                 line.endswith(" = 0") for line in traces[root].decode().splitlines()),
             "traced root invocation differs")
     require(metadata["trace_arguments"] == trace_arguments(), "tracer invocation differs")
-    verify_startup_log(raw["worker-arguments.log"], proof["worker_pid"], startup,
-                       metadata["agent_path"], metadata["witness_path"], metadata["mirror"],
-                       metadata["arguments_log"].replace(proof["worker_pid"], "%p"),
-                       metadata["class_load_log"].replace(proof["worker_pid"], "%p"))
+    if host == "jvm":
+        verify_startup_log(raw["worker-arguments.log"], proof["worker_pid"], startup,
+                           metadata["agent_path"], metadata["witness_path"], metadata["mirror"],
+                           metadata["arguments_log"].replace(proof["worker_pid"], "%p"),
+                           metadata["class_load_log"].replace(proof["worker_pid"], "%p"))
+    else:
+        require(metadata["arguments_log"] is None and metadata["class_load_log"] is None and
+                not any(token.startswith(("-Xlog:", "-agentlib:", "-agentpath:",
+                                          "-Xbootclasspath", "-Djava.system.class.loader="))
+                        for token in tokens), "Java 8 worker startup option differs")
+        allowed = {"-XX:+DisableAttachMechanism", "-Xshare:off", "-XX:-UsePerfData",
+                   "-Xmx512m", "-Dfile.encoding=UTF-8", "-Duser.country",
+                   "-Duser.language=en", "-Duser.variant", "-ea"}
+        prefixes = ("-Djava.io.tmpdir=", "-Dorg.gradle.internal.worker.tmpdir=",
+                    "-Dportable.numericProbeMirror=")
+        flags = tokens[1:tokens.index("-cp")]
+        require(len(flags) == len(set(flags)) and all(
+            flag in allowed or flag.startswith(prefixes) or flag ==
+            "-javaagent:" + metadata["agent_path"] + "=" + metadata["witness_path"]
+            for flag in flags), "Java 8 worker has unknown startup option")
     require(all(tokens.count(option) == 1 for option in (
                 "-javaagent:" + metadata["agent_path"] + "=" + metadata["witness_path"],
                 "-XX:+DisableAttachMechanism", "-Xshare:off")),
             "traced worker guard arguments differ")
-    for field, file in (("arguments_log", "worker-arguments.log"), ("class_load_log", "class-load.log")):
+    for field, file in ((("arguments_log", "worker-arguments.log"),
+                         ("class_load_log", "class-load.log")) if host == "jvm" else ()):
         aux = verify_transport(traces, metadata[field], raw[file], selected_exec,
                                exclusive=False, ordered=False)
         require(aux["worker_pid"] == selected_exec[0], "worker auxiliary log identity differs")
@@ -664,8 +755,19 @@ def _proof(raw, receipt, cases, artifacts, scratch):
     require(class_root == PORTABLE / "build/classes/kotlin/jvm", "compiled provider root differs")
     require(archive_classes(class_root) == raw["compiled-classes.zip"],
             "current compiled payload differs")
+    if host == "jvm8":
+        require_java8_classes(payload, Path(artifacts["target"]), raw["class-witness-agent.jar"])
+        expected = {name.split("/", 1)[1].removesuffix(".class"): data
+                    for name, data in payload.items()}
+        with zipfile.ZipFile(artifacts["target"]) as engine:
+            expected.update({name.removesuffix(".class"): engine.read(name)
+                             for name in engine.namelist()
+                             if name.startswith("org/dyn4j/") and name.endswith(".class")})
+        successful = read_witness(raw["class-witness.log"], expected)["loaded"]
+    else:
+        successful = None
     entries, origins = _providers(raw, observation, startup, payload, Path(artifacts["target"]),
-                                  class_root, proof["worker_pid"])
+                                  class_root, proof["worker_pid"], host, successful)
     require(exact(decode(raw["classpath-inventory.json"]), entries),
             "captured effective classpath bytes changed")
     require(all(any(entry["path"] == item for entry in entries) for item in startup.split(os.pathsep)),
@@ -675,7 +777,7 @@ def _proof(raw, receipt, cases, artifacts, scratch):
     require(class_map(rebuilt) == payload, "independent deterministic recompilation differs")
     proof["class_witness"] = _witness(raw, source, metadata, traces, proof["worker_pid"],
                                       payload, Path(artifacts["target"]), class_root,
-                                      entries, selected_exec, scratch)
+                                      entries, selected_exec, scratch, host)
     proof.update({"runtime_executable_sha256": digest(executable),
                   "classpath_sha256": sha(encoded(entries)),
                   "class_archive_sha256": sha(raw["compiled-classes.zip"]),
@@ -713,13 +815,16 @@ def _validate_proof(proof):
     require(isinstance(witness, dict) and set(witness) == {
                 "schema", "source_sha256", "agent_sha256", "witness_sha256",
                 "definition_count", "definition_inventory_sha256", "helper_provider",
-                "input_reads", "writer_tids", "writer_fd", "destination"} and
+                "input_reads", "provider_reads", "writer_tids", "writer_fd", "destination"} and
             witness["schema"] == WITNESS_SCHEMA and
             all(type(witness[field]) is str and re.fullmatch(r"[0-9a-f]{64}", witness[field])
                 for field in ("source_sha256", "agent_sha256", "witness_sha256",
                               "definition_inventory_sha256")) and
             type(witness["definition_count"]) is int and witness["definition_count"] >= 3 and
             type(witness["input_reads"]) is int and witness["input_reads"] > 0 and
+            isinstance(witness["provider_reads"], dict) and
+            set(witness["provider_reads"]) in (set(), {"engine", *CRITICAL_CLASS_FILES}) and
+            all(type(value) is int and value > 0 for value in witness["provider_reads"].values()) and
             type(witness["helper_provider"]) is str and witness["helper_provider"].startswith("file:/") and
             type(witness["writer_tids"]) is list and witness["writer_tids"] and
             all(pid(value) for value in witness["writer_tids"]) and
@@ -745,8 +850,9 @@ def verify(lane, commit, source_sha256, trace_sha256, artifacts, runtime, *, scr
             "numeric producer full-lane receipt differs")
     require(receipt["artifact_sha256"] == {name: digest(path) for name, path in artifacts.items()} and
             receipt["runtime"] == runtime, "numeric producer artifact or runtime differs")
+    host = lane.name
     require(receipt["selected_test"] == {"class": CLASS, "method": METHOD,
-            "task": "jvmTest", "host": "jvm"} and lane.name == "jvm",
+            "task": "jvmTest", "host": host} and host in ("jvm", "jvm8"),
             "numeric producer selected identity differs")
     require(type(runtime.get("method_executions")) is int and runtime["method_executions"] == 15,
             "numeric producer lane is not complete")
@@ -759,7 +865,7 @@ def verify(lane, commit, source_sha256, trace_sha256, artifacts, runtime, *, scr
     require(receipt["geometry_case_sha256"] == {case: sha(raw) for case, raw in cases.items()},
             "numeric producer geometry slice digest differs")
     _validate_proof(receipt["proof"])
-    raw = load_raw(lane / "numeric-probe", receipt["files"])
+    raw = load_raw(lane / "numeric-probe", receipt["files"], host)
     if scratch is None:
         scratch = Path(tempfile.mkdtemp(prefix="numeric-replay-", dir=Path.home())) / "rebuild"
     scratch = Path(scratch).resolve()
@@ -775,11 +881,14 @@ def verify(lane, commit, source_sha256, trace_sha256, artifacts, runtime, *, scr
     return {"status": "PASSED_BOUND_PRODUCER", "proof": proof["class_witness"]}
 
 
-def capture(output, scratch):
+def capture(output, scratch, host="jvm", jdk8_home=None):
     from actual_arithmetic import _source_archive
     from capture_actual import CaptureBudget, stop_capture_process
-    from run import clean_identity, method_command
+    from run import clean_identity, method_command, selected_jdk8_home
     output, scratch = Path(output).resolve(), Path(scratch).resolve()
+    require(host in ("jvm", "jvm8"), "numeric producer host differs")
+    if host == "jvm8":
+        jdk8_home = selected_jdk8_home(jdk8_home)
     require(not output.exists() and not scratch.exists() and
             output.is_relative_to(Path.home().resolve()) and
             scratch.is_relative_to(Path.home().resolve()), "capture paths must be new and home-backed")
@@ -803,9 +912,10 @@ def capture(output, scratch):
     (output / "source.tar").write_bytes(source)
     agent = output / "class-witness-agent.jar"
     witness = output / "class-witness.log"
-    configured_jdk = Path(env["JAVA_HOME"])
-    expected_executable = str(configured_jdk / "bin/java")
-    require(configured_jdk == WITNESS_JDK and Path(expected_executable).is_file(),
+    configured_jdk = WITNESS_JDK
+    worker_jdk = jdk8_home if host == "jvm8" else configured_jdk
+    expected_executable = str(worker_jdk / "bin/java")
+    require(configured_jdk.is_dir() and Path(expected_executable).is_file(),
             "configured worker executable is unavailable")
     build_agent((PORTABLE / "class_witness/NumericClassWitness.java").read_bytes(),
                 configured_jdk, agent, scratch / "witness-compile")
@@ -814,15 +924,19 @@ def capture(output, scratch):
     mirror = output / "mirror.log"
     argument_pattern = scratch / "arguments-%p.log"
     class_pattern = scratch / "classes-%p.log"
-    env["JAVA_TOOL_OPTIONS"] += (
-        " -Xlog:arguments=info:file=" + str(argument_pattern) + ":pid,level,tags:filecount=0")
-    command, _ = method_command("jvm", METHOD, output)
+    if host == "jvm":
+        env["JAVA_TOOL_OPTIONS"] += (
+            " -Xlog:arguments=info:file=" + str(argument_pattern) + ":pid,level,tags:filecount=0")
+    command, _ = method_command(host, METHOD, output, jdk8_home, trace_jvm8=False)
     command[command.index("--tests") + 1] = CLASS + "." + METHOD
-    command += ["--offline", "--max-workers=2", "-Pkotlin.compiler.execution.strategy=in-process",
+    command += ["--offline", "--max-workers=1",
                 "-PportableNumericProbeMirror=" + str(mirror),
-                "-PportableWorkerClassLoadLog=" + str(class_pattern),
                 "-PportableClassWitnessAgent=" + str(agent),
                 "-PportableClassWitnessOutput=" + str(witness)]
+    if host == "jvm":
+        command.append("-Pkotlin.compiler.execution.strategy=in-process")
+    if host == "jvm":
+        command.append("-PportableWorkerClassLoadLog=" + str(class_pattern))
     tracer = shutil.which("strace")
     require(tracer is not None, "strace is unavailable")
     version = subprocess.run([tracer, "--version"], env=env, capture_output=True,
@@ -872,37 +986,51 @@ def capture(output, scratch):
         (output / "direct-classpath.json").write_bytes(encoded(argv))
     require((output / "worker-classpath.txt").exists() or
             (output / "direct-classpath.json").exists(), "live response capture missed worker")
-    for source_path, name in ((PORTABLE / "build/test-results/jvmTest" / ("TEST-" + CLASS + ".xml"),
-                              "selected.xml"),
-                             (Path(str(argument_pattern).replace("%p", worker)), "worker-arguments.log"),
-                             (Path(str(class_pattern).replace("%p", worker)), "class-load.log")):
+    copies = [(PORTABLE / "build/test-results/jvmTest" / ("TEST-" + CLASS + ".xml"),
+               "selected.xml")]
+    if host == "jvm":
+        copies.extend(((Path(str(argument_pattern).replace("%p", worker)), "worker-arguments.log"),
+                       (Path(str(class_pattern).replace("%p", worker)), "class-load.log")))
+    for source_path, name in copies:
         require(source_path.is_file() and source_path.stat().st_size <= MAX_MEMBER,
                 "required selected worker raw output unavailable")
         shutil.copyfile(source_path, output / name)
     from run import artifacts
     retained = {path.name: path.read_bytes() for path in output.iterdir() if path.is_file()}
-    _, _, startup, _, _, _ = _startup(retained, (worker, executable, selected_argv))
+    _, _, startup, _, _, _ = _startup(retained, (worker, executable, selected_argv), host)
     observations = [decode(line[len(b"NUMERICAL_PROVIDER_JSON "):])
                     for line in retained["mirror.log"].splitlines()
                     if line.startswith(b"NUMERICAL_PROVIDER_JSON ")]
     require(len(observations) == 1, "capture provider observation is missing")
-    entries, _ = _providers(retained, observations[0], startup, class_map(before),
-                            artifacts("jvm")["target"], class_root, worker)
+    payload = class_map(before)
+    if host == "jvm8":
+        require_java8_classes(payload, artifacts(host)["target"], agent.read_bytes())
+        expected = {name.split("/", 1)[1].removesuffix(".class"): data
+                    for name, data in payload.items()}
+        with zipfile.ZipFile(artifacts(host)["target"]) as engine:
+            expected.update({name.removesuffix(".class"): engine.read(name)
+                             for name in engine.namelist()
+                             if name.startswith("org/dyn4j/") and name.endswith(".class")})
+        successful = read_witness(witness.read_bytes(), expected)["loaded"]
+    else:
+        successful = None
+    entries, _ = _providers(retained, observations[0], startup, payload,
+                            artifacts(host)["target"], class_root, worker, host, successful)
     (output / "classpath-inventory.json").write_bytes(encoded(entries))
     bounded_command([executable, "-version"], ROOT, scratch, output / "runtime-version.log", 10)
     from run import _java_version_line
     version_output = (output / "runtime-version.log").read_text()
     runtime_version = _java_version_line(subprocess.CompletedProcess([], 0, version_output, ""))
-    dependency = artifacts("jvm")["target"]
-    sidecar_runtime = {"host": "jvm", "os": platform.platform(),
+    dependency = artifacts(host)["target"]
+    sidecar_runtime = {"host": host, "os": platform.platform(),
                        "machine": platform.machine(), "executable": executable,
                        "executable_sha256": digest(executable), "version": runtime_version,
                        "dependency_sha256": digest(dependency)}
     metadata = {"command": command, "tracer": tracer, "tracer_version": version,
                 "trace_arguments": tracer_arguments, "exit": process.returncode,
                 "mirror": str(mirror), "class_root": str(class_root),
-                "arguments_log": str(argument_pattern).replace("%p", worker),
-                "class_load_log": str(class_pattern).replace("%p", worker),
+                "arguments_log": str(argument_pattern).replace("%p", worker) if host == "jvm" else None,
+                "class_load_log": str(class_pattern).replace("%p", worker) if host == "jvm" else None,
                 "seconds": 900, "bytes": MAX_CAPTURE_TOTAL, "members": MAX_MEMBERS,
                 "compiled_before_sha256": sha(before), "compiled_after_sha256": sha(after),
                 "mirror_identity": captured_file_identity(mirror),
@@ -911,8 +1039,14 @@ def capture(output, scratch):
                 "agent_identity": agent_identity,
                 "witness_identity": captured_file_identity(witness),
                 "agent_sha256": agent_sha}
+    if host == "jvm8":
+        metadata["jdk8_home"] = str(jdk8_home)
+        metadata["provider_inputs"] = {
+            "engine": captured_file_identity(dependency),
+            **{name: captured_file_identity(class_root / relative)
+               for name, relative in CRITICAL_CLASS_FILES.items()}}
     (output / "trace-command.json").write_bytes(encoded(metadata))
-    load_raw(output, inventory(output))
+    load_raw(output, inventory(output), host)
     require(clean_identity() == (commit, source_sha), "source changed during capture")
     return {"candidate_commit": commit, "source_sha256": source_sha, "files": inventory(output)}
 
@@ -922,7 +1056,7 @@ def seal(captured, lane, baseline, attestation, scratch):
     from prospective_compare import compare_host
     from run import comparison_coverage
     lane, captured = Path(lane), Path(captured)
-    require(lane.name == "jvm" and not (lane / "numeric-probe-receipt.json").exists() and
+    require(lane.name in ("jvm", "jvm8") and not (lane / "numeric-probe-receipt.json").exists() and
             not (lane / "numeric-probe").exists(), "numeric producer lane is already sealed")
     # The full comparator validates source, artifacts, runtime, reference, and 332-case coverage.
     compare_host(baseline, lane, comparison_coverage()["frozen_case_ids"], attestation)
@@ -931,7 +1065,7 @@ def seal(captured, lane, baseline, attestation, scratch):
     from run import method_case_ids
     cases = {case: (lane / "cases" / (case + ".jsonl")).read_bytes() for case in method_case_ids(METHOD)}
     files = inventory(captured)
-    raw = load_raw(captured, files)
+    raw = load_raw(captured, files, lane.name)
     metadata = decode(raw["trace-command.json"])
     require(isinstance(metadata, dict) and
             metadata.get("mirror_identity") == captured_file_identity(captured / "mirror.log"),
@@ -942,13 +1076,13 @@ def seal(captured, lane, baseline, attestation, scratch):
                "primary_receipt_sha256": digest(lane / "receipt.json"),
                "geometry_case_sha256": {case: sha(data) for case, data in cases.items()},
                "artifact_sha256": primary["artifact_sha256"], "runtime": primary["runtime"],
-               "selected_test": {"class": CLASS, "method": METHOD, "task": "jvmTest", "host": "jvm"},
+               "selected_test": {"class": CLASS, "method": METHOD, "task": "jvmTest", "host": lane.name},
                "probe": probe, "files": files}
     scratch = Path(scratch).resolve()
     require(not scratch.exists() and scratch.is_relative_to(Path.home().resolve()),
             "seal scratch must be new and home-backed")
     scratch.mkdir(parents=True)
-    receipt["proof"] = _proof(raw, receipt, cases, artifacts("jvm"), scratch)
+    receipt["proof"] = _proof(raw, receipt, cases, artifacts(lane.name), scratch)
     require(inventory(captured) == files, "capture changed during seal")
     shutil.copytree(captured, lane / "numeric-probe")
     require(inventory(lane / "numeric-probe") == files, "sealed copy differs")
@@ -957,12 +1091,46 @@ def seal(captured, lane, baseline, attestation, scratch):
     return receipt
 
 
+def replay_pilot(captured, scratch, host="jvm8"):
+    from run import artifacts, clean_identity, method_case_ids
+    captured = Path(captured)
+    require(host == "jvm8", "pilot host differs")
+    raw = load_raw(captured, inventory(captured), host)
+    mirror = raw["mirror.log"]
+    slices = {}
+    for line in mirror.splitlines(keepends=True):
+        if line.startswith(b"NUMERICAL_JSON "):
+            row = decode(line[len(b"NUMERICAL_JSON "):])
+            slices.setdefault(row["id"], []).append(line[len(b"NUMERICAL_JSON "):])
+    require(set(slices) == set(method_case_ids(METHOD)),
+            "pilot original case inventory differs")
+    cases = {name: b"".join(rows) for name, rows in slices.items()}
+    markers = [decode(line[len(b"NUMERICAL_PROBE_JSON "):])
+               for line in mirror.splitlines() if line.startswith(b"NUMERICAL_PROBE_JSON ")]
+    require(len(markers) == 1, "pilot probe marker differs")
+    metadata = decode(raw["trace-command.json"])
+    commit, source_sha = clean_identity()
+    receipt = {"candidate_commit": commit, "source_sha256": source_sha,
+               "selected_test": {"class": CLASS, "method": METHOD,
+                                 "task": "jvmTest", "host": host},
+               "probe": markers[0], "runtime": metadata["sidecar_runtime"]}
+    scratch = Path(scratch).resolve()
+    require(not scratch.exists() and scratch.is_relative_to(Path.home().resolve()),
+            "pilot scratch must be new and home-backed")
+    scratch.mkdir(parents=True)
+    proof = _proof(raw, receipt, cases, artifacts(host), scratch)
+    return {"status": "PILOT_ONLY", "host": host, "cases": len(cases),
+            "probe_values": len(markers[0]) - 1, "proof": proof}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="mode", required=True)
     capture_parser = commands.add_parser("capture")
     capture_parser.add_argument("--output", type=Path, required=True)
     capture_parser.add_argument("--scratch", type=Path, required=True)
+    capture_parser.add_argument("--host", choices=("jvm", "jvm8"), default="jvm")
+    capture_parser.add_argument("--jdk8-home", type=Path)
     seal_parser = commands.add_parser("seal")
     seal_parser.add_argument("--captured", type=Path, required=True)
     seal_parser.add_argument("--lane", type=Path, required=True)
@@ -973,11 +1141,16 @@ def main():
     verify_parser.add_argument("--lane", type=Path, required=True)
     verify_parser.add_argument("--baseline", type=Path, required=True)
     verify_parser.add_argument("--attestation", type=Path, required=True)
+    pilot_parser = commands.add_parser("pilot-replay")
+    pilot_parser.add_argument("--captured", type=Path, required=True)
+    pilot_parser.add_argument("--scratch", type=Path, required=True)
     args = parser.parse_args()
     if args.mode == "capture":
-        result = capture(args.output, args.scratch)
+        result = capture(args.output, args.scratch, args.host, args.jdk8_home)
     elif args.mode == "seal":
         result = seal(args.captured, args.lane, args.baseline, args.attestation, args.scratch)
+    elif args.mode == "pilot-replay":
+        result = replay_pilot(args.captured, args.scratch)
     else:
         from prospective_compare import compare_host
         from run import comparison_coverage

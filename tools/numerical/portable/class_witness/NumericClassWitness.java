@@ -3,7 +3,6 @@ package dyn4k.witness;
 import java.io.IOException;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
-import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -13,10 +12,12 @@ import java.nio.file.StandardOpenOption;
 import java.security.CodeSource;
 import java.security.MessageDigest;
 import java.security.ProtectionDomain;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Locale;
 import java.util.Set;
+import java.util.Map;
 
 public final class NumericClassWitness {
     private static final String[] CRITICAL = {
@@ -30,11 +31,15 @@ public final class NumericClassWitness {
         new IdentityHashMap<ClassLoader, String>();
     private static int count;
     private static boolean failed;
+    private static Instrumentation instrument;
+    private static int state;
+    private static final Map<String, String> definitions = new HashMap<String, String>();
 
     private NumericClassWitness() {}
 
     private static boolean relevant(String name) {
-        return name != null && (name.startsWith("portable/") || name.startsWith("org/dyn4j/"));
+        return name != null && name.indexOf("$$Lambda$") < 0 &&
+            (name.startsWith("portable/") || name.startsWith("org/dyn4j/"));
     }
 
     private static void provider(Class<?> type, Path jar) throws Exception {
@@ -65,8 +70,11 @@ public final class NumericClassWitness {
     private static synchronized void record(ClassLoader loader, String name,
                                              Class<?> redefining, ProtectionDomain domain,
                                              byte[] bytes) {
+        if (state != 0 || redefining != null) {
+            Runtime.getRuntime().halt(86);
+        }
         try {
-            if (redefining != null || bytes == null || !seen.add(name) || domain == null ||
+            if (bytes == null || !seen.add(name) || domain == null ||
                 domain.getCodeSource() == null) {
                 throw new IllegalStateException("class witness definition is ambiguous");
             }
@@ -88,6 +96,7 @@ public final class NumericClassWitness {
                 throw new IllegalStateException("class witness record is malformed");
             }
             count++;
+            definitions.put(name, id + "\t" + origin);
             write("CLASS\t" + count + "\t" + name + "\t" + hash(bytes) + "\t" + id +
                   "\t" + origin + "\tjava:" + Thread.currentThread().getId() + "\n");
         } catch (Throwable error) {
@@ -108,10 +117,42 @@ public final class NumericClassWitness {
 
     private static synchronized void finish() {
         try {
+            state = 1;
             for (String name : CRITICAL) {
                 if (!seen.contains(name)) {
                     failed = true;
                 }
+            }
+            write("SEALED\t" + count + "\n");
+            Set<String> loadedNames = new HashSet<String>();
+            int loadedCount = 0;
+            for (Class<?> type : instrument.getAllLoadedClasses()) {
+                String name = type.getName().replace('.', '/');
+                if (!relevant(name)) {
+                    continue;
+                }
+                if (!loadedNames.add(name)) {
+                    failed = true;
+                    continue;
+                }
+                ClassLoader loader = type.getClassLoader();
+                String id = loader == null ? "bootstrap" :
+                    loader == ClassLoader.getSystemClassLoader() ? "system" : loaders.get(loader);
+                CodeSource source = type.getProtectionDomain().getCodeSource();
+                if (id == null || source == null) {
+                    failed = true;
+                    continue;
+                }
+                String origin = source.getLocation().toURI().toASCIIString();
+                if (!(id + "\t" + origin).equals(definitions.get(name))) {
+                    failed = true;
+                }
+                loadedCount++;
+                write("LOADED\t" + loadedCount + "\t" + name + "\t" + id +
+                      "\t" + origin + "\n");
+            }
+            if (!loadedNames.equals(seen) || loadedCount != count) {
+                failed = true;
             }
             String status = failed ? "FAIL" : "OK";
             String start = "END\t" + status + "\t" + count + "\t";
@@ -122,6 +163,7 @@ public final class NumericClassWitness {
                 failed = true;
             }
             output.close();
+            state = 2;
         } catch (Throwable error) {
             failed = true;
         }
@@ -148,10 +190,11 @@ public final class NumericClassWitness {
         ByteBuffer.allocate(1);
         Path path = Paths.get(destination);
         output = FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-        write("BEGIN\tclass-witness/1\n");
+        write("BEGIN\tclass-witness/2\n");
         Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
             @Override public void run() { finish(); }
         }, "numeric-class-witness-finish"));
+        instrument = instrumentation;
         instrumentation.addTransformer(new Observer(), false);
     }
 }

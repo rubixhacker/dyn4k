@@ -41,8 +41,11 @@ def record(name="portable/PortableMatrixTest", value=b"class", origin="file:/fix
             + "\tL1\t" + origin + "\tjava:1\n").encode()
 
 
-def witness(rows=None, status="OK"):
-    body = b"BEGIN\tclass-witness/1\n" + (record() if rows is None else rows)
+def witness(rows=None, status="OK", loaded=None):
+    callback = record() if rows is None else rows
+    snapshot = (b"LOADED\t1\tportable/PortableMatrixTest\tL1\tfile:/fixture/\n"
+                if loaded is None else loaded)
+    body = b"BEGIN\tclass-witness/2\n" + callback + b"SEALED\t1\n" + snapshot
     end = f"END\t{status}\t1\t"
     return body + (end + f"{len(body) + len(end) + 21:020d}\n").encode()
 
@@ -62,11 +65,15 @@ class ClassWitnessTest(unittest.TestCase):
         expected = {"portable/PortableMatrixTest": b"class"}
         good = witness()
         self.assertEqual(read_witness(good, expected)["definitions"][0]["thread"], "java:1")
+        self.assertEqual(read_witness(good, expected)["loaded"][0]["loader"], "L1")
         failures = (good.replace(b"END\tOK", b"END\tFAIL"), good[:-31],
                     good.replace(hashlib.sha256(b"class").hexdigest().encode(), b"0" * 64),
                     good.replace(b"file:/fixture/", b"file:/shadow/"),
                     good.replace(b"java:1", b"os:1"),
-                    witness(record() + record().replace(b"CLASS\t1", b"CLASS\t2")))
+                    witness(record() + record().replace(b"CLASS\t1", b"CLASS\t2")),
+                    witness(loaded=b""),
+                    witness(loaded=b"LOADED\t1\tportable/PortableMatrixTest\tL2\tfile:/fixture/\n"),
+                    witness(loaded=b"LOADED\t1\tportable/PortableMatrixTest\tL1\tfile:/shadow/\n"))
         for invalid in failures:
             with self.subTest(invalid=invalid[:40]), self.assertRaises(Rejected):
                 read_witness(invalid, expected, {"portable/PortableMatrixTest": "file:/fixture/"})
@@ -109,6 +116,16 @@ class ClassWitnessTest(unittest.TestCase):
             self.assertEqual(successful.stdout, b"75\n")
             records = read_witness(witness_path.read_bytes(), expected)
             self.assertEqual(len(records["definitions"]), 3)
+            self.assertEqual(len(records["loaded"]), 3)
+            witness_path.unlink()
+            jdk8 = Path("/var/home/stewart/dyn4k-resume-20261022-yZgd7q/jdk8-preparation/jdk8u504-b01")
+            java8 = [str(jdk8 / "bin/java"), "-XX:+DisableAttachMechanism", "-Xshare:off",
+                     "-javaagent:" + str(agent) + "=" + str(witness_path),
+                     "-cp", str(classes), "Main"]
+            java8_result = subprocess.run(java8, capture_output=True, check=False, timeout=30)
+            self.assertEqual(java8_result.returncode, 0, java8_result.stderr.decode())
+            self.assertEqual(java8_result.stdout, b"75\n")
+            self.assertEqual(len(read_witness(witness_path.read_bytes(), expected)["loaded"]), 3)
             self.assertIn("portable.PortableMatrixTest source:",
                           (root / "loads.log").read_text())
             tracer = shutil.which("strace")
@@ -165,6 +182,50 @@ class ClassWitnessTest(unittest.TestCase):
             substituted = subprocess.run(command, capture_output=True, check=False, timeout=30)
             self.assertNotEqual(substituted.returncode, 0)
             self.assertFalse(witness_path.exists())
+
+    def test_relevant_load_after_seal_forces_nonzero_java8_exit(self):
+        jdk8 = Path("/var/home/stewart/dyn4k-resume-20261022-yZgd7q/jdk8-preparation/jdk8u504-b01")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            agent = root / "agent.jar"
+            build_agent(SOURCE.read_bytes(), JDK, agent, root / "agent-build")
+            classes = root / "classes"
+            classes.mkdir()
+            package = root / "src/portable"
+            package.mkdir(parents=True)
+            for name in ("NumericProbeMatrixTest", "PortableMatrixTest", "NumericalRecorder",
+                         "LateRelevant"):
+                (package / (name + ".java")).write_text(
+                    "package portable; public class " + name + " {}")
+            main = root / "src/LateMain.java"
+            main.write_text("""public class LateMain {
+                public static void main(String[] args) throws Exception {
+                    Class.forName("portable.NumericProbeMatrixTest");
+                    Class.forName("portable.PortableMatrixTest");
+                    Class.forName("portable.NumericalRecorder");
+                    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                        try {
+                            while (!new String(java.nio.file.Files.readAllBytes(
+                                java.nio.file.Paths.get(args[0])), "US-ASCII").contains("SEALED")) {
+                                Thread.sleep(5);
+                            }
+                            Class.forName("portable.LateRelevant");
+                        } catch (Exception failure) { throw new RuntimeException(failure); }
+                    }));
+                }
+            }""")
+            compiled = subprocess.run([str(JDK / "bin/javac"), "--release", "8", "-d",
+                                       str(classes), str(main),
+                                       *map(str, sorted(package.glob("*.java")))],
+                                      capture_output=True, timeout=30)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr.decode())
+            witness_path = root / "witness.log"
+            result = subprocess.run([str(jdk8 / "bin/java"), "-XX:+DisableAttachMechanism",
+                                     "-Xshare:off", "-javaagent:" + str(agent) + "=" + str(witness_path),
+                                     "-cp", str(classes), "LateMain", str(witness_path)],
+                                    capture_output=True, timeout=30)
+            self.assertEqual(result.returncode, 86, result.stderr.decode())
+            self.assertIn(b"SEALED\t", witness_path.read_bytes())
 
 
 if __name__ == "__main__":
