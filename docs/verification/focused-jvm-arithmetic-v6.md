@@ -44,7 +44,7 @@ The observer also checks protected operands before interpreter exec. Unprotected
 
 Every other operation-marked write stream remains visible. Version 6 requires complete XML-ordered marker copies and an independent live local socket object with all writes and a final close across proved shared-table threads. This is a local output classification. It does not identify the remote peer or the application protocol. Unknown or partial marked channels reject. Versions 3 through 5 retain their single marked stream rule. The JDWP socket and handshake proof stays separate.
 
-The socket proof credits only complete writes that the projected writer can model. It rejects other output calls on that live socket, including vector writes, sends and file-to-socket transfers. It checks output operands without treating FD digits or path text in quoted payloads as operands.
+The socket proof credits complete writes from every proved shared-table writer on the selected live object, including writers whose own stream has no operation marker. It compares every such raw write with the same thread and descriptor in the checked projected ZIP. It rejects missing or changed projected writes and markers split across writes. The legacy writer check still requires each marked stream to contain the complete ordered XML marker lines. Other output calls on the live socket, including vector writes, sends and file-to-socket transfers, reject. The proof checks output operands without treating FD digits or path text in quoted payloads as operands.
 
 ## Capture and replay
 

@@ -267,9 +267,47 @@ class FocusedReplayTest(unittest.TestCase):
             b'1.000003 socket(')
         traces = {"41": shared_parent, "42": child, "43": extra}
         from numeric_producer_trace import _events
+        selected, proof = actual_output_v6.prove_socket_writers(
+            traces, _events(traces, ()), "41", ("41", "59"))
+        self.assertEqual(selected, frozenset({("42", "56")}))
+        self.assertEqual(proof[0]["writes"], 2)
+        self.assertEqual(proof[0]["writer_threads"], ["42", "43"])
+        self.assertFalse(proof[0]["projected_bound"])
+        after_close = extra.replace(b"1.0000061 write(", b"1.0000071 write(")
         with self.assertRaises(Rejected):
+            late_traces = {"41": shared_parent, "42": child, "43": after_close}
             actual_output_v6.prove_socket_writers(
-                traces, _events(traces, ()), "41", ("41", "59"))
+                late_traces, _events(late_traces, ()), "41", ("41", "59"))
+        def projected(extra_payload=b"x", include_extra=True):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as archive:
+                archive.writestr("trace.42", "write(56, " +
+                                 json.dumps(copy.decode()) + ", " +
+                                 str(len(copy)) + ") = " + str(len(copy)) + "\n")
+                archive.writestr("trace.43", ("write(56, " +
+                    json.dumps(extra_payload.decode()) + ", " +
+                    str(len(extra_payload)) + ") = " +
+                    str(len(extra_payload)) + "\n") if include_extra else "")
+            return output.getvalue()
+        _, bound = actual_output_v6.prove_socket_writers(
+            traces, _events(traces, ()), "41", ("41", "59"),
+            projected_archive=projected())
+        self.assertTrue(bound[0]["projected_bound"])
+        for changed in (projected(include_extra=False), projected(b"y")):
+            with self.assertRaisesRegex(Rejected, "projected socket stream differs"):
+                actual_output_v6.prove_socket_writers(
+                    traces, _events(traces, ()), "41", ("41", "59"),
+                    projected_archive=changed)
+        split = child.replace(
+            json.dumps(copy.decode()).encode(),
+            json.dumps((copy + b"NUMERICAL_").decode()).encode()).replace(
+            f'{len(copy)}) = {len(copy)}'.encode(),
+            f'{len(copy) + 10}) = {len(copy) + 10}'.encode())
+        split_extra = extra.replace(b'"x", 1) = 1', b'"JSON {}\\n", 8) = 8')
+        with self.assertRaisesRegex(Rejected, "socket marker crosses writes"):
+            split_traces = {"41": shared_parent, "42": split, "43": split_extra}
+            actual_output_v6.prove_socket_writers(
+                split_traces, _events(split_traces, ()), "41", ("41", "59"))
         child_extra = child.replace(
             b'1.000007 close(',
             b'1.0000061 write(56<TCP:[local->remote]>, "x", 1) = 1\n'

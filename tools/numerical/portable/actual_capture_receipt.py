@@ -470,7 +470,9 @@ def _output_proof(files, metadata, traces, events, worker, transport, environmen
     socket_keys, sockets = actual_output_v6.prove_socket_writers(
         worker_traces, worker_events, selected[0],
         (mirror["mirror_writer_tid"], mirror["mirror_fd"]),
-        verified_class_reads)
+        verified_class_reads, worker["legacy_zip"])
+    require(all(proof["projected_bound"] for proof in sockets),
+            "version 6 socket projection is unbound")
     binding = actual_arithmetic.V6WriterBinding(
         sha(worker["legacy_zip"]),
         (mirror["mirror_writer_tid"], mirror["mirror_fd"]), socket_keys)

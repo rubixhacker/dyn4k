@@ -271,6 +271,39 @@ def _socket_output_operand(call, fd):
     return arguments[position] == fd
 
 
+def _projected_socket_writes(archive, fd, raw_writes):
+    from actual_arithmetic import _WITNESS_WRITE
+
+    _require(type(archive) is bytes,
+             "version 6 projected socket archive differs")
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as traces:
+            for tid, expected in raw_writes.items():
+                name = "trace." + tid
+                _require(name in traces.namelist(),
+                         "version 6 projected socket writer is missing")
+                observed = []
+                with traces.open(name) as member:
+                    for raw in member:
+                        line = raw.decode("utf-8").rstrip("\n")
+                        match = _WITNESS_WRITE.fullmatch(line)
+                        if match is None:
+                            if re.match(r"write\(" + re.escape(fd) + r"(?=,|\))", line):
+                                raise Rejected("version 6 projected socket write differs")
+                            continue
+                        parsed_fd, literal, requested, written = match.groups()
+                        if parsed_fd != fd:
+                            continue
+                        payload = quoted(literal)
+                        _require(len(payload) == int(requested) == int(written),
+                                 "version 6 projected socket write is incomplete")
+                        observed.append(payload)
+                _require(observed == expected,
+                         "version 6 projected socket stream differs")
+    except (OSError, UnicodeError, zipfile.BadZipFile) as error:
+        raise Rejected("version 6 projected socket archive differs") from error
+
+
 def prove_file_lifetime(traces, events, root, path, data, identity, role):
     _require(role in ROLES and type(data) is bytes and type(identity) is dict,
              "version 6 output role differs")
@@ -388,7 +421,7 @@ def prove_file_lifetime(traces, events, root, path, data, identity, role):
 
 
 def prove_socket_writers(traces, events, root, mirror,
-                         verified_class_reads=frozenset()):
+                         verified_class_reads=frozenset(), projected_archive=None):
     from actual_arithmetic import _WITNESS_PREFIXES
 
     _require(type(mirror) is tuple and len(mirror) == 2,
@@ -435,6 +468,8 @@ def prove_socket_writers(traces, events, root, mirror,
         closed = False
         marked_on_object = set()
         all_writes = 0
+        raw_writes = {}
+        ordered_writes = []
         last_stamp = None
         last_tid = None
         for index, (stamp, tid, _, call) in enumerate(events):
@@ -500,12 +535,12 @@ def prove_socket_writers(traces, events, root, mirror,
             if output and transfer is None:
                 raise Rejected("version 6 socket write is incomplete")
             if transfer and transfer[0] == fd:
-                _require((tid, fd) in sockets,
-                         "version 6 socket writer is outside the proved stream")
                 _require(connects == 1 and
                          transfer[1].startswith(("TCP:[", "TCPv6:[")),
                          "version 6 socket write lacked live connection")
                 all_writes += 1
+                raw_writes.setdefault(tid, []).append(transfer[2])
+                ordered_writes.append(transfer[2])
                 if any(prefix in transfer[2] for prefix in _WITNESS_PREFIXES):
                     marked_on_object.add((tid, fd))
                 continue
@@ -526,8 +561,26 @@ def prove_socket_writers(traces, events, root, mirror,
         _require(provider_count == 1 and connects == 1 and closed and
                  active is None and all_writes >= len(writers),
                  "version 6 socket lifetime is incomplete")
+        complete_stream = b"".join(ordered_writes)
+        for prefix in _WITNESS_PREFIXES:
+            _require(complete_stream.count(prefix) == sum(
+                payload.count(prefix) for payload in ordered_writes),
+                "version 6 socket marker crosses writes")
+        for payload in ordered_writes:
+            for fragment in (b"NUMERICAL_", b"PROSPECTIVE_"):
+                at = payload.find(fragment)
+                while at >= 0:
+                    _require(any(payload.startswith(prefix, at)
+                                 for prefix in _WITNESS_PREFIXES),
+                             "version 6 socket marker is incomplete")
+                    at = payload.find(fragment, at + 1)
+        if projected_archive is not None:
+            _projected_socket_writes(projected_archive, fd, raw_writes)
         proofs.append({"fd": fd, "writes": all_writes,
+                       "writer_threads": sorted(raw_writes, key=int),
                        "writers": sorted(writers, key=int),
+                       "stream_sha256": hashlib.sha256(complete_stream).hexdigest(),
+                       "projected_bound": projected_archive is not None,
                        "scope": "local socket object; peer and protocol unproved"})
     _terminal_stamp(events)
     return frozenset(sockets), proofs
