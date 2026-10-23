@@ -626,6 +626,13 @@ class OutputTest(unittest.TestCase):
 
 
 class StartupTest(unittest.TestCase):
+    def test_worker_selector_rejects_main_name_only_in_application_data(self):
+        from numeric_producer_trace import worker_exec
+        call = ('execve("/jdk/bin/java", ["java", "other.Main", '
+                '"worker.org.gradle.process.internal.worker.GradleWorkerMain", '
+                '"executor"], 0x0) = 0')
+        self.assertIsNone(worker_exec(call, "/jdk/bin/java"))
+
     def test_penultimate_shell_marker_does_not_replace_selected_jvm(self):
         from numeric_producer import _startup
         from numeric_producer_trace import select_worker_exec
@@ -850,6 +857,15 @@ class StartupTest(unittest.TestCase):
                                  "81441a672a57908ea5fd3755252ed168a0c0d02bb2edc17f9cb436fd47cd0b1d")
                 for changed in ({**traces, "2": event(worker, [worker,
                                  "org.gradle.launcher.daemon.bootstrap.GradleDaemon"])},
+                                {**traces, "2": event(str(build), [str(build),
+                                 "other.Main",
+                                 "org.gradle.launcher.daemon.bootstrap.GradleDaemon"])},
+                                {**traces, "2": event(str(build), [str(build),
+                                 "@/private/unproved-options",
+                                 "org.gradle.launcher.daemon.bootstrap.GradleDaemon"])},
+                                {**traces, "1": event(str(build), [str(build),
+                                 "other.Main",
+                                 "/repo/gradle/wrapper/gradle-wrapper.jar"])},
                                 {**traces, "4": event(worker, [worker,
                                  "worker.org.gradle.process.internal.worker.GradleWorkerMain",
                                  "extra"])}):

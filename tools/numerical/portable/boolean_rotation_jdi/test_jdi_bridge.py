@@ -81,7 +81,8 @@ class JdiBridgeTest(unittest.TestCase):
             'close(4</proc/123/fd>) = 0',
             'fcntl(3<pipe:[95]>, F_SETFD, FD_CLOEXEC) = 0',
             'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
-            '["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], '
+            '["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain", '
+            '"executor"], '
             '0x1) = 0',
         ]
 
@@ -93,6 +94,13 @@ class JdiBridgeTest(unittest.TestCase):
 
         self.assertEqual(prove(calls)[1], 9)
         for label, altered in (
+                ("directory closed before stat", calls[:6] +
+                 ['close(4</proc/123/fd>) = 0'] + calls[6:]),
+                ("directory used after close", calls[:8] +
+                 ['fstat(4</proc/123/fd>, {st_mode=S_IFDIR|0700, st_size=0}) = 0'] +
+                 calls[8:]),
+                ("directory closed twice", calls[:8] +
+                 ['close(4</proc/123/fd>) = 0'] + calls[8:]),
                 ("read", calls[:8] + ['read(4</proc/123/fd>, "x", 1) = 1'] + calls[8:]),
                 ("socket", calls[:8] + ['socket(AF_INET, SOCK_STREAM, 0) = 5'] + calls[8:]),
                 ("other open", [call.replace('"/proc/self/fd"',
@@ -107,14 +115,27 @@ class JdiBridgeTest(unittest.TestCase):
     def test_version6_fork_parent_binds_daemon_and_thread_ancestry(self):
         events = [
             (Decimal("1.0"), "10", 0, 'execve("/project/gradlew", ["gradlew"], 0x1) = 0'),
-            (Decimal("1.1"), "10", 1, 'clone(0) = 11'),
+            (Decimal("1.05"), "10", 1,
+             'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+             '["java", "-Xmx64m", "-jar", '
+             '"/project/gradle/wrapper/gradle-wrapper.jar", "jvmTest"], 0x1) = 0'),
+            (Decimal("1.1"), "10", 2,
+             'clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|'
+             'CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x1) = 11'),
             (Decimal("1.2"), "11", 0, 'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
-             '["java", "org.gradle.launcher.daemon.bootstrap.GradleDaemon"], '
+             '["java", "-cp", "/gradle/lib/*", '
+             '"org.gradle.launcher.daemon.bootstrap.GradleDaemon", "9.5.0"], '
              '0x1) = 0'),
-            (Decimal("1.3"), "11", 1, 'clone(CLONE_THREAD|CLONE_FILES) = 12'),
-            (Decimal("1.4"), "12", 0, 'clone(0) = 13'),
+            (Decimal("1.3"), "11", 1,
+             'clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|'
+             'CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|'
+             'CLONE_CHILD_CLEARTID, exit_signal=0}, 88) = 12'),
+            (Decimal("1.4"), "12", 0,
+             'clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|'
+             'CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x1) = 13'),
             (Decimal("1.4"), "13", 0, 'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
-             '["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], '
+             '["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain", '
+             '"executor"], '
              '0x1) = 0'),
         ]
         self.assertEqual(jdi_bridge.verify_gradle_fork_parent_v6(events, 13, 10), 11)
@@ -122,19 +143,60 @@ class JdiBridgeTest(unittest.TestCase):
                 ("wrong parent", [(s, t, i, c.replace("GradleDaemon", "OtherMain"))
                     for s, t, i, c in events]),
                 ("child before birth", events[:-1] + [(Decimal("1.399999"), *events[-1][1:])]),
-                ("disconnected", events[:4] + [(events[4][0], "12", 0, "clone(0) = 14"),
-                    events[5]]),
-                ("intermediate image", events[:4] + [
+                ("disconnected", events[:5] + [(events[5][0], "12", 0,
+                    events[5][3].replace("= 13", "= 14")), events[6]]),
+                ("intermediate image", events[:5] + [
                     (Decimal("1.35"), "12", 0,
                      'execve("/other", ["other"], 0x1) = 0'),
-                    (Decimal("1.4"), "12", 1, 'clone(0) = 13'), events[5]])):
+                    (Decimal("1.4"), "12", 1, events[5][3]), events[6]]),
+                ("missing wrapper image", events[:1] + events[2:]),
+                ("wrapper token in application data", events[:1] + [
+                    (events[1][0], "10", 1,
+                     events[1][3].replace('"-jar", ', '"other.Main", '))]
+                    + events[2:]),
+                ("wrapper from another project", events[:1] + [
+                    (events[1][0], "10", 1,
+                     events[1][3].replace('/project/gradle/wrapper/',
+                                          '/other/gradle/wrapper/'))] + events[2:]),
+                ("daemon token in application data", events[:3] + [
+                    (events[3][0], "11", 0,
+                     events[3][3].replace(
+                         '"org.gradle.launcher.daemon.bootstrap.GradleDaemon",',
+                         '"other.Main", '
+                         '"org.gradle.launcher.daemon.bootstrap.GradleDaemon",'))] +
+                    events[4:]),
+                ("daemon token in classpath", events[:3] + [
+                    (events[3][0], "11", 0,
+                     'execve("/tmp/dyn4k-tools/jdk21/bin/java", '
+                     '["java", "-cp", '
+                     '"org.gradle.launcher.daemon.bootstrap.GradleDaemon", '
+                     '"other.Main", "9.5.0"], 0x1) = 0')] + events[4:]),
+                ("thread birth without sharing", events[:4] + [
+                    (events[4][0], "11", 1,
+                     events[4][3].replace("CLONE_FILES|", ""))] + events[5:]),
+                ("daemon sibling changed image", events[:4] + [
+                    (Decimal("1.25"), "11", 1,
+                     events[4][3].replace("= 12", "= 14")), events[4],
+                    (Decimal("1.35"), "14", 0,
+                     'execve("/other", ["other"], 0x1) = 0')] + events[5:]),
+                ("thread-shaped worker birth", events[:5] + [
+                    (events[5][0], "12", 0, events[4][3].replace("= 12", "= 13"))]
+                    + events[6:]),
+                ("shared process birth", events[:5] + [
+                    (events[5][0], "12", 0,
+                     events[5][3].replace("CLONE_CHILD_CLEARTID|",
+                                          "CLONE_VM|CLONE_FILES|CLONE_CHILD_CLEARTID|"))]
+                    + events[6:]),
+                ("vfork worker birth", events[:5] + [
+                    (events[5][0], "12", 0, 'vfork() = 13')] + events[6:])):
             with self.subTest(label=label), self.assertRaises(jdi_bridge.EvidenceRejected):
                 jdi_bridge.verify_gradle_fork_parent_v6(altered, 13, 10)
 
     def test_version6_raw_transport_requires_live_accept_peer_and_exchange(self):
         worker = (
             b'1.000001 execve("/tmp/dyn4k-tools/jdk21/bin/java", '
-            b'["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain"], '
+            b'["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain", '
+            b'"executor"], '
             b'0x7f) = 0\n'
             b'1.0000011 socket(AF_INET, SOCK_STREAM, IPPROTO_TCP) = 9<TCP:[90]>\n'
             b'1.000002 bind(9<TCP:[90]>, {sa_family=AF_INET, '

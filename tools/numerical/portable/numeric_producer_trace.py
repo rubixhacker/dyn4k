@@ -18,6 +18,7 @@ STRING = r'"(?:[^"\\]|\\.)*"'
 FD = r'([0-9]+)<([^>]+)>'
 MAPPED_FD = r'mmap\([^,]+, [^,]+, [^,]+, [^,]+, ' + FD + r','
 WORKER_MAIN = "worker.org.gradle.process.internal.worker.GradleWorkerMain"
+DAEMON_MAIN = "org.gradle.launcher.daemon.bootstrap.GradleDaemon"
 
 
 def quoted(value):
@@ -42,6 +43,38 @@ def successful_execve(call):
         raise Rejected("worker executable or argument is not UTF-8") from error
 
 
+def java_entry_point(arguments):
+    if (not isinstance(arguments, (tuple, list)) or len(arguments) < 2 or
+            any(type(value) is not str or not value for value in arguments)):
+        return None
+    index = 1
+    paired = {"-cp", "-classpath", "--class-path", "--add-opens",
+              "--add-exports", "--add-reads", "--add-modules"}
+    while index < len(arguments):
+        value = arguments[index]
+        if value in paired:
+            if index + 1 >= len(arguments):
+                return None
+            index += 2
+            continue
+        if value == "-jar":
+            return ("jar", arguments[index + 1], index + 1) if index + 1 < len(
+                arguments) else None
+        if value in ("-m", "--module"):
+            return None
+        if (value.startswith(("-D", "-X", "-javaagent:", "-agentlib:",
+                              "-agentpath:", "--add-opens=", "--add-exports=",
+                              "--add-reads=", "--add-modules=")) or
+                value in ("-ea", "-da", "-esa", "-dsa", "--enable-preview") or
+                value.startswith("@")):
+            index += 1
+            continue
+        if value.startswith("-"):
+            return None
+        return ("class", value, index)
+    return None
+
+
 def worker_exec(call, expected_executable):
     if not call.startswith("execve(") or not call.endswith(" = 0"):
         return None
@@ -50,8 +83,9 @@ def worker_exec(call, expected_executable):
         if "GradleWorkerMain" in call:
             raise Rejected("worker argv is truncated or malformed")
         return None
-    return parsed if (parsed[0] == expected_executable and len(parsed[1]) >= 3 and
-                      parsed[1][-2] == WORKER_MAIN) else None
+    entry = java_entry_point(parsed[1])
+    return parsed if (parsed[0] == expected_executable and entry is not None and
+                      entry == ("class", WORKER_MAIN, len(parsed[1]) - 2)) else None
 
 
 def select_worker_exec(traces, expected_executable):

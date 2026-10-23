@@ -20,7 +20,8 @@ from urllib.parse import unquote, urlparse
 
 from receipt import Rejected, digest, exact, _pairs, _reject_nonfinite
 from numeric_producer_trace import (Unbound, verify_transport, verify_stable_input,
-                                    select_worker_exec, worker_exec, successful_execve)
+                                    select_worker_exec, worker_exec, successful_execve,
+                                    java_entry_point, WORKER_MAIN, DAEMON_MAIN)
 from numeric_class_witness import build_agent, read_witness, SCHEMA as WITNESS_SCHEMA
 
 SCHEMA = "portable-binary64-probe-receipt/2"
@@ -570,12 +571,26 @@ def verify_build_runtime(traces, selected_exec):
             if executed is None:
                 continue
             path, arguments = executed
-            if any(value.endswith(".GradleWorkerMain") for value in arguments) and \
-                    (tid, path, arguments) != selected_exec:
+            entry = java_entry_point(arguments)
+            if WORKER_MAIN in arguments and (entry != (
+                    "class", WORKER_MAIN, len(arguments) - 2) or
+                    (tid, path, arguments) != selected_exec):
                 raise Rejected("additional or wrong-runtime test worker differs")
-            if "org.gradle.launcher.daemon.bootstrap.GradleDaemon" in arguments:
+            if DAEMON_MAIN in arguments:
+                require(entry is not None and entry[:2] == ("class", DAEMON_MAIN),
+                        "Gradle daemon Java main differs")
+                require(all(not value.startswith("@")
+                            for value in arguments[:entry[2]]),
+                        "Gradle daemon Java options differ")
                 daemons.append((tid, path))
-            if any(token.endswith("/gradle/wrapper/gradle-wrapper.jar") for token in arguments):
+            if any(token.endswith("/gradle/wrapper/gradle-wrapper.jar")
+                   for token in arguments):
+                require(entry is not None and entry[0] == "jar" and
+                        entry[1].endswith("/gradle/wrapper/gradle-wrapper.jar"),
+                        "Gradle wrapper Java launch differs")
+                require(all(not value.startswith("@")
+                            for value in arguments[:entry[2]]),
+                        "Gradle wrapper Java options differ")
                 wrappers.append((tid, path))
     require(len(wrappers) == 1 and len(daemons) == 1 and
             wrappers[0][1] == build and daemons[0][1] == build,
