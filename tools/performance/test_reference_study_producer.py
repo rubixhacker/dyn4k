@@ -77,7 +77,8 @@ class ReferenceStudyProducerTest(unittest.TestCase):
                      "CLASSPATH", "GRADLE_OPTS", "ANDROID_HOME", "ANDROID_SDK_ROOT"):
             cls.env.pop(name, None)
         cls.env.update(JAVA_HOME=str(JDK), TMPDIR=str(cls.root),
-                       JAVA_TOOL_OPTIONS=f"-Djava.io.tmpdir={cls.root}",
+                       JAVA_TOOL_OPTIONS=(f"-Djava.io.tmpdir={cls.root} "
+                                          "-Dorg.gradle.workers.max=1"),
                        PYTHONDONTWRITEBYTECODE="1")
         cls.keyed_env = dict(cls.env, OLLAMA_API_KEY="synthetic-reference-study-key")
         cls.capture_command = [sys.executable, str(SOURCE), "capture", "--output-root",
