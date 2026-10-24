@@ -672,6 +672,172 @@ class NativeHostConsumerTests(unittest.TestCase):
                 self.assertFalse(os.access(snapshot / "inputs" / f"{short}-cases.tsv",
                                            os.X_OK))
 
+    @unittest.skipUnless(os.name == "posix", "requires POSIX executable modes")
+    def test_cross_build_replay_requires_executable_mode_for_both_products(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            base = Path(temporary)
+            repository = Path(__file__).resolve().parents[2]
+            candidate = "candidate-sha"
+            hashes = {"dyn4k-core": route.digest(b"core-klib"),
+                      "dyn4k": route.digest(b"facade-klib")}
+            inputs = {
+                "source-inventory.tsv": b"Example.kt\t" + b"a" * 64 + b"\n",
+                "core-cases.tsv": b"dyn4k-core:a.B#one\ta.B\tone\n",
+                "facade-cases.tsv": b"dyn4k:c.D#two\tc.D\ttwo\n",
+            }
+            contract = {"cases": []}
+
+            def make_fixture(mode, permissions):
+                lane = LANE.rsplit(":", 1)[0] + ":" + mode
+                root = base / mode
+                (root / "inputs").mkdir(parents=True)
+                (root / "resolved").mkdir()
+                (root / "runtime").mkdir()
+                paths = {
+                    "checkout": "/candidate-checkout",
+                    "staging": "/staging",
+                    "archive_root": str(root),
+                    "work_root": str(base / f"{mode}-work"),
+                    "gradle": "/tools/gradle",
+                    "native_home": "/tools/konan",
+                    "python": "/tools/python",
+                }
+                for name, data in inputs.items():
+                    (root / "inputs" / name).write_bytes(data)
+                (root / "inputs/mode.init.gradle").write_bytes(
+                    route.mode_script("linuxArm64", mode))
+                components = [
+                    f"io.github.rubixhacker:{module}-linuxarm64:0.1.0-alpha.1"
+                    for module in route.MODULES
+                ]
+                artifacts = [{
+                    "component": f"io.github.rubixhacker:{module}-linuxarm64:0.1.0-alpha.1",
+                    "sha256": hashes[module],
+                    "file": str(route.staged_path(PurePosixPath("/staging"),
+                                                   module, "linuxArm64")),
+                } for module in route.MODULES]
+                graph = {
+                    "runtime_resolution": "native-test-executable; no separate KLIB runtime resolution",
+                    "gradle_user_home": "/tools/gradle-home",
+                    "compile": [{
+                        "project": short,
+                        "configuration": "linuxArm64TestCompileKlibraries",
+                        "components": components,
+                        "artifacts": artifacts,
+                    } for short in ("core", "facade")],
+                }
+                (root / "provider-graph.json").write_bytes(route.encoded(graph))
+                binary_mode = "debugTest" if mode == "debug-g" else "releaseTest"
+                chosen = "-g" if mode == "debug-g" else "-opt"
+                link = "Debug" if mode == "debug-g" else "Release"
+                stdout = ["BUILD SUCCESSFUL", f"QUALIFICATION_CROSS_BUILD_LANE={lane}",
+                          f"QUALIFICATION_SOURCE_COUNT={len(inputs['source-inventory.tsv'].splitlines())}"]
+                flags = {}
+                products = {}
+                elf = bytearray(64)
+                elf[:6] = b"\x7fELF\x02\x01"
+                elf[18:20] = (183).to_bytes(2, "little")
+                for short, module in (("core", "dyn4k-core"), ("facade", "dyn4k")):
+                    friend = next(item for item in artifacts
+                                  if item["component"] ==
+                                  f"io.github.rubixhacker:{module}-linuxarm64:0.1.0-alpha.1")
+                    flags[short] = [chosen, "-friend-modules", friend["file"]]
+                    stdout += [f"QUALIFICATION_COMPILER_FLAGS_{short.upper()}="
+                               f"{json.dumps(flags[short])}",
+                               f"> Task :{short}:link{link}TestLinuxArm64"]
+                    program = root / "runtime" / f"{short}.program"
+                    program.write_bytes(elf)
+                    program.chmod(permissions[short])
+                    binary_dir = Path(paths["work_root"]) / short / "bin/linuxArm64" / binary_mode
+                    products[short] = {
+                        "archive": f"runtime/{short}.program",
+                        "mode": binary_mode,
+                        "sha256": route.digest(elf),
+                        "source_path": str(binary_dir / "test.kexe"),
+                    }
+                for module, content in (("dyn4k-core", b"core-klib"),
+                                        ("dyn4k", b"facade-klib")):
+                    (root / "resolved" / f"{module}-linuxarm64-0.1.0-alpha.1.klib").write_bytes(content)
+                (root / "stdout.txt").write_text("\n".join(stdout) + "\n")
+                (root / "stderr.txt").write_bytes(b"")
+                (root / "attempt.json").write_bytes(route.encoded({"status": "COMPILED_ONLY"}))
+                now = time.time_ns()
+                started, finished = now - 5_000_000_000, now + 5_000_000_000
+                for path in root.rglob("*"):
+                    if path.is_file():
+                        os.utime(path, ns=(now, now))
+                receipt = {
+                    "schema": 2,
+                    "status": "COMPILED_ONLY",
+                    "phase": "linux-x64-cross-build",
+                    "lane": lane,
+                    "candidate_sha": candidate,
+                    "source_tree": "candidate-tree",
+                    "artifact_hashes": hashes,
+                    "consumer_contract_sha256": independent_gates.digest(contract),
+                    "selected_cases": 2523,
+                    "build_host": {"system": "Linux", "machine": "x86_64"},
+                    "toolchain": {"gradle_user_home": "/tools/gradle-home"},
+                    "producer_sha256": route.digest((repository / route.PRODUCER).read_bytes()),
+                    "consumer_build_sha256": {
+                        f"{route.PROJECT}/{name}": route.digest(
+                            (repository / route.PROJECT / name).read_bytes())
+                        for name in ("build.gradle.kts", "settings.gradle.kts",
+                                     "gradle.properties", "core/build.gradle.kts",
+                                     "facade/build.gradle.kts")
+                    },
+                    "source_inventory_sha256": route.digest(inputs["source-inventory.tsv"]),
+                    "producer_paths": paths,
+                    "process": {
+                        "command": route.gradle_command(paths, lane, mode, hashes,
+                                                         "qualificationCrossBuild"),
+                        "cwd": paths["archive_root"],
+                        "exit_code": 0,
+                        "pid": 101,
+                        "parent_pid": 100,
+                        "started_ns": started,
+                        "finished_ns": finished,
+                    },
+                    "compiler_flags": flags,
+                    "products": products,
+                }
+                receipt["files"] = route.archive_files(root)
+                (root / "receipt.json").write_bytes(route.encoded(receipt))
+                return root, lane, independent_gates.archive_digest(root)
+
+            with patch.object(route, "lane_contract", return_value=(None, contract)), \
+                    patch.object(route, "git", return_value="candidate-tree"), \
+                    patch.object(route, "source_inputs", return_value=inputs):
+                for mode, permissions in (
+                        ("debug-g", {"core": 0o755, "facade": 0o710}),
+                        ("optimized-opt", {"core": 0o710, "facade": 0o755})):
+                    with self.subTest(mode=mode):
+                        archive, lane, selected_digest = make_fixture(mode, permissions)
+                        root = base / f"{mode}-relocated"
+                        route.snapshot_archive(archive, root)
+                        self.assertEqual(independent_gates.archive_digest(root),
+                                         selected_digest)
+
+                        def verify():
+                            return route.verify_cross_build_snapshot(
+                                root, repository, candidate, lane, hashes, selected_digest)
+
+                        self.assertEqual(verify()["status"], "COMPILED_ONLY")
+                        for short in ("core", "facade"):
+                            program = root / "runtime" / f"{short}.program"
+                            before = program.read_bytes()
+                            before_mtime = program.stat().st_mtime_ns
+                            original_mode = program.stat().st_mode & 0o777
+                            program.chmod(0o644)
+                            self.assertEqual(program.read_bytes(), before)
+                            self.assertEqual(program.stat().st_mtime_ns, before_mtime)
+                            self.assertEqual(independent_gates.archive_digest(root),
+                                             selected_digest)
+                            with self.subTest(mode=mode, product=short), \
+                                    self.assertRaisesRegex(ValueError, "executable mode"):
+                                verify()
+                            program.chmod(original_mode)
+
     def test_unpack_requires_a_new_unlinked_root(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
             root = Path(temporary)

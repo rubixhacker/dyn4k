@@ -1640,6 +1640,9 @@ def verify_cross_build_snapshot(root, repository, candidate, lane, hashes,
                 or f"> Task :{short}:link{'Debug' if mode == 'debug-g' else 'Release'}TestLinuxArm64"
                     not in stdout):
             raise ValueError("cross build selected executable or mode differs")
+        if not (program.stat().st_mode &
+                (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)):
+            raise ValueError("cross build executable mode has no execute bit")
         validate_linux_arm64_elf(program.read_bytes())
     return receipt
 
