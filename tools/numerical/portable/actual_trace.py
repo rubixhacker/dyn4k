@@ -520,7 +520,9 @@ def checked_projection(raw, protected=(), *, strict_outputs=(), version6_raw=Fal
                     _, call = line.split(" ", 1)
                     projected.append(_project_descriptors(call,
                         version6_raw=version6_raw))
-                legacy.writestr("trace." + tid, ("\n".join(projected) + "\n").encode())
+                member = zipfile.ZipInfo("trace." + tid, (1980, 1, 1, 0, 0, 0))
+                member.compress_type = legacy.compression
+                legacy.writestr(member, ("\n".join(projected) + "\n").encode())
         result = {"raw_sha256": hashlib.sha256(raw).hexdigest(),
                   "legacy_zip": output.getvalue(), "threads": len(traces),
                   "raw_bytes": sum(map(len, traces.values())),

@@ -3,11 +3,14 @@ import io
 import json
 import struct
 import sys
+import time
 from pathlib import Path
 import unittest
 import zipfile
 from unittest.mock import patch
 
+import actual_arithmetic
+import actual_capture_receipt
 import actual_trace
 from actual_trace import checked_projection, TraceRejected, trace_exposes_environment
 from boolean_rotation_jdi.jdi_bridge import verify_jdi_file_writes
@@ -55,6 +58,43 @@ class ActualTraceTest(unittest.TestCase):
             actual_trace._project_descriptors(
                 'write(7<TCP:[127.0.0.1:4000->127.0.0.1:5000]>, '
                 '"unterminated, 12) = 12', version6_raw=True)
+
+    def test_projection_metadata_is_stable_at_legacy_receipt_hash_boundary(self):
+        raw = archived({"trace.41": b"1.000001 +++ exited with 0 +++\n"})
+        early = time.struct_time((2026, 10, 23, 22, 52, 6, 4, 296, -1))
+        late = time.struct_time((2026, 10, 23, 22, 52, 8, 4, 296, -1))
+        clock_values = iter((early, early, late, late))
+
+        with patch("actual_trace.zipfile.time.localtime",
+                   side_effect=lambda *args: next(clock_values)):
+            worker_before, helper_before = actual_capture_receipt._raw_projections(
+                {"worker_write_traces": raw, "jdi_helper_traces": raw}, set(), set())
+            worker_after, helper_after = actual_capture_receipt._raw_projections(
+                {"worker_write_traces": raw, "jdi_helper_traces": raw}, set(), set())
+
+        outputs = (worker_before["legacy_zip"], helper_before["legacy_zip"],
+                   worker_after["legacy_zip"], helper_after["legacy_zip"])
+        decoded = []
+        metadata = []
+        for packed in outputs:
+            with zipfile.ZipFile(io.BytesIO(packed)) as archive:
+                members = archive.infolist()
+                decoded.append([(member.filename, archive.read(member))
+                                for member in members])
+                metadata.append([(member.filename, member.date_time,
+                                  member.compress_type) for member in members])
+
+        self.assertEqual(decoded, [[(
+            "trace.41", b"+++ exited with 0 +++\n")] for _ in outputs])
+        self.assertTrue(all(row == metadata[0] for row in metadata))
+        self.assertEqual(metadata[0][0][2], zipfile.ZIP_STORED)
+        self.assertEqual(hashlib.sha256(worker_before["legacy_zip"]).hexdigest(),
+                         hashlib.sha256(worker_after["legacy_zip"]).hexdigest())
+        self.assertEqual(hashlib.sha256(helper_before["legacy_zip"]).hexdigest(),
+                         hashlib.sha256(helper_after["legacy_zip"]).hexdigest())
+
+        self.assertEqual(actual_arithmetic._sha(worker_before["legacy_zip"]),
+                         actual_arithmetic._sha(worker_after["legacy_zip"]))
 
     def test_structural_identity_ignores_quoted_live_descriptor_text(self):
         protected = "/home/test/protected-output"
