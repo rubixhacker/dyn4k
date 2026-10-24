@@ -2,6 +2,7 @@ import json
 import io
 import contextlib
 import os
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -52,6 +53,62 @@ def report(short, name=None, outcome=None, duplicate=False):
 
 
 class NativeHostConsumerTests(unittest.TestCase):
+    def test_simulator_capture_requires_observed_spawn_parent(self):
+        udid = "AA3852EE-9842-471F-91C0-DE44A699EA3C"
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            archive = root / "archive"
+            (archive / "runtime").mkdir(parents=True)
+            now = time.time_ns()
+            (archive / "simctl-guest.json").write_bytes(route.encoded({
+                "finished_ns": now - 750_000}))
+            observations = archive / "runtime/process-observations.jsonl"
+            work_root = PurePosixPath("/Volumes/Build Space/native build")
+            simctl = "/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/bin/simctl"
+
+            for target in ("iosSimulatorArm64", "iosX64", "tvosSimulatorArm64",
+                           "watchosSimulatorArm64"):
+                for mode, binary_mode in (("debug-g", "debugTest"),
+                                          ("optimized-opt", "releaseTest")):
+                    for short in ("core", "facade"):
+                        with self.subTest(target=target, mode=mode, module=short):
+                            image = str(work_root / short / "bin" / target /
+                                        binary_mode / "test.kexe")
+                            parent = {"module": None, "pid": 400, "parent_pid": 300,
+                                      "image": simctl, "image_sha256": "a" * 64,
+                                      "command": f"{simctl} spawn --standalone {udid} "
+                                                 f"{shlex.quote(image)} -- --ktest_logger=TEAMCITY",
+                                      "observed_ns": now - 500_000,
+                                      "simulator_udid": udid}
+                            child = {"module": short, "pid": 401, "parent_pid": 400,
+                                     "image": image, "image_sha256": "b" * 64,
+                                     "command": f"{shlex.quote(image)} -- --ktest_logger=TEAMCITY",
+                                     "observed_ns": now - 250_000,
+                                     "simulator_udid": None}
+
+                            def selected(test_parent=parent, test_child=child):
+                                observations.write_bytes(route.encoded(test_parent) +
+                                                         route.encoded(test_child))
+                                return route.process_binding(archive, work_root, target,
+                                                             mode, udid, short, "b" * 64)
+
+                            self.assertEqual(selected(), child)
+                            for label, changed_parent, changed_child in (
+                                ("orphan", {}, {"parent_pid": 999999}),
+                                ("wrong parent", {"pid": 402}, {}),
+                                ("wrong guest", {"simulator_udid": "0" * 36}, {}),
+                                ("wrong command guest", {"command": parent["command"].replace(udid, "0" * 36)}, {}),
+                                ("wrong exact executable", {"command": parent["command"].replace(
+                                    shlex.quote(image), shlex.quote(image + "-shadow"))}, {}),
+                                ("late parent", {"observed_ns": child["observed_ns"] + 1}, {}),
+                                ("early parent", {"observed_ns": now - 800_000}, {}),
+                                ("invalid parent identity", {"image_sha256": "bad"}, {}),
+                                ("invalid child identity", {}, {"pid": 0}),
+                            ):
+                                with self.subTest(case=label), self.assertRaises(ValueError):
+                                    selected({**parent, **changed_parent},
+                                             {**child, **changed_child})
+
     def test_macos_posix_process_binding_journey_and_spoofs(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
             root = Path(temporary)
@@ -1426,7 +1483,7 @@ class NativeHostConsumerTests(unittest.TestCase):
 
             def verify():
                 archive_hash = seal()
-                return route.verify(root, Path(temporary), "candidate", LANE, hashes,
+                return route.verify(root, Path(temporary), "candidate", receipt["lane"], hashes,
                                     selection, archive_hash, toolchain)
 
             with (patch.object(route, "lane_contract", return_value=(manifest, contract)),
@@ -1463,6 +1520,112 @@ class NativeHostConsumerTests(unittest.TestCase):
                     with self.subTest(key=key), self.assertRaises(ValueError):
                         verify()
                     receipt[key] = original
+
+                simulator_lane = "iosSimulatorArm64:iOS simulator ARM64:current:debug-g"
+                udid = "AA3852EE-9842-471F-91C0-DE44A699EA3C"
+                manifest["lanes"][simulator_lane] = {
+                    "target": "iosSimulatorArm64", "runtime": "iOS simulator ARM64",
+                    "version": "current", "configuration": "debug-g"}
+                selection.clear()
+                selection.update({"lane": simulator_lane, "role": "current",
+                                  "system": "Darwin", "machine": "arm64",
+                                  "os_version": "26.5.1", "simulator_udid": udid,
+                                  "simulator_runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+                                  "guest_version": "26.5"})
+                host = {"system": "Darwin", "machine": "arm64", "os_version": "26.5.1",
+                        "xcode_version": "26.5", "guest_family": "iOS",
+                        "guest_udid": udid,
+                        "guest_runtime": selection["simulator_runtime"],
+                        "guest_version": "26.5", "guest_state": "Booted"}
+                write("host.json", route.encoded(host))
+                write("host-after.json", route.encoded(host))
+                write("inputs/runtime-selection.json", route.encoded(selection))
+                write("inputs/mode.init.gradle", route.mode_script(
+                    "iosSimulatorArm64", "debug-g", udid))
+                paths["work_root"] = "/producer build"
+                receipt.update({"lane": simulator_lane, **manifest["lanes"][simulator_lane],
+                                "selection": selection, "host": host, "host_after": host,
+                                "runtime_identity": route.digest(route.encoded(host))})
+                receipt["process"]["command"] = route.gradle_command(
+                    paths, simulator_lane, "debug-g", hashes)
+                graph["compile"] = [{**entry,
+                                     "configuration": "iosSimulatorArm64TestCompileKlibraries",
+                                     "components": [component.replace("linuxarm64", "iossimulatorarm64")
+                                                    for component in entry["components"]],
+                                     "artifacts": [{**item,
+                                                    "component": item["component"].replace(
+                                                        "linuxarm64", "iossimulatorarm64"),
+                                                    "file": item["file"].replace(
+                                                        "linuxarm64", "iossimulatorarm64")}
+                                                   for item in entry["artifacts"]]}
+                                    for entry in graph["compile"]]
+                write("provider-graph.json", route.encoded(graph))
+                receipt["resolved_artifacts"] = {
+                    module: f"resolved/{module}-iossimulatorarm64-0.1.0-alpha.1.klib"
+                    for module in route.MODULES}
+                for module, data in (("dyn4k-core", b"core-klib"),
+                                     ("dyn4k", b"facade-klib")):
+                    write(receipt["resolved_artifacts"][module], data)
+                (root / "resolved/dyn4k-core-linuxarm64-0.1.0-alpha.1.klib").unlink()
+                (root / "resolved/dyn4k-linuxarm64-0.1.0-alpha.1.klib").unlink()
+                simctl = "/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/Resources/bin/simctl"
+                simulator_samples = []
+                output = ["BUILD SUCCESSFUL", f"QUALIFICATION_LANE={simulator_lane}",
+                          "QUALIFICATION_CASE_COUNT=2523",
+                          f"QUALIFICATION_PROVIDER_GRAPH_SHA256={route.digest((root / 'provider-graph.json').read_bytes())}"]
+                for index, short in enumerate(("core", "facade")):
+                    product = products[short]
+                    image = f"/producer build/{short}/bin/iosSimulatorArm64/debugTest/test.kexe"
+                    parent = {"module": None, "pid": 300 + index,
+                              "parent_pid": 101, "image": simctl,
+                              "image_sha256": "a" * 64,
+                              "command": f"{simctl} spawn --standalone {udid} "
+                                         f"{shlex.quote(image)} -- --ktest_logger=TEAMCITY",
+                              "observed_ns": start + 10 + index * 10,
+                              "simulator_udid": udid}
+                    child = {**product["observed_process"], "pid": 400 + index,
+                             "parent_pid": parent["pid"], "image": image,
+                             "command": f"{shlex.quote(image)} -- --ktest_logger=TEAMCITY",
+                             "observed_ns": parent["observed_ns"] + 1}
+                    product.update({"path": image, "target": "iosSimulatorArm64",
+                                    "observed_process": child})
+                    simulator_samples.extend((parent, child))
+                    raw = report(short).replace(b"linuxArm64", b"iosSimulatorArm64")
+                    _, normal = route.original_report(raw, "iosSimulatorArm64",
+                        route.selected_rows(inputs[f"{short}-cases.tsv"]))
+                    write(raw_paths[index], raw)
+                    write(normal_paths[index], normal)
+                    friend = "dyn4k-core" if short == "core" else "dyn4k"
+                    output.extend((f"> Task :{short}:iosSimulatorArm64Test",
+                                   f"QUALIFICATION_COMPILER_FLAGS_{short.upper()}=" +
+                                   json.dumps(["-g", "-friend-modules", str(route.staged_path(
+                                       PurePosixPath("/staging"), friend, "iosSimulatorArm64"))]),
+                                   f"QUALIFICATION_RUNTIME_{short.upper()}_PROGRAM_SHA256={product['sha256']}",
+                                   f"QUALIFICATION_RAW_XML_SHA256={route.digest(raw)}",
+                                   f"QUALIFICATION_XML_SHA256={route.digest(normal)}"))
+                output.append(f"QUALIFICATION_REPORT_TRAVERSAL_SHA256={route.digest((root / 'reports/report-traversal.json').read_bytes())}")
+                for module, value in hashes.items():
+                    output.append(f"QUALIFICATION_RESOLVED_{module.upper().replace('-', '_')}_SHA256={value}")
+                write("stdout.txt", ("\n".join(output) + "\n").encode())
+                write("runtime/products.json", route.encoded(products))
+                write("runtime/process-observations.jsonl", b"".join(
+                    route.encoded(item) for item in simulator_samples))
+                write("simctl-guest.stdout", b"")
+                write("simctl-guest.stderr", b"")
+                write("simctl-guest.json", route.encoded({
+                    "command": ["xcrun", "simctl", "spawn", udid, "launchctl", "list"],
+                    "exit_code": 0, "pid": 250, "started_ns": start + 1,
+                    "finished_ns": start + 2,
+                    "stdout_sha256": route.digest(b""), "stderr_sha256": route.digest(b"")}))
+                self.assertEqual(verify()["status"], "PASSED")
+                orphan = {**simulator_samples[1], "parent_pid": 999999}
+                products["core"]["observed_process"] = orphan
+                write("runtime/products.json", route.encoded(products))
+                write("runtime/process-observations.jsonl", b"".join(
+                    route.encoded(orphan if item is simulator_samples[1] else item)
+                    for item in simulator_samples))
+                with self.assertRaisesRegex(ValueError, "simulator|parent|process"):
+                    verify()
 
 
 if __name__ == "__main__":

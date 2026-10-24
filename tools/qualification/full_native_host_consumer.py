@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -532,12 +533,52 @@ def macos_gradle_client_pid(archive):
     return client["pid"]
 
 
-def process_binding(archive, work_root, target, mode, simulator_udid, short, binary_sha):
+def simulator_spawn_parent(samples, binding, simulator_udid, executable,
+                           started_ns, finished_ns):
+    if (not all(type(value) is int and value > 0 for value in
+                (binding.get("pid"), binding.get("parent_pid"),
+                 binding.get("observed_ns"), started_ns, finished_ns))
+            or not started_ns <= binding["observed_ns"] <= finished_ns
+            or binding.get("image") != str(executable)):
+        raise ValueError("selected simulator test process identity or time differs")
+    parents = [sample for sample in samples
+               if sample.get("pid") == binding["parent_pid"]]
+    if len(parents) != 1:
+        raise ValueError("selected simulator spawn parent is absent or ambiguous")
+    parent = parents[0]
+    image = parent.get("image")
+    if (parent.get("module") is not None
+            or parent.get("simulator_udid") != simulator_udid
+            or type(parent.get("pid")) is not int or parent["pid"] <= 0
+            or type(parent.get("parent_pid")) is not int or parent["parent_pid"] <= 0
+            or type(parent.get("observed_ns")) is not int
+            or not started_ns <= parent["observed_ns"] <= binding["observed_ns"]
+            or not isinstance(image, str) or not PurePosixPath(image).is_absolute()
+            or PurePosixPath(image).name != "simctl"
+            or not SHA.fullmatch(str(parent.get("image_sha256", "")))):
+        raise ValueError("selected simulator spawn parent identity or time differs")
+    try:
+        command = shlex.split(parent.get("command", ""))
+    except (TypeError, ValueError):
+        command = []
+    if len(command) < 4 or command[:2] != [image, "spawn"]:
+        raise ValueError("selected simulator spawn command differs")
+    arguments = command[2:]
+    while arguments and arguments[0].startswith("--") and arguments[0] != "--":
+        arguments = arguments[1:]
+    if len(arguments) < 2 or arguments[:2] != [simulator_udid, str(executable)]:
+        raise ValueError("selected simulator guest or exact test executable differs")
+    return parent
+
+
+def process_binding(archive, work_root, target, mode, simulator_udid, short, binary_sha,
+                    executable=None):
     samples = [json.loads(line) for line in (archive / "runtime/process-observations.jsonl").read_bytes().splitlines()]
     binary_mode = "debugTest" if mode == "debug-g" else "releaseTest"
     folder = work_root / short / "bin" / target / binary_mode
     matches = [sample for sample in samples if sample.get("module") == short
                and Path(sample["image"]).parent == folder
+               and (executable is None or Path(sample["image"]) == Path(executable))
                and sample.get("image_sha256") == binary_sha
                and sample.get("pid", 0) > 0 and sample.get("parent_pid", 0) > 0]
     if target == "macosArm64":
@@ -549,10 +590,12 @@ def process_binding(archive, work_root, target, mode, simulator_udid, short, bin
         matches = [sample for sample in matches if sample["parent_pid"] == launcher_pid]
     if not matches:
         raise ValueError(f"selected {short} Native test launcher and executable bytes were not observed")
-    if simulator_udid and not any(sample.get("simulator_udid") == simulator_udid
-                                  and str(folder) in sample.get("command", "")
-                                  for sample in samples):
-        raise ValueError("selected simulator spawn and test executable were not observed")
+    if simulator_udid:
+        guest = json.loads((archive / "simctl-guest.json").read_bytes())
+        started_ns = guest.get("finished_ns")
+        finished_ns = time.time_ns()
+        simulator_spawn_parent(samples, matches[0], simulator_udid,
+                               matches[0]["image"], started_ns, finished_ns)
     return matches[0]
 
 
@@ -613,7 +656,7 @@ def capture(archive, work_root, lane, core_cases, facade_cases, simulator_udid=N
         shutil.copyfile(executable, copy)
         print(f"QUALIFICATION_RUNTIME_{short.upper()}_PROGRAM_SHA256={digest(copy.read_bytes())}")
         binding = process_binding(archive, work_root, target, mode, simulator_udid,
-                                  short, digest(copy.read_bytes()))
+                                  short, digest(copy.read_bytes()), executable)
         records[short] = {"path": str(executable), "sha256": digest(copy.read_bytes()),
                           "archive": copy.relative_to(archive).as_posix(), "mode": binary_mode,
                           "target": target, "observed_process": binding}
@@ -2109,12 +2152,10 @@ def verify_snapshot(root, repository, candidate, lane, hashes, selection, archiv
                 or not process["started_ns"] <= binding.get("observed_ns", -1)
                 <= process["finished_ns"]):
             raise ValueError("selected Native test process is not bound to executable bytes")
-        if TARGETS[target][2] and not any(
-                sample.get("simulator_udid") == selection["simulator_udid"]
-                and product["path"] in sample.get("command", "")
-                and process["started_ns"] <= sample.get("observed_ns", -1)
-                <= process["finished_ns"] for sample in samples):
-            raise ValueError("selected simulator did not spawn the observed test executable")
+        if TARGETS[target][2]:
+            simulator_spawn_parent(samples, binding, selection["simulator_udid"],
+                                   product["path"], process["started_ns"],
+                                   process["finished_ns"])
     observed = []
     expected_raw_paths = sorted(path.relative_to(root).as_posix() for path in
                                 (root / "reports/raw").rglob("TEST-*.xml"))
