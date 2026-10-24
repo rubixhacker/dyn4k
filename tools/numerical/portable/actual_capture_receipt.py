@@ -413,6 +413,16 @@ def _mirror_worker_scope(mirror, selected_pid):
             "direct mirror worker ancestry differs")
 
 
+def _helper_argument_topology(argument_path, transport):
+    output = Path(transport["output_path"])
+    scratch = output.parent
+    require(output.name == "jdi-output" and
+            scratch.parent == Path(transport["temp_path"]) and
+            scratch.name.startswith("dyn4k-actual-") and
+            argument_path == str(scratch / "jdi-helper-arguments.log"),
+            "JDI helper startup log path differs")
+
+
 def _output_proof(files, metadata, traces, events, worker, transport, environment,
                   verified_class_reads):
     _xml_mirror(files)
@@ -662,9 +672,7 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
             metadata["helper_class_before"] == metadata["helper_class_after"],
             "JDI helper class input identity changed")
     helper_traces, _ = normalize_rich_traces(_trace_map(files["jdi_helper_traces"]))
-    require(metadata["helper_argument_path"] ==
-            str(Path(transport["temp_path"]) / "jdi-helper-arguments.log"),
-            "JDI helper startup log path differs")
+    _helper_argument_topology(metadata["helper_argument_path"], transport)
     require(type(metadata["helper_argument_identity"]) is dict and
             set(metadata["helper_argument_identity"]) == {
                 "device_major", "device_minor", "inode", "size"} and

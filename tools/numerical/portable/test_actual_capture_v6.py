@@ -1048,6 +1048,24 @@ class FocusedWorkerIdentityProofTest(unittest.TestCase):
                     FocusedRejected, "direct mirror worker ancestry differs"):
                 focused_receipt._mirror_worker_scope(mirror, "41")
 
+    def test_helper_argument_path_uses_capture_scratch_child(self):
+        root = Path("/home/test/d4")
+        scratch = root / "dyn4k-actual-abc"
+        transport = {"temp_path": str(root),
+                     "output_path": str(scratch / "jdi-output")}
+        argument = str(scratch / "jdi-helper-arguments.log")
+        focused_receipt._helper_argument_topology(argument, transport)
+        invalid = (
+            (str(root / "jdi-helper-arguments.log"), transport),
+            (argument, {**transport, "output_path": str(root / "jdi-output")}),
+            (argument, {**transport, "output_path": str(scratch / "other")}),
+        )
+        for path, declaration in invalid:
+            with self.subTest(path=path, declaration=declaration), \
+                    self.assertRaisesRegex(FocusedRejected,
+                                           "JDI helper startup log path differs"):
+                focused_receipt._helper_argument_topology(path, declaration)
+
 
 if __name__ == "__main__":
     unittest.main()
