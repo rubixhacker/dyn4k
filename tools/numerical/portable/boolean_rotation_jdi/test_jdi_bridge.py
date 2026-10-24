@@ -362,6 +362,27 @@ class JdiBridgeTest(unittest.TestCase):
                                         40001, 123, 456, HELPER_ARGS)
         self.assertEqual(multi["worker_packets"], {"send": 2, "receive": 1})
         self.assertEqual(multi["helper_packets"], {"send": 1, "receive": 1})
+        neutral = (b'1.000011 fstat(1</dev/null>, {st_mode=S_IFCHR}) = 0\n' * 5000)
+        busy_worker = worker_multi.replace(b'1.000013 sendto',
+                                           neutral + b'1.000013 sendto')
+        busy_helper = helper_multi.replace(b'1.000011 write',
+                                           neutral + b'1.000011 write')
+        with patch.object(jdi_bridge.re, "escape", wraps=jdi_bridge.re.escape) as escaping:
+            busy = verify_jdi_transport_v6(
+                archive({**worker_members, "trace.123": busy_worker}),
+                archive({**helper_members, "trace.456": busy_helper}),
+                40001, 123, 456, HELPER_ARGS)
+        self.assertEqual(busy["worker_packets"], multi["worker_packets"])
+        self.assertEqual(busy["helper_packets"], multi["helper_packets"])
+        self.assertLess(escaping.call_count, 128)
+        with self.assertRaises(EvidenceRejected):
+            verify_jdi_transport_v6(
+                archive({**worker_members, "trace.123": busy_worker.replace(
+                    b'1.000013 sendto',
+                    b'1.0000129 close_range(10, 10, 0) = 0\n'
+                    b'1.000013 sendto')}),
+                archive({**helper_members, "trace.456": busy_helper}),
+                40001, 123, 456, HELPER_ARGS)
         first_clone = shared_clones.splitlines(keepends=True)[0]
         late_worker = worker_multi.replace(first_clone, b'').replace(
             b'1.000013 sendto',
