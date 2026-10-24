@@ -1373,7 +1373,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                          independent_gates._prospective_checker_binding(ROOT, previous)[source])
         self.assertEqual(independent_gates.APPROVED_P2_OBSERVER_BOUNDS_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, previous))
-        self.assertEqual(new_digest,
+        self.assertEqual(independent_gates.ARCHIVE_PRIVACY_CAPTURE_DEPENDENCIES[source],
                          independent_gates._prospective_checker_binding(ROOT, "HEAD")[source])
         self.assertEqual(independent_gates.APPROVED_P2_NATIVE_UDP_GRAMMAR_PRODUCERS,
                          independent_gates._p2_producer_binding(ROOT, "HEAD"))
