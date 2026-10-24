@@ -1463,7 +1463,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         source = "tools/numerical/portable/actual_capture_receipt.py"
         old_digest = "916838f8386116c337fa233051b183f2caaa8136e29aac49046270f994c71b92"
         new_digest = "f25f9564cdf5779ff690dac4938f2d9e4d7a0c038f5de9be9948b73850f3cb9a"
-        self.assertEqual("bede94fb5a104828ca434b3c740f86b5b05934d6", revision)
+        self.assertEqual("b67ff73970811bfb44895e8d3354ed63863818d9", revision)
         self.assertEqual(old_digest,
                          independent_gates.WORKER_PID_CAPTURE_DEPENDENCIES[source])
         self.assertEqual(old_digest,
@@ -1472,6 +1472,12 @@ class IndependentGateSeamTests(unittest.TestCase):
                          independent_gates.ARCHIVE_PRIVACY_CAPTURE_DEPENDENCIES[source])
         self.assertEqual(new_digest,
                          independent_gates.P2_ARCHIVE_PRIVACY_DEPENDENCIES[source])
+        trace_source = "tools/numerical/portable/actual_trace.py"
+        trace_digest = "ead9e4adb689214d54bc0f23a520f0af96b7024f207d96852b0a8a41d1e7c84d"
+        self.assertEqual(trace_digest,
+                         independent_gates.ARCHIVE_PRIVACY_CAPTURE_DEPENDENCIES[trace_source])
+        self.assertEqual(trace_digest,
+                         independent_gates.P2_ARCHIVE_PRIVACY_DEPENDENCIES[trace_source])
         for candidate, digest in (("d740fec9a3399e1701b504077178b1058072c7b2",
                                    old_digest), (revision, new_digest), ("HEAD", new_digest)):
             with self.subTest(candidate=candidate):
@@ -1490,6 +1496,15 @@ class IndependentGateSeamTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
             independent_gates._p2_producer_binding(
                 ROOT, "512bc6123a95d6e04976a5dd0dc50c3710ce00a8")
+        for incomplete in ("bede94fb5a104828ca434b3c740f86b5b05934d6",
+                           "42bd74cb7b82cbe1566ee0ad96c80bd38e3f6858"):
+            with self.subTest(incomplete=incomplete):
+                with self.assertRaisesRegex(ValueError,
+                                            "prospective policy/checker blob differs"):
+                    independent_gates._prospective_checker_binding(ROOT, incomplete)
+                with self.assertRaisesRegex(ValueError,
+                                            "JDK 21 JDI producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, incomplete)
         original_read = Path.read_bytes
         with mock.patch.object(Path, "read_bytes", lambda path: b"changed"
                                if path == ROOT / source else original_read(path)):
