@@ -105,6 +105,54 @@ class ActualTraceTest(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(result["legacy_zip"])) as projected:
             self.assertEqual(projected.read("trace.41").splitlines(), list(expected))
 
+    def test_version6_projects_udp_inode_result_and_operands(self):
+        payload = b'3<UDP:[1234567890]> -> "ok"'
+        calls = (
+            b'socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC, IPPROTO_UDP) = '
+            b'7<UDP:[1234567890]>',
+            b'getsockname(7<UDP:[1234567890]>, NULL, NULL) = 0',
+            b'write(1<pipe:[44]>, "' + payload.replace(b'"', b'\\"') +
+            b'", ' + str(len(payload)).encode() + b') = ' +
+            str(len(payload)).encode(),
+            b'close(7<UDP:[1234567890]>) = 0',
+        )
+        trace = b"".join(f"1.{index:06d} ".encode() + call + b"\n"
+                         for index, call in enumerate(calls, 1))
+        trace += b"1.000005 +++ exited with 0 +++\n"
+        expected = (
+            b'socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC, IPPROTO_UDP) = 7',
+            b'getsockname(7, NULL, NULL) = 0',
+            b'write(1, "' + payload.replace(b'"', b'\\"') + b'", ' +
+            str(len(payload)).encode() + b') = ' + str(len(payload)).encode(),
+            b'close(7) = 0', b'+++ exited with 0 +++',
+        )
+        for strict in (True, False):
+            with self.subTest(version6_raw=strict):
+                result = checked_projection(archived({"trace.41": trace}),
+                                            version6_raw=strict)
+                with zipfile.ZipFile(io.BytesIO(result["legacy_zip"])) as projected:
+                    self.assertEqual(projected.read("trace.41").splitlines(),
+                                     list(expected))
+
+    def test_version6_udp_inode_rejects_malformed_or_adjacent_tokens(self):
+        good = (b'1.000001 socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP) = '
+                b'7<UDP:[1234567890]>\n'
+                b'1.000002 close(7<UDP:[1234567890]>) = 0\n'
+                b'1.000003 +++ exited with 0 +++\n')
+        for bad in (
+                good.replace(b'UDP:[1234567890]', b'UDP:[letters]'),
+                good.replace(b'UDP:[1234567890]', b'UDP:[123->456]'),
+                good.replace(b'UDP:[1234567890]', b'UDP:[[1234567890]]'),
+                good.replace(b'UDP:[1234567890]>', b'UDP:[1234567890>'),
+                good.replace(b'UDP:[1234567890]>', b'UDP:[1234567890]>>'),
+                good.replace(b'UDP:[1234567890]>', b'UDP:[1234567890]>tail'),
+                good.replace(b'UDP:[1234567890]>',
+                             b'UDP:[1234567890]>8<pipe:[9]>', 1),
+        ):
+            with self.subTest(call_sha256=hashlib.sha256(bad).hexdigest()), \
+                    self.assertRaises(TraceRejected):
+                checked_projection(archived({"trace.41": bad}), version6_raw=True)
+
     def test_version6_rejects_malformed_native_descriptor_neighbors(self):
         call = b'dup2(7<pipe:[12345]>, 8</dev/null<char 1:3>>) = 8<pipe:[12345]>'
         bad_calls = (

@@ -28,6 +28,7 @@ V6_FD_START = re.compile(r"([0-9]+)<")
 V6_FILE = re.compile(r"/[^<>\r\n\"(),]+(?:<char [0-9]+:[0-9]+>)?")
 V6_SOCKET = re.compile(
     r"(?:TCP|TCPv6|UDPv6):\[(?:->|[0-9A-Za-z:.%_\[\]-])+\]")
+V6_UDP_INODE = re.compile(r"UDP:\[[0-9]+\]")
 V6_UNIX_SOCKET = re.compile(r"UNIX-STREAM:\[[0-9]+->[0-9]+\]")
 V6_PIPE = re.compile(r"pipe:\[[0-9]+\]")
 V6_ANON_INODE = re.compile(r"anon_inode:(?:\[[0-9A-Za-z_-]+\]|[0-9A-Za-z_-]+)")
@@ -205,7 +206,8 @@ def _version6_fd_token(call, index, *, directory=False):
         valid = valid and depth == 0
     else:
         valid = any(pattern.fullmatch(decoration) is not None for pattern in (
-            V6_FILE, V6_UNIX_SOCKET, V6_PIPE, V6_ANON_INODE, V6_EVENTFD))
+            V6_FILE, V6_UNIX_SOCKET, V6_PIPE, V6_ANON_INODE, V6_EVENTFD,
+            V6_UDP_INODE))
     if not valid:
         raise TraceRejected("version 6 descriptor decoration differs")
     end = cursor + 1
