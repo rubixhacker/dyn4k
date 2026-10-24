@@ -1308,6 +1308,42 @@ class EnvironmentSentinelTest(unittest.TestCase):
         finally:
             directory.cleanup()
 
+    def test_public_v6_loader_rejects_plain_split_markers(self):
+        samples = (
+            b'writev(4, ["OLLAMA_", "API_KEY"], 2) = 14\n',
+            b'writev(4, ["DYN4K_CAPTURE_ENV_", '
+            b'"SENTINEL=portable-capture-check"], 2) = 50\n',
+            b'write(4, "safe\\n", 5) = 5\n'
+            b'writev(4, ["OLLAMA_", "API_KEY"], 2) = 14\n',
+        )
+        for field in ("gradle_log", "receipt"):
+            for raw in samples:
+                with self.subTest(field=field,
+                                  raw_sha256=hashlib.sha256(raw).hexdigest()), \
+                        tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+                    root = Path(directory)
+                    for name in FILE_NAMES.values():
+                        (root / name).write_bytes(b"safe")
+                    for name in ("worker-class-load-42.log", "worker-arguments-42.log"):
+                        (root / name).write_bytes(b"safe")
+                    (root / "receipt.json").write_text(json.dumps({
+                        "schema": "portable-arithmetic-capture-receipt/6"}))
+                    target = root / ("receipt.json" if field == "receipt"
+                                     else FILE_NAMES[field])
+                    if field == "receipt":
+                        parts = (["DYN4K_CAPTURE_ENV_",
+                                  "SENTINEL=portable-capture-check"]
+                                 if b"DYN4K_CAPTURE_ENV_" in raw else
+                                 ["OLLAMA_", "API_KEY"])
+                        target.write_text(json.dumps({
+                            "schema": "portable-arithmetic-capture-receipt/6",
+                            "diagnostic": parts}))
+                    else:
+                        target.write_bytes(raw)
+                    with self.assertRaisesRegex(FocusedRejected,
+                                                "exposed the environment"):
+                        load_version6_archive(root)
+
     def test_normal_execve_trace_passes(self):
         with tempfile.TemporaryDirectory() as directory:
             trace = Path(directory) / "execve.log"

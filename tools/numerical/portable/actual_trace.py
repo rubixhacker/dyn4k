@@ -51,10 +51,10 @@ def trace_exposes_environment(raw):
         raise TraceRejected("trace privacy input differs")
     if ENVIRONMENT_SENTINEL in raw or FORBIDDEN_ENVIRONMENT_KEY in raw:
         return True
-    if b"\\" not in raw:
+    if b'"' not in raw:
         return False
     for line in raw.splitlines():
-        if b"\\" not in line:
+        if b'"' not in line:
             continue
         fragments = []
         for token in QUOTED_BYTES.finditer(line):

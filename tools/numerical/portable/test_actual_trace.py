@@ -249,6 +249,17 @@ class ActualTraceTest(unittest.TestCase):
                 b'1.000001 write(4, "OLLAMA_\\x41PI_KEY", 14) = 14\n'
                 b'1.000002 +++ exited with 0 +++\n'}))
 
+    def test_privacy_decoder_checks_plain_split_fragments(self):
+        split_key = b'1.000001 writev(4, ["OLLAMA_", "API_KEY"], 2) = 14\n'
+        split_canary = (b'1.000001 writev(4, ["DYN4K_CAPTURE_ENV_", '
+                        b'"SENTINEL=portable-capture-check"], 2) = 50\n')
+        for raw in (split_key, split_canary,
+                    b'1.000001 write(4, "safe\\n", 5) = 5\n' + split_key):
+            with self.subTest(raw_sha256=hashlib.sha256(raw).hexdigest()):
+                self.assertTrue(trace_exposes_environment(raw))
+        self.assertFalse(trace_exposes_environment(
+            b'1.000001 writev(4, ["OLLAMA_", "not-a-key"], 2) = 17\n'))
+
     def test_rich_trace_is_checked_before_legacy_projection(self):
         trace = (
             b'1.000001 execve("/jdk/java", ["java"], 0x7f) = 0\n'
