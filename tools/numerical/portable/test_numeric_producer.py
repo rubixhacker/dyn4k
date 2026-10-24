@@ -14,6 +14,7 @@ from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
+import numeric_producer_trace as trace_logic
 from numeric_producer_trace import verify_transport, verify_stable_input, Unbound
 from receipt import Rejected
 
@@ -149,6 +150,36 @@ class TransportTest(unittest.TestCase):
         with self.assertRaisesRegex(Unbound, "writer ordering"):
             verify_transport(traces, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
                              "/work/args.txt", b"-cp\n/a\n")
+
+    def test_prepared_transport_events_keep_shared_writer_checks(self):
+        trace = self.trace()["100"].replace(
+            b'1.210000 write(4</work/mirror.log>, "hello\\n", 6) = 6',
+            b'1.205000 clone(child_stack=NULL, flags=CLONE_THREAD|CLONE_FILES) = 101\n'
+            b'1.210000 write(4</work/mirror.log>, "he", 2) = 2')
+        traces = {"100": trace, "101": (
+            b'1.215000 write(4</work/mirror.log>, "llo\\n", 4) = 4\n'
+            b'1.230000 +++ exited with 0 +++\n')}
+        expected = verify_transport(
+            traces, "/work/mirror.log", b"hello\n", TRANSPORT_EXEC,
+            "/work/args.txt", b"-cp\n/a\n", shared_writers=True)
+        events = trace_logic._events(
+            traces, ("/work/mirror.log", "/work/args.txt"))
+        with patch.object(trace_logic, "_events",
+                          side_effect=AssertionError("reparsed transport")):
+            observed = trace_logic._verify_transport_events(
+                traces, events, "/work/mirror.log", b"hello\n",
+                TRANSPORT_EXEC, "/work/args.txt", b"-cp\n/a\n",
+                shared_writers=True)
+        self.assertEqual(observed, expected)
+        changed = dict(traces)
+        changed["101"] = changed["101"].replace(b"llo\\n", b"lxo\\n")
+        bad_events = trace_logic._events(
+            changed, ("/work/mirror.log", "/work/args.txt"))
+        with self.assertRaises(Rejected):
+            trace_logic._verify_transport_events(
+                changed, bad_events, "/work/mirror.log", b"hello\n",
+                TRANSPORT_EXEC, "/work/args.txt", b"-cp\n/a\n",
+                shared_writers=True)
 
     def test_agent_input_requires_worker_read_and_stable_identity(self):
         path = "/private/agent.jar"

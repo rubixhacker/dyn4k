@@ -114,6 +114,82 @@ class FocusedReplayTest(unittest.TestCase):
                     {"41": changed}, _events({"41": changed}, {path}), "41",
                     path, b"abc\n", identity, "mirror")
 
+    def test_validated_projection_context_covers_shared_multi_output_threads(self):
+        root = Path.home() / "focused-output-context"
+        mirror, arguments, class_load = (
+            str(root / name) for name in ("mirror", "arguments", "class-load"))
+        status = lambda inode, size: (
+            "{st_dev=makedev(0, 42), st_ino=" + str(inode) +
+            ", st_mode=S_IFREG|0644, st_size=" + str(size) + "}")
+        main = (
+            '1.000001 execve("/jdk/java", ["/jdk/java"], 0x0) = 0\n'
+            '1.000002 clone(flags=CLONE_VM|CLONE_SIGHAND|CLONE_THREAD|CLONE_FILES) = 42\n'
+            f'1.000003 openat(AT_FDCWD, "{mirror}", O_WRONLY|O_CREAT|O_EXCL) = '
+            f'59<{mirror}>\n'
+            f'1.000004 write(59<{mirror}>, "abc\\n", 4) = 4\n'
+            f'1.000005 fstat(59<{mirror}>, {status(19, 4)}) = 0\n'
+            f'1.000006 close(59<{mirror}>) = 0\n'
+            '1.000020 +++ exited with 0 +++\n')
+        child = (
+            f'1.000007 openat(AT_FDCWD, "{arguments}", O_WRONLY|O_CREAT|O_EXCL) = '
+            f'60<{arguments}>\n'
+            f'1.000008 fstat(60<{arguments}>, {status(20, 0)}) = 0\n'
+            f'1.000009 write(60<{arguments}>, "arg\\n", 4) = 4\n'
+            f'1.000010 close(60<{arguments}>) = 0\n'
+            f'1.000011 openat(AT_FDCWD, "{class_load}", O_WRONLY|O_CREAT|O_EXCL) = '
+            f'61<{class_load}>\n'
+            f'1.000012 fstat(61<{class_load}>, {status(21, 0)}) = 0\n'
+            f'1.000013 write(61<{class_load}>, "xyz\\n", 4) = 4\n'
+            f'1.000014 close(61<{class_load}>) = 0\n'
+            '1.000019 +++ exited with 0 +++\n')
+
+        def packed(rows):
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                for tid, records in rows.items():
+                    archive.writestr("trace." + tid, records.encode())
+            return buffer.getvalue()
+
+        helper = packed({"51": "1.000001 +++ exited with 0 +++\n"})
+        protected = {mirror, arguments, class_load}
+        def checked(main_rows, child_rows):
+            worker, _ = focused_receipt._raw_projections(
+                {"worker_write_traces": packed({"41": main_rows, "42": child_rows}),
+                 "jdi_helper_traces": helper}, protected, set())
+            self.assertEqual(worker["threads"], 2)
+            return worker
+
+        worker = checked(main, child)
+        traces = worker["_validated_traces"]
+        events = worker["_validated_events"]
+        for role, path, data, inode, writer in (
+                ("mirror", mirror, b"abc\n", 19, "41"),
+                ("worker_arguments", arguments, b"arg\n", 20, "42"),
+                ("worker_class_load", class_load, b"xyz\n", 21, "42")):
+            proof = actual_output_v6.prove_file_lifetime(
+                traces, events, "41", path, data,
+                {"device_major": 0, "device_minor": 42,
+                 "inode": inode, "size": 4}, role)
+            self.assertEqual(proof["writer_tid"], writer)
+        for label, changed_main, changed_child in (
+                ("missing_birth", main.replace(
+                    '1.000002 clone(flags=CLONE_VM|CLONE_SIGHAND|CLONE_THREAD|CLONE_FILES) = 42\n',
+                    ""), child),
+                ("unshared_files", main.replace("CLONE_THREAD|CLONE_FILES",
+                                                "CLONE_THREAD"), child)):
+            with self.subTest(change=label):
+                candidate = checked(changed_main, changed_child)
+                with self.assertRaises((Rejected, jdi_bridge.EvidenceRejected)):
+                    actual_output_v6.prove_file_lifetime(
+                        candidate["_validated_traces"],
+                        candidate["_validated_events"], "41",
+                        arguments, b"arg\n",
+                        {"device_major": 0, "device_minor": 42,
+                         "inode": 20, "size": 4}, "worker_arguments")
+        with self.assertRaises(TraceRejected):
+            checked(main, child.replace("1.000007 openat",
+                                        "1.0000015 openat"))
+
     def test_version6_observer_requires_four_ordered_read_only_identities(self):
         paths = tuple(str(Path.home() / f"focused-observer-{number}")
                       for number in range(4))

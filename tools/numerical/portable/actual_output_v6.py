@@ -262,13 +262,11 @@ def verify_observer(raw_zip, interpreter, paths, identities, worker_events,
 
 
 def _shared_threads(traces, root, events):
-    plain = {int(pid): "\n".join(line.split(" ", 1)[1]
-             for line in data.decode().splitlines()) + "\n"
-             for pid, data in traces.items()}
-    _require(int(root) in plain, "version 6 output process is missing")
+    members = {int(pid): None for pid in traces}
+    _require(int(root) in members, "version 6 output process is missing")
     births = {}
     shared = jdi_bridge._worker_thread_ids(
-        plain, int(root), shared=True, timed_events=events, births=births)
+        members, int(root), shared=True, timed_events=events, births=births)
     for stamp, tid, _, call in events:
         owner = int(tid)
         while owner != int(root):

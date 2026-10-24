@@ -44,6 +44,7 @@ V6_RAW_MAX_RECORD_BYTES = 1024 * 1024
 ENVIRONMENT_SENTINEL = b"DYN4K_CAPTURE_ENV_SENTINEL=portable-capture-check"
 FORBIDDEN_ENVIRONMENT_KEY = b"OLLAMA_API_KEY"
 QUOTED_BYTES = re.compile(rb'"(?:[^"\\]|\\.)*"')
+QUOTED_TEXT = re.compile(r'"(?:[^"\\]|\\.)*"', re.S)
 
 
 def trace_exposes_environment(raw):
@@ -220,25 +221,15 @@ def _version6_fd_token(call, index, *, directory=False):
 
 def _project_descriptors(call, *, version6_raw=False, descriptors=None):
     output = []
-    quoted = False
-    escaped = False
     index = 0
     while index < len(call):
         char = call[index]
-        if quoted:
-            output.append(char)
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                quoted = False
-            index += 1
-            continue
         if char == '"':
-            quoted = True
-            output.append(char)
-            index += 1
+            quoted = QUOTED_TEXT.match(call, index)
+            if quoted is None:
+                raise TraceRejected("trace quoted record is incomplete")
+            output.append(quoted[0])
+            index = quoted.end()
             continue
         if call.startswith("AT_FDCWD<", index):
             if version6_raw:
@@ -277,8 +268,6 @@ def _project_descriptors(call, *, version6_raw=False, descriptors=None):
                 raise TraceRejected("version 6 descriptor decoration is unsupported")
         output.append(char)
         index += 1
-    if quoted:
-        raise TraceRejected("trace quoted record is incomplete")
     return "".join(output)
 
 
@@ -492,8 +481,11 @@ def validate_version6_raw_archive(raw, archive):
     return members
 
 
-def checked_projection(raw, protected=(), *, strict_outputs=(), version6_raw=False):
-    if (type(version6_raw) is not bool or type(raw) is not bytes or not raw or
+def checked_projection(raw, protected=(), *, strict_outputs=(), version6_raw=False,
+                       _retain_validated=False):
+    if (type(version6_raw) is not bool or type(_retain_validated) is not bool or
+            _retain_validated and not version6_raw or
+            type(raw) is not bytes or not raw or
             len(raw) > (V6_RAW_MAX_BYTES if version6_raw else MAX_READER_BYTES)):
         raise TraceRejected("rich trace archive exceeds reader bound")
     if not isinstance(protected, (set, frozenset, tuple, list)) or any(
@@ -529,10 +521,14 @@ def checked_projection(raw, protected=(), *, strict_outputs=(), version6_raw=Fal
                     projected.append(_project_descriptors(call,
                         version6_raw=version6_raw))
                 legacy.writestr("trace." + tid, ("\n".join(projected) + "\n").encode())
-        return {"raw_sha256": hashlib.sha256(raw).hexdigest(),
-                "legacy_zip": output.getvalue(), "threads": len(traces),
-                "raw_bytes": sum(map(len, traces.values())),
-                "aborted_calls": len(aborted)}
+        result = {"raw_sha256": hashlib.sha256(raw).hexdigest(),
+                  "legacy_zip": output.getvalue(), "threads": len(traces),
+                  "raw_bytes": sum(map(len, traces.values())),
+                  "aborted_calls": len(aborted)}
+        if _retain_validated:
+            result["_validated_traces"] = normalized
+            result["_validated_events"] = events
+        return result
     except (OSError, UnicodeError, ValueError, zipfile.BadZipFile, RuntimeError,
             IndexError, Rejected) as error:
         if isinstance(error, TraceRejected):

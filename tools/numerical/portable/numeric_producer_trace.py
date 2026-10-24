@@ -394,6 +394,17 @@ def verify_transport(traces, destination, mirror, selected_exec, response_path=N
                      exclusive=True, ordered=True, mirror_identity=None,
                      shared_writers=False, allow_initial_log_seek=False):
     events = _events(traces, (destination, response_path))
+    return _verify_transport_events(
+        traces, events, destination, mirror, selected_exec, response_path, response,
+        exclusive=exclusive, ordered=ordered, mirror_identity=mirror_identity,
+        shared_writers=shared_writers,
+        allow_initial_log_seek=allow_initial_log_seek)
+
+
+def _verify_transport_events(traces, events, destination, mirror, selected_exec,
+                             response_path=None, response=None, *,
+                             exclusive=True, ordered=True, mirror_identity=None,
+                             shared_writers=False, allow_initial_log_seek=False):
     if (not isinstance(selected_exec, tuple) or len(selected_exec) != 3 or
             not isinstance(selected_exec[0], str) or
             not isinstance(selected_exec[1], str) or

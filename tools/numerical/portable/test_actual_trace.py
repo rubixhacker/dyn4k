@@ -1,6 +1,8 @@
 import hashlib
 import io
+import json
 import struct
+import sys
 from pathlib import Path
 import unittest
 import zipfile
@@ -20,6 +22,40 @@ def archived(rows):
 
 
 class ActualTraceTest(unittest.TestCase):
+    def test_structural_projection_skips_quoted_buffer_work(self):
+        def projected_with_line_count(size):
+            payload = '8</home/test/protected> \\"-> ' + "x" * size
+            call = (f'write(7<TCP:[127.0.0.1:4000->127.0.0.1:5000]>, '
+                    f'{json.dumps(payload)}, {len(payload)}) = {len(payload)}')
+            lines = 0
+            previous = sys.gettrace()
+
+            def count_lines(frame, event, argument):
+                nonlocal lines
+                if (event == "line" and
+                        frame.f_code is actual_trace._project_descriptors.__code__):
+                    lines += 1
+                return count_lines
+
+            sys.settrace(count_lines)
+            try:
+                projected = actual_trace._project_descriptors(
+                    call, version6_raw=True)
+            finally:
+                sys.settrace(previous)
+            self.assertEqual(projected,
+                             f'write(7, {json.dumps(payload)}, '
+                             f'{len(payload)}) = {len(payload)}')
+            return lines
+
+        short = projected_with_line_count(8)
+        long = projected_with_line_count(4096)
+        self.assertLess(long - short, 200)
+        with self.assertRaises(TraceRejected):
+            actual_trace._project_descriptors(
+                'write(7<TCP:[127.0.0.1:4000->127.0.0.1:5000]>, '
+                '"unterminated, 12) = 12', version6_raw=True)
+
     def test_structural_identity_ignores_quoted_live_descriptor_text(self):
         protected = "/home/test/protected-output"
         mentioned = f"7<{protected}>"

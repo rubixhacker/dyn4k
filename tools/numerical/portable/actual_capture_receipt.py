@@ -25,7 +25,8 @@ from boolean_rotation_jdi import (jdi_bridge, source_guard as jdi_source_guard,
 from numeric_class_witness import build_agent, read_witness
 from numeric_producer import (MAX_TRACE_MEMBER, captured_file_identity, class_map, select_worker_exec,
                               verify_build_runtime, verify_witness_classpath)
-from numeric_producer_trace import (_events, successful_execve,
+from numeric_producer_trace import (_events, _verify_transport_events,
+                                    successful_execve,
                                     quoted, verify_stable_input, verify_transport)
 from prospective_compare import compare_host
 from receipt import Rejected
@@ -444,21 +445,17 @@ def _helper_argument_topology(argument_path, transport):
             "JDI helper startup log path differs")
 
 
-def _output_proof(files, metadata, traces, events, worker, transport, environment,
-                  verified_class_reads):
+def _output_proof(files, metadata, traces, events, worker, helper, transport,
+                  environment, verified_class_reads):
     _xml_mirror(files)
     selected = select_worker_exec(traces, _PINNED_JAVA)
-    with zipfile.ZipFile(io.BytesIO(files["worker_write_traces"])) as archive:
-        worker_raw = {name[6:]: archive.read(name) for name in archive.namelist()}
-    worker_traces, worker_aborted = normalize_rich_traces(worker_raw)
-    require(not worker_aborted, "version 6 protected worker output call is incomplete")
-    worker_events = _events(worker_traces, ())
-    helper_raw = jdi_bridge._trace_members(
-        files["jdi_helper_traces"], version6_raw=True)
-    helper_traces, helper_aborted = normalize_rich_traces({
-        str(pid): raw.encode() for pid, raw in helper_raw.items()})
-    require(not helper_aborted, "version 6 protected helper output call is incomplete")
-    helper_events = _events(helper_traces, ())
+    require(worker["raw_sha256"] == sha(files["worker_write_traces"]) and
+            helper["raw_sha256"] == sha(files["jdi_helper_traces"]),
+            "version 6 output raw projection differs")
+    worker_traces = worker["_validated_traces"]
+    worker_events = worker["_validated_events"]
+    helper_traces = helper["_validated_traces"]
+    helper_events = helper["_validated_events"]
     argv = _helper_argv(transport)
     helper_selected = (str(transport["helper_pid"]), argv[0], tuple(argv))
     spec = (
@@ -476,8 +473,8 @@ def _output_proof(files, metadata, traces, events, worker, transport, environmen
         path = metadata[path_key]
         data = files[data_key]
         expected_identity = metadata[identity_key]
-        transport_check = verify_transport(
-            scope, path, data, execution,
+        transport_check = _verify_transport_events(
+            scope, scope_events, path, data, execution,
             metadata["response_path"] if role == "mirror" else None,
             files["worker_classpath"] if role == "mirror" else None,
             exclusive=role == "mirror", shared_writers=role != "mirror",
@@ -692,7 +689,9 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
             {Path(path).name for path in class_paths} and
             metadata["helper_class_before"] == metadata["helper_class_after"],
             "JDI helper class input identity changed")
-    helper_traces, _ = normalize_rich_traces(_trace_map(files["jdi_helper_traces"]))
+    require(helper["raw_sha256"] == sha(files["jdi_helper_traces"]),
+            "JDI helper raw projection differs")
+    helper_traces = helper["_validated_traces"]
     _helper_argument_topology(metadata["helper_argument_path"], transport)
     require(type(metadata["helper_argument_identity"]) is dict and
             set(metadata["helper_argument_identity"]) == {
@@ -776,14 +775,15 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
 
 def _raw_projections(files, protected, output_paths):
     worker = checked_projection(files["worker_write_traces"], protected,
-                                version6_raw=True)
+                                version6_raw=True, _retain_validated=True)
     helper = checked_projection(files["jdi_helper_traces"], protected,
-                                strict_outputs=set(output_paths), version6_raw=True)
+                                strict_outputs=set(output_paths), version6_raw=True,
+                                _retain_validated=True)
     return worker, helper
 
 
 def _verified_compiled_marker_reads(files, worker_pid, class_bytes, origins,
-                                    witnessed):
+                                    witnessed, validated_worker=None):
     candidates = {}
     for name, data in class_bytes.items():
         origin = origins[name]
@@ -794,9 +794,15 @@ def _verified_compiled_marker_reads(files, worker_pid, class_bytes, origins,
                     "marker class provider differs from witnessed origin")
             candidates[str(origin / (name + ".class"))] = data
     require(candidates, "compiled marker class inventory differs")
-    with zipfile.ZipFile(io.BytesIO(files["worker_write_traces"])) as archive:
-        raw = {name[6:]: archive.read(name) for name in archive.namelist()}
-    traces, _ = normalize_rich_traces(raw)
+    if validated_worker is None:
+        with zipfile.ZipFile(io.BytesIO(files["worker_write_traces"])) as archive:
+            raw = {name[6:]: archive.read(name) for name in archive.namelist()}
+        traces, _ = normalize_rich_traces(raw)
+    else:
+        require(validated_worker["raw_sha256"] ==
+                sha(files["worker_write_traces"]),
+                "compiled marker class raw projection differs")
+        traces = validated_worker["_validated_traces"]
     selected = select_worker_exec(traces, _PINNED_JAVA)
     require(selected[0] == str(worker_pid), "marker class selected worker differs")
     selected_reads = {}
@@ -928,10 +934,10 @@ def make_version6_receipt(files, commit, runtime_executable=_PINNED_JAVA):
                    prefix in data for prefix in actual_arithmetic._WITNESS_PREFIXES)}
     worker, helper = _raw_projections(files, protected | class_paths, output_paths)
     verified_reads, selected_paths = _verified_compiled_marker_reads(
-        files, metadata["worker_pid"], expected_classes, origins, witnessed)
+        files, metadata["worker_pid"], expected_classes, origins, witnessed, worker)
     require(selected_paths == class_paths, "compiled marker class protection differs")
     output_proofs, output_observer, socket_proofs, binding = _output_proof(
-        files, metadata, traces, events, worker, transport, environment,
+        files, metadata, traces, events, worker, helper, transport, environment,
         verified_reads)
     legacy_files = _legacy_files(files, worker)
     legacy = make_capture_receipt(
