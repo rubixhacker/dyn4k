@@ -1515,14 +1515,14 @@ class IndependentGateSeamTests(unittest.TestCase):
 
     def test_replay_cost_window_binds_complete_current_and_historical_bytes(self):
         revision = independent_gates.REPLAY_COST_SOURCE_REVISION
-        self.assertEqual("2c107b509c16ae2b72372014bfa6b1991648d608", revision)
+        self.assertEqual("82f8088171537ae6be09a20649f21daa71f460e1", revision)
         changed = {
             "actual_capture_receipt.py":
-                "28551e469ebb6b22cf6241e00e2861601d015a7204b23faeca371ae028b8938e",
+                "f5379558a416cf556b3eb53b343197d587238df9c2d3e7d0755b60193e117123",
             "actual_output_v6.py":
                 "9a902d3adfa6f9ce1ed5471992feb1fcef90027425aed2a4388ba5f1d97d556c",
             "actual_trace.py":
-                "afa78b2147129b875fab2a13ded477fc450d732b2e93f5548ed5530b1add4257",
+                "0ae5ade1e7f5e54785326a03448a6986d34929317889e37e6601d201f4ffd478",
             "numeric_producer_trace.py":
                 "9b219f1e142b0758676935201fd3d12acc9f012f679277a77af748ae21871393",
         }
@@ -1566,6 +1566,21 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(independent_gates._prospective_checker_binding(ROOT, "HEAD"),
                          checker)
         self.assertEqual(independent_gates._p2_producer_binding(ROOT, "HEAD"), producer)
+
+    def test_replay_cost_window_excludes_incomplete_private_revisions(self):
+        for revision in (
+                "2c107b509c16ae2b72372014bfa6b1991648d608",
+                "abb87a0f27443a072ff7dfa95f41ba7c96b03234",
+                "4a566167209409763195be99b07c17548900ea70",
+                "609205c0b0bd09fa830d098a54dba7a845e4cb47",
+                "7a72696a4b01d02a21d7d529d70bfe387cf5b7db"):
+            with self.subTest(revision=revision):
+                with self.assertRaisesRegex(ValueError,
+                                            "prospective policy/checker blob differs"):
+                    independent_gates._prospective_checker_binding(ROOT, revision)
+                with self.assertRaisesRegex(ValueError,
+                                            "(JDK 21 JDI producer|reviewed P2 raw producer) blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, revision)
 
     def test_replay_cost_window_rejects_local_candidate_and_cache_drift(self):
         revision = independent_gates.REPLAY_COST_SOURCE_REVISION
