@@ -157,6 +157,7 @@ OBSERVER_OPERANDS_SOURCE_REVISION = "06e32732fecd27122c2379ec76952e391ec8cce9"
 PATH_MODEL_SOURCE_REVISION = "67cfb611f69edd3c19698d973fa402a8190dbbd6"
 OBSERVER_BOUNDS_SOURCE_REVISION = "109e2a54bcbd9aa618efe3b3f48d79ad8ff6e04c"
 NATIVE_UDP_GRAMMAR_SOURCE_REVISION = "f111a2d48a34359930722e38b7f27a87660155d5"
+WORKER_PID_SOURCE_REVISION = "8623c04ed2ce5ff5ef8c528f5517ec6e7cf3443e"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -190,11 +191,14 @@ APPROVED_PROSPECTIVE_OBSERVER_BOUNDS_CHECKERS = {
 APPROVED_PROSPECTIVE_NATIVE_UDP_GRAMMAR_CHECKERS = {
     **APPROVED_PROSPECTIVE_OBSERVER_BOUNDS_CHECKERS,
 }
+APPROVED_PROSPECTIVE_WORKER_PID_CHECKERS = {
+    **APPROVED_PROSPECTIVE_NATIVE_UDP_GRAMMAR_CHECKERS,
+}
 APPROVED_PROSPECTIVE_EXECUTABLE_SHARED = {
     path: APPROVED_POLICY[path] for path in
     ("tools/numerical/compare.py", "tools/numerical/physical.py")
 }
-PINNED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_NATIVE_UDP_GRAMMAR_CHECKERS)
+PINNED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_WORKER_PID_CHECKERS)
 APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS = {
     **APPROVED_PROSPECTIVE_CHECKERS,
     "prospective_compare.py": "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f",
@@ -472,6 +476,11 @@ NATIVE_UDP_GRAMMAR_CAPTURE_DEPENDENCIES = {
     "tools/numerical/portable/actual_trace.py":
         "d9b95a8164c5898c99972ae0219016bb302589a7fab6c4798dc9d6e1805acc3d",
 }
+WORKER_PID_CAPTURE_DEPENDENCIES = {
+    **NATIVE_UDP_GRAMMAR_CAPTURE_DEPENDENCIES,
+    "tools/numerical/portable/actual_capture_receipt.py":
+        "d7873090e89c91740a177418efd96a0f44e14f2d37c4080fdc15dfd568fd4ec8",
+}
 P2_V6_DEPENDENCIES = {
     **P2_EXECUTABLE_LOCAL_DEPENDENCIES,
     "tools/numerical/portable/build.gradle.kts":
@@ -549,6 +558,12 @@ P2_NATIVE_UDP_GRAMMAR_DEPENDENCIES = {
         NATIVE_UDP_GRAMMAR_CAPTURE_DEPENDENCIES[
             "tools/numerical/portable/actual_trace.py"],
 }
+P2_WORKER_PID_DEPENDENCIES = {
+    **P2_NATIVE_UDP_GRAMMAR_DEPENDENCIES,
+    "tools/numerical/portable/actual_capture_receipt.py":
+        WORKER_PID_CAPTURE_DEPENDENCIES[
+            "tools/numerical/portable/actual_capture_receipt.py"],
+}
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_JVM8_PRODUCERS = {
     **P2_ROTATION_PREMISE_PRODUCERS,
@@ -601,7 +616,10 @@ APPROVED_P2_OBSERVER_BOUNDS_PRODUCERS = {
 APPROVED_P2_NATIVE_UDP_GRAMMAR_PRODUCERS = {
     **APPROVED_P2_OBSERVER_BOUNDS_PRODUCERS,
 }
-PINNED_P2_CURRENT_LOCAL_PRODUCERS = dict(APPROVED_P2_NATIVE_UDP_GRAMMAR_PRODUCERS)
+APPROVED_P2_WORKER_PID_PRODUCERS = {
+    **APPROVED_P2_NATIVE_UDP_GRAMMAR_PRODUCERS,
+}
+PINNED_P2_CURRENT_LOCAL_PRODUCERS = dict(APPROVED_P2_WORKER_PID_PRODUCERS)
 APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS = {
     **APPROVED_P2_PRODUCERS,
     "baseline_capture.py": "b7bb228bde030d7fd6949ae3e7ca743a92060b436797835c6e4f7e12d779ad6c",
@@ -1061,6 +1079,7 @@ def _prospective_checker_binding(repository, candidate_sha):
         return checked.returncode == 0
 
     executable_window = descends_from(PROSPECTIVE_EXECUTABLE_CHECKER_REVISION)
+    worker_pid_window = descends_from(WORKER_PID_SOURCE_REVISION)
     native_udp_window = descends_from(NATIVE_UDP_GRAMMAR_SOURCE_REVISION)
     observer_bounds_window = descends_from(OBSERVER_BOUNDS_SOURCE_REVISION)
     path_model_window = descends_from(PATH_MODEL_SOURCE_REVISION)
@@ -1071,7 +1090,9 @@ def _prospective_checker_binding(repository, candidate_sha):
     baseline_compat_window = descends_from(BASELINE_COMPAT_SOURCE_REVISION)
     private_launch_window = descends_from(PRIVATE_LAUNCH_SOURCE_REVISION)
     v6_window = descends_from(PROSPECTIVE_V6_SOURCE_REVISION)
-    if native_udp_window:
+    if worker_pid_window:
+        approved = APPROVED_PROSPECTIVE_WORKER_PID_CHECKERS
+    elif native_udp_window:
         approved = APPROVED_PROSPECTIVE_NATIVE_UDP_GRAMMAR_CHECKERS
     elif observer_bounds_window:
         approved = APPROVED_PROSPECTIVE_OBSERVER_BOUNDS_CHECKERS
@@ -1137,7 +1158,9 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
         if hashlib.sha256(committed).hexdigest() != expected:
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
-    executable_dependencies = (NATIVE_UDP_GRAMMAR_CAPTURE_DEPENDENCIES
+    executable_dependencies = (WORKER_PID_CAPTURE_DEPENDENCIES
+                               if worker_pid_window else
+                               NATIVE_UDP_GRAMMAR_CAPTURE_DEPENDENCIES
                                if native_udp_window else
                                OBSERVER_BOUNDS_CAPTURE_DEPENDENCIES
                                if observer_bounds_window else
@@ -1149,7 +1172,7 @@ def _prospective_checker_binding(repository, candidate_sha):
                                PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES
                                if executable_window else {})
     local_dependencies = (APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
-                          NATIVE_UDP_GRAMMAR_CAPTURE_DEPENDENCIES)
+                          WORKER_PID_CAPTURE_DEPENDENCIES)
     for relative, expected in local_dependencies.items():
         local = Path(__file__).resolve().parents[2] / relative
         try:
@@ -1249,6 +1272,7 @@ def _p2_producer_binding(repository, candidate_sha):
 
     if not descends_from(PROSPECTIVE_CHECKER_REVISION):
         raise ValueError("candidate predates reviewed P2 raw producer revision")
+    worker_pid_window = descends_from(WORKER_PID_SOURCE_REVISION)
     native_udp_window = descends_from(NATIVE_UDP_GRAMMAR_SOURCE_REVISION)
     observer_bounds_window = descends_from(OBSERVER_BOUNDS_SOURCE_REVISION)
     path_model_window = descends_from(PATH_MODEL_SOURCE_REVISION)
@@ -1265,7 +1289,9 @@ def _p2_producer_binding(repository, candidate_sha):
     rotation_premise = descends_from(P2_ROTATION_PREMISE_SOURCE_REVISION)
     boolean_jdi_final = descends_from(P2_BOOLEAN_JDI_FINAL_SOURCE_REVISION)
     boolean_jdi = descends_from(P2_BOOLEAN_JDI_SOURCE_REVISION)
-    if native_udp_window:
+    if worker_pid_window:
+        approved = APPROVED_P2_WORKER_PID_PRODUCERS
+    elif native_udp_window:
         approved = APPROVED_P2_NATIVE_UDP_GRAMMAR_PRODUCERS
     elif observer_bounds_window:
         approved = APPROVED_P2_OBSERVER_BOUNDS_PRODUCERS
@@ -1346,7 +1372,9 @@ def _p2_producer_binding(repository, candidate_sha):
         if hashlib.sha256(committed).hexdigest() != digest:
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     if jdk21_jdi:
-        dependencies = (P2_NATIVE_UDP_GRAMMAR_DEPENDENCIES
+        dependencies = (P2_WORKER_PID_DEPENDENCIES
+                        if worker_pid_window else
+                        P2_NATIVE_UDP_GRAMMAR_DEPENDENCIES
                         if native_udp_window else
                         P2_OBSERVER_BOUNDS_DEPENDENCIES
                         if observer_bounds_window else
@@ -1360,27 +1388,27 @@ def _p2_producer_binding(repository, candidate_sha):
                         else P2_JDK21_JDI_DEPENDENCIES)
         _source_binding(repository, candidate_sha, dependencies,
                         "JDK 21 JDI producer",
-                        local_approved=P2_NATIVE_UDP_GRAMMAR_DEPENDENCIES)
+                        local_approved=P2_WORKER_PID_DEPENDENCIES)
     elif corrected_jdi:
         _source_binding(repository, candidate_sha, P2_CORRECTED_JDI_DEPENDENCIES,
                         "corrected JDI producer",
-                        local_approved=P2_NATIVE_UDP_GRAMMAR_DEPENDENCIES)
+                        local_approved=P2_WORKER_PID_DEPENDENCIES)
     elif bounded_jdi:
         _source_binding(repository, candidate_sha, P2_BOUNDED_JDI_DEPENDENCIES,
                         "bounded JDI producer",
-                        local_approved=P2_NATIVE_UDP_GRAMMAR_DEPENDENCIES)
+                        local_approved=P2_WORKER_PID_DEPENDENCIES)
     elif rotation_premise:
         _source_binding(repository, candidate_sha, P2_ROTATION_PREMISE_DEPENDENCIES,
                         "rotation premise producer",
-                        local_approved=P2_NATIVE_UDP_GRAMMAR_DEPENDENCIES)
+                        local_approved=P2_WORKER_PID_DEPENDENCIES)
     elif boolean_jdi_final:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_FINAL_DEPENDENCIES,
                         "Boolean JDI final producer",
-                        local_approved=P2_NATIVE_UDP_GRAMMAR_DEPENDENCIES)
+                        local_approved=P2_WORKER_PID_DEPENDENCIES)
     elif boolean_jdi:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_DEPENDENCIES,
                         "Boolean JDI producer",
-                        local_approved=P2_NATIVE_UDP_GRAMMAR_DEPENDENCIES)
+                        local_approved=P2_WORKER_PID_DEPENDENCIES)
     if not v6_window:
         for relative in (P2_BASELINE_COMPAT_DEPENDENCIES.keys() -
                          P2_EXECUTABLE_LOCAL_DEPENDENCIES.keys()):
@@ -1389,7 +1417,7 @@ def _p2_producer_binding(repository, candidate_sha):
                 actual = hashlib.sha256(local.read_bytes()).hexdigest()
             except OSError as error:
                 raise ValueError(f"reviewed P2 raw producer blob differs: {relative}") from error
-            if actual != P2_NATIVE_UDP_GRAMMAR_DEPENDENCIES[relative]:
+            if actual != P2_WORKER_PID_DEPENDENCIES[relative]:
                 raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     return dict(approved)
 
