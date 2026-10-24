@@ -3,6 +3,7 @@ import io
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import stat
 import sys
@@ -493,6 +494,21 @@ def _output_proof(files, metadata, traces, events, worker, helper, transport,
                  (lifetime["writer_tid"], lifetime["writer_fd"])),
                 "version 6 output destination binding differs")
         checked[role] = {"transport": transport_check, "lifetime": lifetime}
+    captured_tmpdir = transport["temp_path"]
+    require(type(captured_tmpdir) is str and
+            os.path.isabs(captured_tmpdir) and
+            len(os.fsencode(captured_tmpdir)) <= 40,
+            "version 6 observer capture temporary root differs")
+    try:
+        home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+        captured_root = Path(captured_tmpdir)
+        valid_root = (captured_root.resolve() == captured_root and
+                      captured_root != home and captured_root.is_relative_to(home))
+    except (OSError, RuntimeError):
+        valid_root = False
+    require(valid_root, "version 6 observer capture temporary root differs")
+    _helper_argument_topology(metadata["helper_argument_path"], transport)
+    captured_environment = {**environment, "TMPDIR": captured_tmpdir}
     current_interpreter = Path(sys.executable).resolve()
     try:
         interpreter_identity = captured_file_identity(current_interpreter)
@@ -505,7 +521,7 @@ def _output_proof(files, metadata, traces, events, worker, helper, transport,
             metadata["observer_interpreter_sha256"] == interpreter_digest and
             metadata["observer_exit_code"] == 0 and
             metadata["observer_environment_sha256"] ==
-            actual_output_v6.declared_environment_hash(environment),
+            actual_output_v6.declared_environment_hash(captured_environment),
             "version 6 observer interpreter or declared environment differs")
     paths = tuple(metadata[key] for key in (
         "mirror_path", "argument_path", "class_load_path", "helper_argument_path"))

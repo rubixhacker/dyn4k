@@ -24,6 +24,103 @@ from receipt import Rejected
 
 
 class FocusedReplayTest(unittest.TestCase):
+    def test_output_proof_binds_captured_observer_environment_across_replay_scratch(self):
+        current = capture_actual.child_environment(focused=True)
+        captured_root = Path(os.environ["TMPDIR"]).with_name("d4c.capture")
+        scratch = captured_root / "dyn4k-actual-abc"
+        paths = tuple(str(scratch / name) for name in (
+            "mirror.log", "worker-arguments.log", "worker-class-load.log",
+            "jdi-helper-arguments.log"))
+        interpreter = Path(focused_receipt.sys.executable).resolve()
+        identity = focused_receipt.captured_file_identity(interpreter)
+        metadata = dict(zip(("mirror_path", "argument_path", "class_load_path",
+                             "helper_argument_path"), paths))
+        metadata.update({"response_path": str(scratch / "response.txt"),
+                         "mirror_identity": {}, "argument_identity": {},
+                         "class_load_identity": {}, "helper_argument_identity": {},
+                         "observer_interpreter_path": str(interpreter),
+                         "observer_interpreter_identity": identity,
+                         "observer_interpreter_after_identity": identity,
+                         "observer_interpreter_sha256": hashlib.sha256(
+                             interpreter.read_bytes()).hexdigest(),
+                         "observer_command": list(actual_output_v6.observer_command(
+                             str(interpreter), paths)), "observer_exit_code": 0})
+        captured = {**current, "TMPDIR": str(captured_root)}
+        metadata["observer_environment_sha256"] = \
+            actual_output_v6.declared_environment_hash(captured)
+        transport = {"helper_pid": 51, "helper_classes_path": str(scratch / "classes"),
+                     "output_path": str(scratch / "jdi-output"),
+                     "temp_path": str(captured_root), "port": 4000}
+        files = {"worker_write_traces": b"worker raw", "jdi_helper_traces": b"helper raw",
+                 "mirror": b"line\n", "worker_classpath": b"classpath\n",
+                 "output_observer_traces": b"observer raw",
+                 "worker_arguments": b"args", "worker_class_load": b"class",
+                 "jdi_helper_arguments": b"helper"}
+        worker = {"raw_sha256": hashlib.sha256(files["worker_write_traces"]).hexdigest(),
+                  "aborted_calls": 0, "_validated_traces": {},
+                  "_validated_events": [], "legacy_zip": b"projected"}
+        helper = {"raw_sha256": hashlib.sha256(files["jdi_helper_traces"]).hexdigest(),
+                  "aborted_calls": 0, "_validated_traces": {},
+                  "_validated_events": []}
+
+        def checked_transport(scope, scope_events, destination, data, selected,
+                              *args, **kwargs):
+            if selected[0] == "51" and selected[2][3] != \
+                    "-Djava.io.tmpdir=" + str(captured_root):
+                raise FocusedRejected("raw helper argv differs")
+            return {"mirror_destination": destination,
+                    "mirror_writer_tid": "41", "mirror_fd": "4"}
+
+        def checked_lifetime(scope, scope_events, pid, path, data, expected, role):
+            return {"writer_tid": "41", "writer_fd": "4"}
+
+        with patch.object(focused_receipt, "_xml_mirror"), \
+                patch.object(focused_receipt, "select_worker_exec",
+                             return_value=("41", "/jdk/java", ("/jdk/java",))), \
+                patch.object(focused_receipt, "_verify_transport_events",
+                             side_effect=checked_transport), \
+                patch.object(actual_output_v6, "prove_file_lifetime",
+                             side_effect=checked_lifetime), \
+                patch.object(actual_output_v6, "verify_observer",
+                             return_value={"status": "PROVED_V6_OUTPUT_OBSERVER"}), \
+                patch.object(actual_output_v6, "prove_socket_writers",
+                             return_value=(frozenset(), [])):
+            proof = lambda values, declaration, selected=current: focused_receipt._output_proof(
+                files, values, {}, [], worker, helper, declaration, selected,
+                frozenset())
+            self.assertEqual(proof(metadata, transport)[1]["status"],
+                             "PROVED_V6_OUTPUT_OBSERVER")
+            self.assertEqual(current["TMPDIR"], os.environ["TMPDIR"])
+            with self.assertRaisesRegex(FocusedRejected,
+                                        "observer interpreter or declared environment"):
+                proof({**metadata, "observer_environment_sha256": "0" * 64}, transport)
+            for key in ("HOME", "CODEX_HOME", "LANG",
+                        "DYN4K_CAPTURE_ENV_SENTINEL", "FAKE_CREDENTIAL"):
+                changed = {**current, key: "synthetic-different-state"}
+                with self.subTest(environment_key=key), self.assertRaisesRegex(
+                        FocusedRejected,
+                        "observer interpreter or declared environment"):
+                    proof(metadata, transport, changed)
+            with self.assertRaises(FocusedRejected):
+                proof(metadata, {**transport, "temp_path": str(captured_root) + "-other"})
+            with self.assertRaises(FocusedRejected):
+                proof({**metadata, "helper_argument_path": str(scratch / "wrong.log")},
+                      transport)
+            wrong_root = captured_root.with_name("d4c.other")
+            wrong_helper = str(wrong_root / scratch.name /
+                               "jdi-helper-arguments.log")
+            coupled = {**metadata, "helper_argument_path": wrong_helper,
+                       "observer_environment_sha256":
+                           actual_output_v6.declared_environment_hash(
+                               {**current, "TMPDIR": str(wrong_root)}),
+                       "observer_command": list(actual_output_v6.observer_command(
+                           str(interpreter), (*paths[:3], wrong_helper)))}
+            changed_transport = {**transport, "temp_path": str(wrong_root),
+                                 "output_path": str(wrong_root / scratch.name /
+                                                    "jdi-output")}
+            with self.assertRaisesRegex(FocusedRejected, "raw helper argv differs"):
+                proof(coupled, changed_transport)
+
     def test_output_proof_rejects_aborted_worker_and_helper_calls(self):
         class ReachedTransport(Exception):
             pass
