@@ -1031,6 +1031,23 @@ class FocusedWorkerIdentityProofTest(unittest.TestCase):
                                            "selected worker identity differs"):
                 self._run_proof("41", 41, legacy_pid)
 
+    def test_jdi_declaration_worker_pid_requires_exact_integer(self):
+        focused_receipt._transport_worker_identity({"worker_pid": 41}, "41")
+        for value in (41.0, "41", True, None):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                    FocusedRejected, "focused JDI transport declaration differs"):
+                focused_receipt._transport_worker_identity(
+                    {"worker_pid": value}, "41")
+
+    def test_worker_only_mirror_scope_uses_complete_graph_for_ancestry(self):
+        focused_receipt._mirror_worker_scope(
+            {"worker_pid": "41", "parent_pids": []}, "41")
+        for mirror in ({"worker_pid": "42", "parent_pids": []},
+                       {"worker_pid": "41", "parent_pids": ["7"]}):
+            with self.subTest(mirror=mirror), self.assertRaisesRegex(
+                    FocusedRejected, "direct mirror worker ancestry differs"):
+                focused_receipt._mirror_worker_scope(mirror, "41")
+
 
 if __name__ == "__main__":
     unittest.main()

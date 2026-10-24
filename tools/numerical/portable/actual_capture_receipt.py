@@ -402,6 +402,17 @@ def _helper_argv(transport):
             str(transport["port"]), "org.dyn4j.geometry.Transform", "1800", "600"]
 
 
+def _transport_worker_identity(transport, selected_pid):
+    require(type(transport["worker_pid"]) is int and
+            transport["worker_pid"] == int(selected_pid),
+            "focused JDI transport declaration differs")
+
+
+def _mirror_worker_scope(mirror, selected_pid):
+    require(mirror["worker_pid"] == selected_pid and mirror["parent_pids"] == [],
+            "direct mirror worker ancestry differs")
+
+
 def _output_proof(files, metadata, traces, events, worker, transport, environment,
                   verified_class_reads):
     _xml_mirror(files)
@@ -578,8 +589,7 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
         traces, response_path, metadata["response_identity"], selected[0],
         files["worker_classpath"], selected[1:], allow_external_readers=True)
     mirror = output_proofs["mirror"]["transport"]
-    require(mirror["worker_pid"] == selected[0] and mirror["parent_pids"],
-            "direct mirror worker ancestry differs")
+    _mirror_worker_scope(mirror, selected[0])
     arguments = output_proofs["worker_arguments"]["transport"]
     class_load = output_proofs["worker_class_load"]["transport"]
     temporary_root = Path(os.environ.get("TMPDIR", ""))
@@ -602,9 +612,9 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
         "schema", "port", "worker_pid", "helper_pid", "helper_classes_path",
         "output_path", "temp_path", "live_socket_owner"} and
         transport["schema"] == "boolean-jdi-transport/1" and
-        transport["worker_pid"] == int(selected[0]) and
         transport["live_socket_owner"] is True,
         "focused JDI transport declaration differs")
+    _transport_worker_identity(transport, selected[0])
     expected_command = [
         str(ROOT / "gradlew"), "jvmTest", "--tests",
         TEST_CLASS + "." + _FOCUSED_BOOLEAN_METHOD,
