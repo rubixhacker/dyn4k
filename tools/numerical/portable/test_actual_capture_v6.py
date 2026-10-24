@@ -24,6 +24,64 @@ from receipt import Rejected
 
 
 class FocusedReplayTest(unittest.TestCase):
+    def test_output_proof_rejects_aborted_worker_and_helper_calls(self):
+        class ReachedTransport(Exception):
+            pass
+
+        def archive(aborted):
+            trace = (b"1.000001 accept(3<TCP:[127.0.0.1:4000]>, NULL, NULL "
+                     b"<unfinished ...>\n" if aborted else b"")
+            trace += b"1.000002 +++ exited with 0 +++\n"
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as zipped:
+                zipped.writestr("trace.41", trace)
+            return output.getvalue()
+
+        metadata = {
+            "mirror_path": "/home/test/mirror",
+            "mirror_identity": {"device_major": 0, "device_minor": 42,
+                                "inode": 19, "size": 2},
+            "response_path": "/home/test/response",
+        }
+        transport = {
+            "helper_pid": 51,
+            "helper_classes_path": "/home/test/helper",
+            "output_path": "/home/test/jdi-output",
+            "temp_path": "/home/test/tmp",
+            "port": 4000,
+        }
+
+        for worker_aborted, helper_aborted, expected in (
+                (False, False, "REACHED_TRANSPORT"),
+                (True, False, "version 6 protected worker output call is incomplete"),
+                (False, True, "version 6 protected helper output call is incomplete")):
+            with self.subTest(worker_aborted=worker_aborted,
+                              helper_aborted=helper_aborted):
+                files = {
+                    "worker_write_traces": archive(worker_aborted),
+                    "jdi_helper_traces": archive(helper_aborted),
+                    "mirror": b"x\n",
+                    "worker_classpath": b"classpath\n",
+                }
+                worker, helper = focused_receipt._raw_projections(
+                    files, set(), set())
+                self.assertEqual((worker["aborted_calls"], helper["aborted_calls"]),
+                                 (int(worker_aborted), int(helper_aborted)))
+                with patch.object(focused_receipt, "_xml_mirror"), \
+                        patch.object(focused_receipt, "select_worker_exec",
+                                     return_value=("41", "/jdk/java", ("/jdk/java",))), \
+                        patch.object(focused_receipt, "_verify_transport_events",
+                                     side_effect=ReachedTransport):
+                    try:
+                        focused_receipt._output_proof(
+                            files, metadata, {}, [], worker, helper, transport,
+                            {}, frozenset())
+                    except ReachedTransport:
+                        outcome = "REACHED_TRANSPORT"
+                    except FocusedRejected as error:
+                        outcome = str(error)
+                self.assertEqual(outcome, expected)
+
     def test_failed_observer_raw_stays_private_and_counted(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
             root = Path(directory)

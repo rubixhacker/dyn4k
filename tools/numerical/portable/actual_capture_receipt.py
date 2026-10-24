@@ -452,6 +452,10 @@ def _output_proof(files, metadata, traces, events, worker, helper, transport,
     require(worker["raw_sha256"] == sha(files["worker_write_traces"]) and
             helper["raw_sha256"] == sha(files["jdi_helper_traces"]),
             "version 6 output raw projection differs")
+    require(worker["aborted_calls"] == 0,
+            "version 6 protected worker output call is incomplete")
+    require(helper["aborted_calls"] == 0,
+            "version 6 protected helper output call is incomplete")
     worker_traces = worker["_validated_traces"]
     worker_events = worker["_validated_events"]
     helper_traces = helper["_validated_traces"]
