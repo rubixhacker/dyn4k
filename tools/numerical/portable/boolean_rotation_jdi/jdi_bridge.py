@@ -914,6 +914,13 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
     def continuous(events, threads, fd, start, end, created_by=None):
         skipped_provider = False
         operand = r'\(' + re.escape(fd) + r'(?=[<,)])'
+        relevant = ("clone(", "clone3(", "fork(", "vfork(", "dup(",
+                    "dup2(", "dup3(", "fcntl(", "close(", "shutdown(",
+                    "close_range(", "unshare(", "setns(", "execve(",
+                    "execveat(", "open(", "openat(", "openat2(", "creat(",
+                    "socket(", "accept(", "accept4(", "sendmsg(", "recvmsg(")
+        close_range = re.compile(
+            r'close_range\(([0-9]+), ([0-9]+), ([^)]+)\) = 0')
         for stamp, tid, _, call in events:
             if int(tid) not in threads or not start <= stamp <= end:
                 continue
@@ -922,8 +929,10 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
                     re.search(r'\) = ' + fd + r'<', call)):
                 skipped_provider = True
                 continue
-            closed_range = re.fullmatch(
-                r'close_range\(([0-9]+), ([0-9]+), ([^)]+)\) = 0', call)
+            if not call.startswith(relevant):
+                continue
+            closed_range = (close_range.fullmatch(call)
+                            if call.startswith("close_range(") else None)
             if closed_range and (closed_range[3] != "0" or
                     int(closed_range[1]) <= int(fd) <= int(closed_range[2])):
                 raise EvidenceRejected("JDI version 6 socket was closed by range")
@@ -977,11 +986,16 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
 
     def handshake(events, fd, token, names):
         found = {}
+        prefixes = tuple(name + "(" for name in names)
+        patterns = {name: re.compile(
+            name + r'\(' + fd + r'<' + re.escape(token) +
+            r'>, "JDWP-Handshake", 14(?:, 0, NULL, '
+            r'(?:NULL|0))?\) = 14') for name in names}
         for stamp, tid, index, call in events:
+            if not call.startswith(prefixes):
+                continue
             for name in names:
-                if re.fullmatch(name + r'\(' + fd + r'<' + re.escape(token) +
-                                r'>, "JDWP-Handshake", 14(?:, 0, NULL, '
-                                r'(?:NULL|0))?\) = 14', call):
+                if patterns[name].fullmatch(call):
                     if name in found:
                         raise EvidenceRejected("JDI version 6 handshake is ambiguous")
                     found[name] = (stamp, tid, index)
@@ -1003,17 +1017,20 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
                 after_index, after_stamp, send, receive):
         counts = {"send": 0, "receive": 0}
         last = after_stamp
+        descriptor = r'\(' + fd + r'<' + re.escape(token) + r'>,'
+        patterns = (("send", re.compile(r'(?:' + "|".join(send) + r')' + descriptor)),
+                    ("receive", re.compile(r'(?:' + "|".join(receive) + r')' + descriptor)))
+        prefixes = tuple(name + "(" for name in (*send, *receive))
+        positive_result = re.compile(r'\) = [1-9][0-9]*$')
         later_entries = [(index, stamp) for stamp, tid, index, call in events
                          if int(tid) == thread and index > after_index and
                          re.match(r'[a-zA-Z_][a-zA-Z_0-9]*\(', call)]
         phase_entry = min(later_entries)[1] if later_entries else None
         for stamp, tid, index, call in events:
-            if "JDWP-Handshake" in call:
+            if "JDWP-Handshake" in call or not call.startswith(prefixes):
                 continue
-            for direction, names in (("send", send), ("receive", receive)):
-                if (re.match(r'(?:' + "|".join(names) + r')\(' + fd + r'<' +
-                             re.escape(token) + r'>,', call) and
-                        re.search(r'\) = [1-9][0-9]*$', call)):
+            for direction, pattern in patterns:
+                if (pattern.match(call) and positive_result.search(call)):
                     if (int(tid) not in process_threads or
                             int(tid) not in shared_threads or
                             (int(tid) == thread and index <= after_index) or

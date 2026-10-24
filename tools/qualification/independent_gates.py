@@ -160,6 +160,8 @@ NATIVE_UDP_GRAMMAR_SOURCE_REVISION = "f111a2d48a34359930722e38b7f27a87660155d5"
 WORKER_PID_SOURCE_REVISION = "f6df2834b59582bb921085592b094f3b30ca7cf0"
 ARCHIVE_PRIVACY_SOURCE_REVISION = "b67ff73970811bfb44895e8d3354ed63863818d9"
 REPLAY_COST_SOURCE_REVISION = "82f8088171537ae6be09a20649f21daa71f460e1"
+JDI_REPLAY_COST_SOURCE_REVISION = "4897dee3dfd945dfda4e48d88222573896b45073"
+OBSERVER_ENV_REPLAY_SOURCE_REVISION = "e35f1b46572d6cc60d12649664fc949b18426f7b"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -204,11 +206,14 @@ APPROVED_PROSPECTIVE_REPLAY_COST_CHECKERS = {
     "numeric_producer_trace.py":
         "9b219f1e142b0758676935201fd3d12acc9f012f679277a77af748ae21871393",
 }
+APPROVED_PROSPECTIVE_OBSERVER_ENV_REPLAY_CHECKERS = {
+    **APPROVED_PROSPECTIVE_REPLAY_COST_CHECKERS,
+}
 APPROVED_PROSPECTIVE_EXECUTABLE_SHARED = {
     path: APPROVED_POLICY[path] for path in
     ("tools/numerical/compare.py", "tools/numerical/physical.py")
 }
-PINNED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_REPLAY_COST_CHECKERS)
+PINNED_PROSPECTIVE_LOCAL_CHECKERS = dict(APPROVED_PROSPECTIVE_OBSERVER_ENV_REPLAY_CHECKERS)
 APPROVED_PROSPECTIVE_ASSEMBLED_CHECKERS = {
     **APPROVED_PROSPECTIVE_CHECKERS,
     "prospective_compare.py": "2f7743fed70ec9403492f84e880a286368a5f4c9f06f32c62996c91da837dd4f",
@@ -509,6 +514,16 @@ REPLAY_COST_CAPTURE_DEPENDENCIES = {
     "tools/numerical/portable/numeric_producer_trace.py":
         "9b219f1e142b0758676935201fd3d12acc9f012f679277a77af748ae21871393",
 }
+JDI_REPLAY_COST_CAPTURE_DEPENDENCIES = {
+    **REPLAY_COST_CAPTURE_DEPENDENCIES,
+    "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
+        "ddfce790b402c612b4ef29354b96274509cd50b7ab202be3a772e1ceed02e8bb",
+}
+OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES = {
+    **JDI_REPLAY_COST_CAPTURE_DEPENDENCIES,
+    "tools/numerical/portable/actual_capture_receipt.py":
+        "8a54f559337266f3f8fadb5486da45c70c8617f504f9d58d0bc882ec70f8403a",
+}
 P2_V6_DEPENDENCIES = {
     **P2_EXECUTABLE_LOCAL_DEPENDENCIES,
     "tools/numerical/portable/build.gradle.kts":
@@ -609,6 +624,18 @@ P2_REPLAY_COST_DEPENDENCIES = {
         "tools/numerical/portable/actual_trace.py",
         "tools/numerical/portable/numeric_producer_trace.py")},
 }
+P2_JDI_REPLAY_COST_DEPENDENCIES = {
+    **P2_REPLAY_COST_DEPENDENCIES,
+    "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
+        JDI_REPLAY_COST_CAPTURE_DEPENDENCIES[
+            "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py"],
+}
+P2_OBSERVER_ENV_REPLAY_DEPENDENCIES = {
+    **P2_JDI_REPLAY_COST_DEPENDENCIES,
+    "tools/numerical/portable/actual_capture_receipt.py":
+        OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES[
+            "tools/numerical/portable/actual_capture_receipt.py"],
+}
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_JVM8_PRODUCERS = {
     **P2_ROTATION_PREMISE_PRODUCERS,
@@ -672,7 +699,10 @@ APPROVED_P2_REPLAY_COST_PRODUCERS = {
     "actual_output_v6.py":
         "9a902d3adfa6f9ce1ed5471992feb1fcef90027425aed2a4388ba5f1d97d556c",
 }
-PINNED_P2_CURRENT_LOCAL_PRODUCERS = dict(APPROVED_P2_REPLAY_COST_PRODUCERS)
+APPROVED_P2_OBSERVER_ENV_REPLAY_PRODUCERS = {
+    **APPROVED_P2_REPLAY_COST_PRODUCERS,
+}
+PINNED_P2_CURRENT_LOCAL_PRODUCERS = dict(APPROVED_P2_OBSERVER_ENV_REPLAY_PRODUCERS)
 APPROVED_P2_PRE_ORIGINAL_OBJECT_PRODUCERS = {
     **APPROVED_P2_PRODUCERS,
     "baseline_capture.py": "b7bb228bde030d7fd6949ae3e7ca743a92060b436797835c6e4f7e12d779ad6c",
@@ -1132,6 +1162,8 @@ def _prospective_checker_binding(repository, candidate_sha):
         return checked.returncode == 0
 
     executable_window = descends_from(PROSPECTIVE_EXECUTABLE_CHECKER_REVISION)
+    observer_env_replay_window = descends_from(OBSERVER_ENV_REPLAY_SOURCE_REVISION)
+    jdi_replay_cost_window = descends_from(JDI_REPLAY_COST_SOURCE_REVISION)
     replay_cost_window = descends_from(REPLAY_COST_SOURCE_REVISION)
     archive_privacy_window = descends_from(ARCHIVE_PRIVACY_SOURCE_REVISION)
     worker_pid_window = descends_from(WORKER_PID_SOURCE_REVISION)
@@ -1145,7 +1177,9 @@ def _prospective_checker_binding(repository, candidate_sha):
     baseline_compat_window = descends_from(BASELINE_COMPAT_SOURCE_REVISION)
     private_launch_window = descends_from(PRIVATE_LAUNCH_SOURCE_REVISION)
     v6_window = descends_from(PROSPECTIVE_V6_SOURCE_REVISION)
-    if replay_cost_window:
+    if observer_env_replay_window:
+        approved = APPROVED_PROSPECTIVE_OBSERVER_ENV_REPLAY_CHECKERS
+    elif jdi_replay_cost_window or replay_cost_window:
         approved = APPROVED_PROSPECTIVE_REPLAY_COST_CHECKERS
     elif archive_privacy_window:
         approved = APPROVED_PROSPECTIVE_ARCHIVE_PRIVACY_CHECKERS
@@ -1217,7 +1251,11 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
         if hashlib.sha256(committed).hexdigest() != expected:
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
-    executable_dependencies = (REPLAY_COST_CAPTURE_DEPENDENCIES
+    executable_dependencies = (OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES
+                               if observer_env_replay_window else
+                               JDI_REPLAY_COST_CAPTURE_DEPENDENCIES
+                               if jdi_replay_cost_window else
+                               REPLAY_COST_CAPTURE_DEPENDENCIES
                                if replay_cost_window else
                                ARCHIVE_PRIVACY_CAPTURE_DEPENDENCIES
                                if archive_privacy_window else
@@ -1235,7 +1273,7 @@ def _prospective_checker_binding(repository, candidate_sha):
                                PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES
                                if executable_window else {})
     local_dependencies = (APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
-                          REPLAY_COST_CAPTURE_DEPENDENCIES)
+                          OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES)
     for relative, expected in local_dependencies.items():
         local = Path(__file__).resolve().parents[2] / relative
         try:
@@ -1335,6 +1373,8 @@ def _p2_producer_binding(repository, candidate_sha):
 
     if not descends_from(PROSPECTIVE_CHECKER_REVISION):
         raise ValueError("candidate predates reviewed P2 raw producer revision")
+    observer_env_replay_window = descends_from(OBSERVER_ENV_REPLAY_SOURCE_REVISION)
+    jdi_replay_cost_window = descends_from(JDI_REPLAY_COST_SOURCE_REVISION)
     replay_cost_window = descends_from(REPLAY_COST_SOURCE_REVISION)
     archive_privacy_window = descends_from(ARCHIVE_PRIVACY_SOURCE_REVISION)
     worker_pid_window = descends_from(WORKER_PID_SOURCE_REVISION)
@@ -1354,7 +1394,9 @@ def _p2_producer_binding(repository, candidate_sha):
     rotation_premise = descends_from(P2_ROTATION_PREMISE_SOURCE_REVISION)
     boolean_jdi_final = descends_from(P2_BOOLEAN_JDI_FINAL_SOURCE_REVISION)
     boolean_jdi = descends_from(P2_BOOLEAN_JDI_SOURCE_REVISION)
-    if replay_cost_window:
+    if observer_env_replay_window:
+        approved = APPROVED_P2_OBSERVER_ENV_REPLAY_PRODUCERS
+    elif jdi_replay_cost_window or replay_cost_window:
         approved = APPROVED_P2_REPLAY_COST_PRODUCERS
     elif archive_privacy_window:
         approved = APPROVED_P2_ARCHIVE_PRIVACY_PRODUCERS
@@ -1441,7 +1483,11 @@ def _p2_producer_binding(repository, candidate_sha):
         if hashlib.sha256(committed).hexdigest() != digest:
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     if jdk21_jdi:
-        dependencies = (P2_REPLAY_COST_DEPENDENCIES
+        dependencies = (P2_OBSERVER_ENV_REPLAY_DEPENDENCIES
+                        if observer_env_replay_window else
+                        P2_JDI_REPLAY_COST_DEPENDENCIES
+                        if jdi_replay_cost_window else
+                        P2_REPLAY_COST_DEPENDENCIES
                         if replay_cost_window else
                         P2_ARCHIVE_PRIVACY_DEPENDENCIES
                         if archive_privacy_window else
@@ -1461,27 +1507,27 @@ def _p2_producer_binding(repository, candidate_sha):
                         else P2_JDK21_JDI_DEPENDENCIES)
         _source_binding(repository, candidate_sha, dependencies,
                         "JDK 21 JDI producer",
-                        local_approved=P2_REPLAY_COST_DEPENDENCIES)
+                        local_approved=P2_OBSERVER_ENV_REPLAY_DEPENDENCIES)
     elif corrected_jdi:
         _source_binding(repository, candidate_sha, P2_CORRECTED_JDI_DEPENDENCIES,
                         "corrected JDI producer",
-                        local_approved=P2_REPLAY_COST_DEPENDENCIES)
+                        local_approved=P2_OBSERVER_ENV_REPLAY_DEPENDENCIES)
     elif bounded_jdi:
         _source_binding(repository, candidate_sha, P2_BOUNDED_JDI_DEPENDENCIES,
                         "bounded JDI producer",
-                        local_approved=P2_REPLAY_COST_DEPENDENCIES)
+                        local_approved=P2_OBSERVER_ENV_REPLAY_DEPENDENCIES)
     elif rotation_premise:
         _source_binding(repository, candidate_sha, P2_ROTATION_PREMISE_DEPENDENCIES,
                         "rotation premise producer",
-                        local_approved=P2_REPLAY_COST_DEPENDENCIES)
+                        local_approved=P2_OBSERVER_ENV_REPLAY_DEPENDENCIES)
     elif boolean_jdi_final:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_FINAL_DEPENDENCIES,
                         "Boolean JDI final producer",
-                        local_approved=P2_REPLAY_COST_DEPENDENCIES)
+                        local_approved=P2_OBSERVER_ENV_REPLAY_DEPENDENCIES)
     elif boolean_jdi:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_DEPENDENCIES,
                         "Boolean JDI producer",
-                        local_approved=P2_REPLAY_COST_DEPENDENCIES)
+                        local_approved=P2_OBSERVER_ENV_REPLAY_DEPENDENCIES)
     if not v6_window:
         for relative in (P2_BASELINE_COMPAT_DEPENDENCIES.keys() -
                          P2_EXECUTABLE_LOCAL_DEPENDENCIES.keys()):
@@ -1490,7 +1536,7 @@ def _p2_producer_binding(repository, candidate_sha):
                 actual = hashlib.sha256(local.read_bytes()).hexdigest()
             except OSError as error:
                 raise ValueError(f"reviewed P2 raw producer blob differs: {relative}") from error
-            if actual != P2_REPLAY_COST_DEPENDENCIES[relative]:
+            if actual != P2_OBSERVER_ENV_REPLAY_DEPENDENCIES[relative]:
                 raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     return dict(approved)
 
