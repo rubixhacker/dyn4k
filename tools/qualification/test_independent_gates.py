@@ -1404,8 +1404,8 @@ class IndependentGateSeamTests(unittest.TestCase):
         revision = independent_gates.WORKER_PID_SOURCE_REVISION
         source = "tools/numerical/portable/actual_capture_receipt.py"
         old_digest = "71cb795d4400f2c5854f0469f98c306190c4e071b4359f1b6544645102017995"
-        new_digest = "d7873090e89c91740a177418efd96a0f44e14f2d37c4080fdc15dfd568fd4ec8"
-        self.assertEqual("8623c04ed2ce5ff5ef8c528f5517ec6e7cf3443e", revision)
+        new_digest = "916838f8386116c337fa233051b183f2caaa8136e29aac49046270f994c71b92"
+        self.assertEqual("f6df2834b59582bb921085592b094f3b30ca7cf0", revision)
         self.assertEqual(old_digest,
                          independent_gates.NATIVE_UDP_GRAMMAR_CAPTURE_DEPENDENCIES[source])
         self.assertEqual(old_digest,
@@ -1428,12 +1428,15 @@ class IndependentGateSeamTests(unittest.TestCase):
                                      ROOT, candidate)[source])
                 self.assertEqual(independent_gates.APPROVED_P2_WORKER_PID_PRODUCERS,
                                  independent_gates._p2_producer_binding(ROOT, candidate))
-        with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
-            independent_gates._prospective_checker_binding(
-                ROOT, "ab2dd165dac3ca5b8586eefa5674aa12c0834cdd")
-        with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
-            independent_gates._p2_producer_binding(
-                ROOT, "ab2dd165dac3ca5b8586eefa5674aa12c0834cdd")
+        for incomplete in ("ab2dd165dac3ca5b8586eefa5674aa12c0834cdd",
+                           "8623c04ed2ce5ff5ef8c528f5517ec6e7cf3443e"):
+            with self.subTest(incomplete=incomplete):
+                with self.assertRaisesRegex(ValueError,
+                                            "prospective policy/checker blob differs"):
+                    independent_gates._prospective_checker_binding(ROOT, incomplete)
+                with self.assertRaisesRegex(ValueError,
+                                            "JDK 21 JDI producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, incomplete)
         original_read = Path.read_bytes
         with mock.patch.object(Path, "read_bytes", lambda path: b"changed"
                                if path == ROOT / source else original_read(path)):
