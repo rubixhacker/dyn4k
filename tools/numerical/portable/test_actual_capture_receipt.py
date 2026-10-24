@@ -1168,6 +1168,36 @@ class EnvironmentSentinelTest(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertEqual(files[field], raw)
 
+    def test_public_v6_replay_compares_the_loaded_receipt(self):
+        expected = {
+            "schema": focused_receipt.SCHEMA,
+            "candidate_commit": "a" * 40,
+            "status": "PASSED_FOCUSED_METHOD_EVIDENCE",
+        }
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory)
+            for name in FILE_NAMES.values():
+                (root / name).write_bytes(b"safe")
+            (root / "artifact.jar").write_bytes(b'PK\x03\x04"\x00\\')
+            (root / "worker-class-load-42.log").write_bytes(b"safe")
+            (root / "worker-arguments-42.log").write_bytes(b"safe")
+            (root / "receipt.json").write_text(json.dumps(expected))
+
+            with patch.object(focused_receipt, "make_version6_receipt",
+                              return_value=expected) as proof:
+                self.assertEqual(focused_receipt.replay_version6(root), expected)
+                loaded_files = proof.call_args.args[0]
+                self.assertEqual(loaded_files["artifact"], b'PK\x03\x04"\x00\\')
+                self.assertEqual(proof.call_args.args[1], "a" * 40)
+
+            changed = {**expected, "status": "UNVERIFIED"}
+            (root / "receipt.json").write_text(json.dumps(changed))
+            with patch.object(focused_receipt, "make_version6_receipt",
+                              return_value=expected):
+                with self.assertRaisesRegex(FocusedRejected,
+                                            "receipt or raw proof differs"):
+                    focused_receipt.replay_version6(root)
+
     def test_public_v6_loader_rejects_literal_private_bytes_in_opaque_fields(self):
         binary_fragment = b'"\x00"\\\x00'
 
