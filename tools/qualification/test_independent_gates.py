@@ -1479,7 +1479,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(trace_digest,
                          independent_gates.P2_ARCHIVE_PRIVACY_DEPENDENCIES[trace_source])
         for candidate, digest in (("d740fec9a3399e1701b504077178b1058072c7b2",
-                                   old_digest), (revision, new_digest), ("HEAD", new_digest)):
+                                   old_digest), (revision, new_digest)):
             with self.subTest(candidate=candidate):
                 self.assertEqual(hashlib.sha256(subprocess.check_output(
                     ["git", "--no-replace-objects", "show", f"{candidate}:{source}"],
@@ -1512,6 +1512,96 @@ class IndependentGateSeamTests(unittest.TestCase):
                 independent_gates._prospective_checker_binding(ROOT, revision)
             with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
                 independent_gates._p2_producer_binding(ROOT, revision)
+
+    def test_replay_cost_window_binds_complete_current_and_historical_bytes(self):
+        revision = independent_gates.REPLAY_COST_SOURCE_REVISION
+        self.assertEqual("2c107b509c16ae2b72372014bfa6b1991648d608", revision)
+        changed = {
+            "actual_capture_receipt.py":
+                "28551e469ebb6b22cf6241e00e2861601d015a7204b23faeca371ae028b8938e",
+            "actual_output_v6.py":
+                "9a902d3adfa6f9ce1ed5471992feb1fcef90027425aed2a4388ba5f1d97d556c",
+            "actual_trace.py":
+                "afa78b2147129b875fab2a13ded477fc450d732b2e93f5548ed5530b1add4257",
+            "numeric_producer_trace.py":
+                "9b219f1e142b0758676935201fd3d12acc9f012f679277a77af748ae21871393",
+        }
+        old = "bc4c130deb8506094456984f02ef85a7e7c2e9ad"
+        checker = independent_gates._prospective_checker_binding(ROOT, revision)
+        producer = independent_gates._p2_producer_binding(ROOT, revision)
+        self.assertEqual(independent_gates.APPROVED_P2_REPLAY_COST_PRODUCERS, producer)
+        for name, digest in changed.items():
+            relative = "tools/numerical/portable/" + name
+            with self.subTest(path=relative):
+                committed = subprocess.check_output(
+                    ["git", "--no-replace-objects", "show", f"{revision}:{relative}"],
+                    cwd=ROOT)
+                self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
+                self.assertEqual(digest, hashlib.sha256((ROOT / relative).read_bytes()).hexdigest())
+                self.assertEqual(digest, checker[relative])
+                self.assertEqual(digest,
+                                 independent_gates.REPLAY_COST_CAPTURE_DEPENDENCIES[relative])
+                self.assertEqual(digest,
+                                 independent_gates.P2_REPLAY_COST_DEPENDENCIES[relative])
+                historical = hashlib.sha256(subprocess.check_output(
+                    ["git", "--no-replace-objects", "show", f"{old}:{relative}"],
+                    cwd=ROOT)).hexdigest()
+                if name == "numeric_producer_trace.py":
+                    self.assertEqual(historical,
+                                     independent_gates.APPROVED_PROSPECTIVE_ARCHIVE_PRIVACY_CHECKERS[name])
+                else:
+                    self.assertEqual(historical,
+                                     independent_gates.ARCHIVE_PRIVACY_CAPTURE_DEPENDENCIES[relative])
+                    self.assertEqual(historical,
+                                     independent_gates.P2_ARCHIVE_PRIVACY_DEPENDENCIES[relative])
+                self.assertEqual(historical,
+                                 independent_gates._prospective_checker_binding(ROOT, old)[relative])
+        self.assertEqual(changed["numeric_producer_trace.py"],
+                         independent_gates.APPROVED_PROSPECTIVE_REPLAY_COST_CHECKERS[
+                             "numeric_producer_trace.py"])
+        self.assertEqual(independent_gates.APPROVED_PROSPECTIVE_REPLAY_COST_CHECKERS[
+                             "numeric_producer_trace.py"],
+                         independent_gates.PINNED_PROSPECTIVE_LOCAL_CHECKERS[
+                             "numeric_producer_trace.py"])
+        self.assertEqual(independent_gates._prospective_checker_binding(ROOT, "HEAD"),
+                         checker)
+        self.assertEqual(independent_gates._p2_producer_binding(ROOT, "HEAD"), producer)
+
+    def test_replay_cost_window_rejects_local_candidate_and_cache_drift(self):
+        revision = independent_gates.REPLAY_COST_SOURCE_REVISION
+        original_read = Path.read_bytes
+        original_show = subprocess.check_output
+        for relative in (
+                "tools/numerical/portable/actual_capture_receipt.py",
+                "tools/numerical/portable/actual_output_v6.py",
+                "tools/numerical/portable/actual_trace.py",
+                "tools/numerical/portable/numeric_producer_trace.py"):
+            local = ROOT / relative
+            with self.subTest(path=relative, surface="local"), mock.patch.object(
+                    Path, "read_bytes", lambda path, local=local: b"changed"
+                    if path == local else original_read(path)):
+                with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                    independent_gates._prospective_checker_binding(ROOT, revision)
+                expected = ("reviewed P2 raw producer blob differs"
+                            if relative.endswith("/actual_output_v6.py") else
+                            "JDK 21 JDI producer blob differs")
+                with self.assertRaisesRegex(ValueError, expected):
+                    independent_gates._p2_producer_binding(ROOT, revision)
+
+            def altered(command, *args, **kwargs):
+                if command[-1] == f"{revision}:{relative}":
+                    return b"changed"
+                return original_show(command, *args, **kwargs)
+
+            with self.subTest(path=relative, surface="candidate"), mock.patch.object(
+                    subprocess, "check_output", altered):
+                with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                    independent_gates._prospective_checker_binding(ROOT, revision)
+                expected = ("reviewed P2 raw producer blob differs"
+                            if relative.endswith("/actual_output_v6.py") else
+                            "JDK 21 JDI producer blob differs")
+                with self.assertRaisesRegex(ValueError, expected):
+                    independent_gates._p2_producer_binding(ROOT, revision)
 
     def test_v6_new_capture_modules_reject_local_and_candidate_drift(self):
         reviewed = "0d5799e1c84f76c504b53f3eaf7468bca20a60eb"
