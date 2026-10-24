@@ -539,6 +539,101 @@ class NativeHostConsumerTests(unittest.TestCase):
             with patch.object(route.os, "open", side_effect=swap), self.assertRaises((OSError, ValueError)):
                 route.snapshot_archive(raw, root / "relocated")
 
+    @unittest.skipUnless(os.name == "posix", "requires POSIX file modes")
+    def test_snapshot_preserves_ordinary_modes_without_privileged_bits(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            raw.mkdir()
+            (raw / "receipt.json").write_bytes(b"{}")
+            executable = raw / "runtime.program"
+            executable.write_bytes(b"program")
+            executable.chmod(0o4755)
+            data = raw / "cases.tsv"
+            data.write_bytes(b"cases")
+            data.chmod(0o640)
+
+            snapshot = root / "snapshot"
+            route.snapshot_archive(raw, snapshot)
+
+            self.assertEqual((snapshot / "runtime.program").read_bytes(), b"program")
+            self.assertEqual((snapshot / "runtime.program").stat().st_mode & 0o7777,
+                             0o755)
+            self.assertEqual((snapshot / "cases.tsv").stat().st_mode & 0o7777,
+                             0o640)
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX file modes")
+    def test_snapshot_rejects_mode_change_between_stat_and_open(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            raw.mkdir()
+            (raw / "receipt.json").write_bytes(b"{}")
+            executable = raw / "runtime.program"
+            executable.write_bytes(b"program")
+            executable.chmod(0o755)
+            original = route.os.open
+
+            def change_mode(path, flags, *args, **kwargs):
+                if path == "runtime.program":
+                    executable.chmod(0o644)
+                return original(path, flags, *args, **kwargs)
+
+            with patch.object(route.os, "open", side_effect=change_mode), \
+                    self.assertRaisesRegex(ValueError, "changed during copy"):
+                route.snapshot_archive(raw, root / "snapshot")
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX executable modes")
+    def test_cross_run_checks_real_snapshot_modes_before_launch_boundary(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            repository = Path(__file__).resolve().parents[2]
+            candidate = route.git(repository, "rev-parse", "HEAD")
+            build = root / "build"
+            (build / "inputs").mkdir(parents=True)
+            (build / "runtime").mkdir()
+            (build / "receipt.json").write_bytes(b"{}")
+            for short in ("core", "facade"):
+                program = build / "runtime" / f"{short}.program"
+                program.write_bytes(b"#!/bin/sh\nexit 0\n")
+                program.chmod(0o755)
+                (build / "inputs" / f"{short}-cases.tsv").write_bytes(b"")
+            selection = root / "selection.json"
+            selection.write_bytes(route.encoded({"lane": LANE, "role": "current"}))
+            output = root / "runtime-output"
+            _, contract = route.lane_contract(repository, LANE)
+            module_ids = {
+                short: [case["id"] for case in contract["cases"]
+                        if case["module"] == ("dyn4k-core" if short == "core" else "dyn4k")]
+                for short in ("core", "facade")
+            }
+            executed = []
+
+            def record_execution(executable, _output, short, _selected):
+                self.assertTrue(os.access(executable, os.X_OK))
+                executed.append(short)
+                return {}, module_ids[short]
+
+            host = {"system": "Linux", "machine": "aarch64", "os_version": "test"}
+            receipt = {"artifact_hash_provenance": "audited", "source_tree": "tree",
+                       "build_host": {}}
+            with patch.object(route, "verify_source_binding"), \
+                    patch.object(route, "observed_host", return_value=host), \
+                    patch.object(route, "validate_host"), \
+                    patch.object(route, "verify_cross_build_snapshot", return_value=receipt), \
+                    patch.object(route, "execute_transferred_test", side_effect=record_execution):
+                result = route.cross_run(repository, candidate, LANE, build, "digest", output,
+                                         selection, {})
+
+            self.assertEqual(executed, ["core", "facade"])
+            self.assertEqual(result["selected_cases"], 2523)
+            snapshot = output / "build"
+            for short in ("core", "facade"):
+                self.assertEqual((snapshot / "runtime" / f"{short}.program").stat().st_mode
+                                 & 0o777, 0o755)
+                self.assertFalse(os.access(snapshot / "inputs" / f"{short}-cases.tsv",
+                                           os.X_OK))
+
     def test_unpack_requires_a_new_unlinked_root(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
             root = Path(temporary)

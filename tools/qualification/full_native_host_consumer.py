@@ -1100,13 +1100,14 @@ def snapshot_archive(root, destination, *, platform_name=None):
                         data = source.read()
                     after = os.fstat(fd)
                     current = os.stat(relative.name, dir_fd=parent_fd, follow_symlinks=False)
-                    identity = lambda value: (value.st_dev, value.st_ino, value.st_size,
+                    identity = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_size,
                                               value.st_mtime_ns, value.st_nlink)
                     if identity(before) != identity(opened) or identity(after) != identity(current):
                         raise ValueError("raw archive member changed during copy")
                     copy = destination / relative
                     copy.parent.mkdir(parents=True, exist_ok=True)
                     copy.write_bytes(data)
+                    copy.chmod(stat.S_IMODE(before.st_mode) & 0o777)
                     os.utime(copy, ns=(before.st_mtime_ns, before.st_mtime_ns))
                 finally:
                     os.close(fd)
