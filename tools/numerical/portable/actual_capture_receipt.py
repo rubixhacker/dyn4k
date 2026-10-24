@@ -16,7 +16,8 @@ import actual_output_v6
 from actual_arithmetic import (CaptureRejected, _FOCUSED_BOOLEAN_CASE,
                                _FOCUSED_BOOLEAN_METHOD, _PINNED_JAVA,
                                _STAGED_JAR, _unique_object, make_capture_receipt)
-from actual_trace import (TraceRejected, _validate_calls, checked_projection,
+from actual_trace import (ENVIRONMENT_SENTINEL, FORBIDDEN_ENVIRONMENT_KEY,
+                          TraceRejected, _validate_calls, checked_projection,
                           normalize_rich_traces, rich_trace_arguments,
                           trace_exposes_environment)
 from boolean_rotation_jdi import (jdi_bridge, source_guard as jdi_source_guard,
@@ -57,6 +58,19 @@ FILE_NAMES = {
     "output_observer_traces": "output-observer-traces.zip",
     "metadata": "capture-metadata.json",
 }
+OPAQUE_PRIVACY_FIELDS = frozenset({
+    "artifact", "runtime", "portable_classes", "jdi_helper_classes",
+    "jdi_evidence", "agent",
+})
+TEXT_PRIVACY_FIELDS = frozenset({
+    "xml", "stage_log", "gradle_log", "execve_log", "worker_classpath",
+    "candidate_case", "reference_case", "jdi_helper_arguments", "jdi_transport",
+    "class_witness", "mirror", "metadata",
+})
+DEFERRED_PRIVACY_FIELDS = frozenset({
+    "source", "worker_write_traces", "jdi_helper_traces", "all_process_traces",
+    "output_observer_traces",
+})
 OBSERVER = "tools/numerical/portable/class_witness/NumericClassWitness.java"
 JDK = Path("/tmp/dyn4k-tools/jdk21")
 
@@ -129,11 +143,18 @@ def load_version6_archive(root):
         files["worker_arguments"] = (root / next(
             name for name in variable if name.startswith("worker-arguments-"))).read_bytes()
         receipt_bytes = (root / "receipt.json").read_bytes()
-        for key, raw in files.items():
-            if key not in {"source", "worker_write_traces", "jdi_helper_traces",
-                           "all_process_traces", "output_observer_traces"}:
-                require(not trace_exposes_environment(raw),
-                        "focused archive exposed the environment")
+        require(set(FILE_NAMES) == OPAQUE_PRIVACY_FIELDS | TEXT_PRIVACY_FIELDS |
+                DEFERRED_PRIVACY_FIELDS and
+                set(files) == set(FILE_NAMES) |
+                {"worker_class_load", "worker_arguments"},
+                "focused archive privacy field inventory differs")
+        for key in OPAQUE_PRIVACY_FIELDS:
+            require(ENVIRONMENT_SENTINEL not in files[key] and
+                    FORBIDDEN_ENVIRONMENT_KEY not in files[key],
+                    "focused archive exposed the environment")
+        for key in TEXT_PRIVACY_FIELDS | {"worker_class_load", "worker_arguments"}:
+            require(not trace_exposes_environment(files[key]),
+                    "focused archive exposed the environment")
         require(not trace_exposes_environment(receipt_bytes),
                 "focused receipt exposed the environment")
         receipt = decoded(receipt_bytes)

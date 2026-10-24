@@ -22,6 +22,8 @@ import baseline_capture
 import capture_actual
 from actual_capture_receipt import (FILE_NAMES, FocusedRejected,
                                     load_version6_archive, verify_boolean_startup)
+from actual_trace import (ENVIRONMENT_SENTINEL as TRACE_ENVIRONMENT_SENTINEL,
+                          FORBIDDEN_ENVIRONMENT_KEY, TraceRejected)
 from capture_actual import ENVIRONMENT_SENTINEL, reject_environment_trace
 from actual_arithmetic import (CaptureRejected, _AUDITED_ENGINE_CLASSES,
                                _FIXTURE_CLASSES, _ROOT, _STAGED_JAR,
@@ -1125,6 +1127,156 @@ class EnvironmentSentinelTest(unittest.TestCase):
                 b'1.000001 write(4, "OLLAMA_\\x41PI_KEY", 14) = 14\n')
             with self.assertRaisesRegex(FocusedRejected, "exposed the environment"):
                 load_version6_archive(root)
+
+    def test_public_v6_loader_preserves_opaque_binary_fields(self):
+        binary_fragment = b'"\x00"\\\x00'
+
+        def archive_bytes(member):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
+                archive.writestr("opaque.bin", member)
+            return output.getvalue()
+
+        runtime = b"\x7fELF\x02\x01\x01\x00" + bytes(56) + b'"\x00\\'
+        opaque = {
+            "artifact": archive_bytes(binary_fragment),
+            "runtime": runtime,
+            "portable_classes": archive_bytes(binary_fragment),
+            "jdi_helper_classes": archive_bytes(binary_fragment),
+            "jdi_evidence": archive_bytes(binary_fragment),
+            "agent": archive_bytes(binary_fragment),
+        }
+        for field, raw in opaque.items():
+            if field != "runtime":
+                with self.subTest(valid_archive=field), \
+                        zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                    self.assertIsNone(archive.testzip())
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory)
+            for name in FILE_NAMES.values():
+                (root / name).write_bytes(b"safe")
+            for field, raw in opaque.items():
+                (root / FILE_NAMES[field]).write_bytes(raw)
+            for name in ("worker-class-load-42.log", "worker-arguments-42.log"):
+                (root / name).write_bytes(b"safe")
+            (root / "receipt.json").write_text(
+                json.dumps({"schema": "portable-arithmetic-capture-receipt/6"}))
+
+            _, files = load_version6_archive(root)
+
+        for field, raw in opaque.items():
+            with self.subTest(field=field):
+                self.assertEqual(files[field], raw)
+
+    def test_public_v6_loader_rejects_literal_private_bytes_in_opaque_fields(self):
+        binary_fragment = b'"\x00"\\\x00'
+
+        def archive_bytes(member):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
+                archive.writestr("opaque.bin", member)
+            return output.getvalue()
+
+        def runtime_bytes(member):
+            return b"\x7fELF\x02\x01\x01\x00" + bytes(48) + member
+
+        opaque = {
+            "artifact": archive_bytes(binary_fragment),
+            "runtime": runtime_bytes(b'"\\'),
+            "portable_classes": archive_bytes(binary_fragment),
+            "jdi_helper_classes": archive_bytes(binary_fragment),
+            "jdi_evidence": archive_bytes(binary_fragment),
+            "agent": archive_bytes(binary_fragment),
+        }
+        samples = (
+            ("key", FORBIDDEN_ENVIRONMENT_KEY),
+            ("canary", TRACE_ENVIRONMENT_SENTINEL),
+        )
+        for field in opaque:
+            for label, sample in samples:
+                with self.subTest(
+                        field=field, sample=label), \
+                        tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+                    root = Path(directory)
+                    for name in FILE_NAMES.values():
+                        (root / name).write_bytes(b"safe")
+                    for name in ("worker-class-load-42.log", "worker-arguments-42.log"):
+                        (root / name).write_bytes(b"safe")
+                    (root / "receipt.json").write_text(
+                        json.dumps({"schema": "portable-arithmetic-capture-receipt/6"}))
+                    member = binary_fragment + sample
+                    raw = (runtime_bytes(member) if field == "runtime"
+                           else archive_bytes(member))
+                    (root / FILE_NAMES[field]).write_bytes(raw)
+
+                    with self.assertRaisesRegex(
+                            FocusedRejected, "exposed the environment"):
+                        load_version6_archive(root)
+
+    def test_public_v6_loader_rejects_unclassified_file_fields(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory)
+            for name in FILE_NAMES.values():
+                (root / name).write_bytes(b"safe")
+            for name in ("worker-class-load-42.log", "worker-arguments-42.log"):
+                (root / name).write_bytes(b"safe")
+            (root / "receipt.json").write_text(
+                json.dumps({"schema": "portable-arithmetic-capture-receipt/6"}))
+            with patch.dict(FILE_NAMES, {"future_payload": "future.bin"}):
+                (root / "future.bin").write_bytes(b"safe")
+                with self.assertRaisesRegex(
+                        FocusedRejected, "privacy field inventory differs"):
+                    load_version6_archive(root)
+
+    def test_public_v6_loader_checks_encoded_and_split_text_and_rejects_malformed_text(self):
+        def archive_with_text(field, raw, receipt=None):
+            directory = tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"])
+            root = Path(directory.name)
+            for name in FILE_NAMES.values():
+                (root / name).write_bytes(b"safe")
+            for name in ("worker-class-load-42.log", "worker-arguments-42.log"):
+                (root / name).write_bytes(b"safe")
+            (root / "receipt.json").write_bytes(receipt or json.dumps({
+                "schema": "portable-arithmetic-capture-receipt/6"}).encode())
+            (root / FILE_NAMES[field]).write_bytes(raw)
+            return directory, root
+
+        directory, root = archive_with_text(
+            "gradle_log",
+            b'write(4, "DYN4K_CAPTURE_ENV_\\123ENTINEL=portable-capture-check", 1) = 1\n')
+        try:
+            with self.assertRaisesRegex(FocusedRejected, "exposed the environment"):
+                load_version6_archive(root)
+        finally:
+            directory.cleanup()
+
+        split_trace = (
+            b'write(4, "DYN4K_CAPTURE_ENV_" "SENTINEL=portable-capture-check", "\\\\n") = 1\n')
+        directory, root = archive_with_text("gradle_log", split_trace)
+        try:
+            with self.assertRaisesRegex(FocusedRejected, "exposed the environment"):
+                load_version6_archive(root)
+        finally:
+            directory.cleanup()
+
+        receipt_canary = json.dumps({
+            "schema": "portable-arithmetic-capture-receipt/6",
+            "diagnostic": "DYN4K_CAPTURE_ENV_SENTINEL=portable-capture-check",
+        }).encode()
+        directory, root = archive_with_text("gradle_log", b"safe\n", receipt_canary)
+        try:
+            with self.assertRaisesRegex(FocusedRejected, "exposed the environment"):
+                load_version6_archive(root)
+        finally:
+            directory.cleanup()
+
+        directory, root = archive_with_text(
+            "gradle_log", b'write(4, "malformed\\x", 1) = 1\n')
+        try:
+            with self.assertRaisesRegex(TraceRejected, "trace privacy string is malformed"):
+                load_version6_archive(root)
+        finally:
+            directory.cleanup()
 
     def test_normal_execve_trace_passes(self):
         with tempfile.TemporaryDirectory() as directory:
