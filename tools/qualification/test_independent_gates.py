@@ -1572,8 +1572,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                 "2c107b509c16ae2b72372014bfa6b1991648d608",
                 "abb87a0f27443a072ff7dfa95f41ba7c96b03234",
                 "4a566167209409763195be99b07c17548900ea70",
-                "609205c0b0bd09fa830d098a54dba7a845e4cb47",
-                "7a72696a4b01d02a21d7d529d70bfe387cf5b7db"):
+                "609205c0b0bd09fa830d098a54dba7a845e4cb47"):
             with self.subTest(revision=revision):
                 with self.assertRaisesRegex(ValueError,
                                             "prospective policy/checker blob differs"):
@@ -1581,6 +1580,20 @@ class IndependentGateSeamTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,
                                             "(JDK 21 JDI producer|reviewed P2 raw producer) blob differs"):
                     independent_gates._p2_producer_binding(ROOT, revision)
+
+    def test_replay_cost_window_rejects_unavailable_revision_at_both_bindings(self):
+        revision = "0" * 40
+        probe = subprocess.run(
+            ["git", "--no-replace-objects", "cat-file", "-e",
+             revision + "^{commit}"], cwd=ROOT,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        self.assertNotEqual(0, probe.returncode)
+        with self.assertRaisesRegex(
+                ValueError, "prospective checker revision ancestry is unavailable"):
+            independent_gates._prospective_checker_binding(ROOT, revision)
+        with self.assertRaisesRegex(
+                ValueError, "reviewed P2 raw producer revision ancestry is unavailable"):
+            independent_gates._p2_producer_binding(ROOT, revision)
 
     def test_replay_cost_window_rejects_local_candidate_and_cache_drift(self):
         revision = independent_gates.REPLAY_COST_SOURCE_REVISION
