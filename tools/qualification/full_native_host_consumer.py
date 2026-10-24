@@ -8,9 +8,9 @@ import json
 import os
 import platform
 import re
-import shlex
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tarfile
@@ -343,6 +343,65 @@ def staged_path(staging, module, target):
     return staging / qualify.target_binary_path(module, target)
 
 
+def parse_darwin_procargs(buffer, used):
+    if type(used) is not int or used < struct.calcsize("=i") or used > len(buffer):
+        raise ValueError("Darwin process arguments are truncated")
+    data = memoryview(buffer).cast("B")
+    count = struct.unpack_from("=i", data)[0]
+    if count <= 0 or count > used // 2:
+        raise ValueError("Darwin process argument count is invalid")
+
+    def terminated(start):
+        end = start
+        while end < used and data[end] != 0:
+            end += 1
+        if end == used:
+            raise ValueError("Darwin process argument is unterminated")
+        return os.fsdecode(bytes(data[start:end])), end + 1
+
+    saved_path, position = terminated(struct.calcsize("=i"))
+    if not saved_path:
+        raise ValueError("Darwin process executable path is absent")
+    while position < used and data[position] == 0:
+        position += 1
+    if position == used:
+        raise ValueError("Darwin process arguments are absent")
+    arguments = []
+    for _ in range(count):
+        value, position = terminated(position)
+        arguments.append(value)
+    if not arguments[0]:
+        raise ValueError("Darwin process first argument is absent")
+    return saved_path, arguments
+
+
+def darwin_process_argv(pid):
+    if type(pid) is not int or pid <= 0:
+        raise ValueError("Darwin process ID is invalid")
+    libc = ctypes.CDLL(None, use_errno=True)
+    sysctl = libc.sysctl
+    sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint,
+                       ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t),
+                       ctypes.c_void_p, ctypes.c_size_t]
+    sysctl.restype = ctypes.c_int
+    argmax = ctypes.c_int()
+    length = ctypes.c_size_t(ctypes.sizeof(argmax))
+    if (sysctl((ctypes.c_int * 2)(1, 8), 2, ctypes.byref(argmax),
+               ctypes.byref(length), None, 0) != 0
+            or length.value != ctypes.sizeof(argmax)
+            or not 0 < argmax.value <= 16 * 1024 * 1024):
+        raise OSError(ctypes.get_errno(), "Darwin process argument capacity is unavailable")
+    buffer = ctypes.create_string_buffer(argmax.value)
+    try:
+        length = ctypes.c_size_t(len(buffer))
+        if sysctl((ctypes.c_int * 3)(1, 49, pid), 3, buffer,
+                  ctypes.byref(length), None, 0) != 0:
+            raise OSError(ctypes.get_errno(), "Darwin process arguments are unavailable")
+        return parse_darwin_procargs(buffer, length.value)
+    finally:
+        ctypes.memset(buffer, 0, len(buffer))
+
+
 def process_snapshot(expected_folders, simulator_udid):
     def wanted(image, command):
         return (any(Path(image).parent == folder for folder in expected_folders)
@@ -368,24 +427,41 @@ def process_snapshot(expected_folders, simulator_udid):
                 continue
     elif system == "Darwin":
         libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
-        listing = subprocess.check_output(["/bin/ps", "-axo", "pid=,ppid=,command="], text=True)
+        listing = subprocess.check_output(["/bin/ps", "-axo", "pid=,ppid="], text=True)
+        processes = {}
         for line in listing.splitlines():
-            match = re.match(r"\s*(\d+)\s+(\d+)\s+(.+)", line)
+            match = re.fullmatch(r"\s*([1-9][0-9]*)\s+([0-9]+)\s*", line)
             if not match:
                 continue
-            pid, parent, command = match.groups()
+            pid, parent = map(int, match.groups())
             buffer = ctypes.create_string_buffer(4096)
-            if libproc.proc_pidpath(int(pid), buffer, len(buffer)) <= 0:
+            if libproc.proc_pidpath(pid, buffer, len(buffer)) <= 0:
                 continue
-            image = buffer.value.decode(errors="replace")
-            if not wanted(image, command):
-                continue
+            image = os.fsdecode(buffer.value)
+            processes[pid] = (parent, image)
+        selected_tests = [pid for pid, (_, image) in processes.items()
+                          if (Path(image).suffix in (".kexe", ".exe")
+                              and any(Path(image).parent == folder
+                                      for folder in expected_folders))]
+        selected_parents = []
+        if simulator_udid:
+            selected_parents = list(dict.fromkeys(
+                processes[pid][0] for pid in selected_tests
+                if processes.get(processes[pid][0], (None, ""))[1].endswith("/simctl")))
+        for pid in dict.fromkeys(selected_parents + selected_tests):
+            parent, image = processes[pid]
             try:
+                saved_path, argv = darwin_process_argv(pid)
+                buffer = ctypes.create_string_buffer(4096)
+                if (saved_path != image or
+                        libproc.proc_pidpath(pid, buffer, len(buffer)) <= 0 or
+                        os.fsdecode(buffer.value) != image):
+                    continue
                 sha = digest(Path(image).read_bytes())
-            except OSError:
+            except (OSError, ValueError):
                 continue
-            yield {"pid": int(pid), "parent_pid": int(parent), "image": image,
-                   "command": command, "image_sha256": sha}
+            yield {"pid": pid, "parent_pid": parent, "image": image,
+                   "command": " ".join(argv), "argv": argv, "image_sha256": sha}
     elif system == "Windows":
         script = ("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,"
                   "ExecutablePath,CommandLine | ConvertTo-Json -Compress")
@@ -452,8 +528,10 @@ def observe_test_processes(work_root, target, mode, simulator_udid, stop, destin
                     image = Path(sample["image"])
                     short = next((key for key, folder in expected.items()
                                   if image.parent == folder and image.suffix in (".kexe", ".exe")), None)
-                    simulator_command = (simulator_udid and "simctl spawn" in sample["command"]
-                                         and simulator_udid in sample["command"])
+                    argv = sample.get("argv")
+                    simulator_command = (simulator_udid and isinstance(argv, list)
+                                         and len(argv) >= 4 and argv[0] == sample["image"]
+                                         and argv[1] == "spawn" and simulator_udid in argv[2:])
                     if not short and not simulator_command:
                         continue
                     sample.update({"observed_ns": time.time_ns(), "module": short,
@@ -557,13 +635,12 @@ def simulator_spawn_parent(samples, binding, simulator_udid, executable,
             or PurePosixPath(image).name != "simctl"
             or not SHA.fullmatch(str(parent.get("image_sha256", "")))):
         raise ValueError("selected simulator spawn parent identity or time differs")
-    try:
-        command = shlex.split(parent.get("command", ""))
-    except (TypeError, ValueError):
-        command = []
-    if len(command) < 4 or command[:2] != [image, "spawn"]:
-        raise ValueError("selected simulator spawn command differs")
-    arguments = command[2:]
+    argv = parent.get("argv")
+    if (not isinstance(argv, list) or len(argv) < 4
+            or any(type(value) is not str or "\0" in value for value in argv)
+            or argv[:2] != [image, "spawn"]):
+        raise ValueError("selected simulator spawn arguments are absent or malformed")
+    arguments = argv[2:]
     while arguments and arguments[0].startswith("--") and arguments[0] != "--":
         arguments = arguments[1:]
     if len(arguments) < 2 or arguments[:2] != [simulator_udid, str(executable)]:

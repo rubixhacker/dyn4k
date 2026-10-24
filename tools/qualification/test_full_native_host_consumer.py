@@ -1,8 +1,10 @@
 import json
 import io
 import contextlib
+import ctypes
 import os
 import shlex
+import struct
 import subprocess
 import sys
 import tarfile
@@ -53,6 +55,78 @@ def report(short, name=None, outcome=None, duplicate=False):
 
 
 class NativeHostConsumerTests(unittest.TestCase):
+    def test_darwin_procargs_count_preserves_empty_and_quote_arguments(self):
+        argv = ["/tool/simctl", "spawn", "", 'literal"quote',
+                "/Volumes/Build Space/test.kexe"]
+        raw = (struct.pack("=i", len(argv)) + b"/tool/simctl\0\0\0" +
+               b"\0".join(item.encode() for item in argv) +
+               b"\0\0SECRET=private-tail\0")
+        parsed = route.parse_darwin_procargs(raw, len(raw))
+        self.assertEqual(parsed, ("/tool/simctl", argv))
+        self.assertNotIn("SECRET", repr(parsed))
+        for malformed in (raw[:3], struct.pack("=i", 0) + raw[4:],
+                          raw[:4] + b"unterminated", raw[:raw.index(b"literal") + 5]):
+            with self.subTest(size=len(malformed)), self.assertRaises(ValueError):
+                route.parse_darwin_procargs(malformed, len(malformed))
+
+    def test_darwin_sampler_emits_selected_argument_boundaries(self):
+        udid = "AA3852EE-9842-471F-91C0-DE44A699EA3C"
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            simctl = root / "CoreSimulator/bin/simctl"
+            image = root / "Build Space/core/bin/iosSimulatorArm64/debugTest/test.kexe"
+            for path in (simctl, image):
+                path.parent.mkdir(parents=True)
+                path.write_bytes(path.name.encode())
+            argv = [str(simctl), "spawn", "--standalone", udid,
+                    str(image), "--", "--ktest_logger=TEAMCITY"]
+            by_pid = {100: str(simctl), 101: str(image),
+                      102: str(root / "OtherSimulator/bin/simctl")}
+            queried = []
+
+            class Libproc:
+                def proc_pidpath(self, pid, buffer, size):
+                    value = by_pid[pid].encode() + b"\0"
+                    ctypes.memmove(buffer, value, len(value))
+                    return len(value) - 1
+
+            def listing(command, **_):
+                self.assertEqual(command[0], "/bin/ps")
+                if "command=" in command[-1]:
+                    return (f"100 10 {' '.join(argv)}\n"
+                            f"101 100 {image} -- --ktest_logger=TEAMCITY\n"
+                            "102 10 unrelated\n")
+                return "100 10\n101 100\n102 10\n"
+
+            def observed_args(pid):
+                queried.append(pid)
+                return (by_pid[pid], argv if pid == 100 else
+                        [str(image), "--", "--ktest_logger=TEAMCITY"])
+
+            with patch.object(route.platform, "system", return_value="Darwin"), \
+                 patch.object(route.ctypes, "CDLL", return_value=Libproc()), \
+                 patch.object(route.subprocess, "check_output", side_effect=listing), \
+                 patch.object(route, "darwin_process_argv", side_effect=observed_args,
+                              create=True):
+                samples = list(route.process_snapshot([image.parent], udid))
+            self.assertEqual(queried, [100, 101])
+            self.assertEqual([sample["argv"] for sample in samples],
+                             [argv, [str(image), "--", "--ktest_logger=TEAMCITY"]])
+            archive = root / "archive"
+            (archive / "runtime").mkdir(parents=True)
+            now = time.time_ns()
+            (archive / "simctl-guest.json").write_bytes(route.encoded({
+                "finished_ns": now - 750_000}))
+            samples[0].update({"module": None, "simulator_udid": udid,
+                               "observed_ns": now - 500_000})
+            samples[1].update({"module": "core", "simulator_udid": None,
+                               "observed_ns": now - 250_000})
+            (archive / "runtime/process-observations.jsonl").write_bytes(
+                b"".join(route.encoded(sample) for sample in samples))
+            self.assertEqual(route.process_binding(
+                archive, root / "Build Space", "iosSimulatorArm64", "debug-g",
+                udid, "core", route.digest(image.read_bytes()), image), samples[1])
+
     def test_simulator_capture_requires_observed_spawn_parent(self):
         udid = "AA3852EE-9842-471F-91C0-DE44A699EA3C"
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
@@ -74,10 +148,11 @@ class NativeHostConsumerTests(unittest.TestCase):
                         with self.subTest(target=target, mode=mode, module=short):
                             image = str(work_root / short / "bin" / target /
                                         binary_mode / "test.kexe")
+                            argv = [simctl, "spawn", "--standalone", udid, image,
+                                    "--", "--ktest_logger=TEAMCITY"]
                             parent = {"module": None, "pid": 400, "parent_pid": 300,
                                       "image": simctl, "image_sha256": "a" * 64,
-                                      "command": f"{simctl} spawn --standalone {udid} "
-                                                 f"{shlex.quote(image)} -- --ktest_logger=TEAMCITY",
+                                      "command": " ".join(argv), "argv": argv,
                                       "observed_ns": now - 500_000,
                                       "simulator_udid": udid}
                             child = {"module": short, "pid": 401, "parent_pid": 400,
@@ -92,14 +167,26 @@ class NativeHostConsumerTests(unittest.TestCase):
                                 return route.process_binding(archive, work_root, target,
                                                              mode, udid, short, "b" * 64)
 
+                            first, second = image.split(" ", 1)
+                            for label, wrong_argv in (
+                                ("split executable", argv[:4] + [first, second] + argv[5:]),
+                                ("literal quote arguments", argv[:4] +
+                                 ['"' + first, second + '"'] + argv[5:]),
+                            ):
+                                changed = {**parent, "argv": wrong_argv,
+                                           "command": " ".join(wrong_argv)}
+                                with self.subTest(case=label), self.assertRaises(ValueError):
+                                    selected(changed, child)
                             self.assertEqual(selected(), child)
                             for label, changed_parent, changed_child in (
                                 ("orphan", {}, {"parent_pid": 999999}),
                                 ("wrong parent", {"pid": 402}, {}),
                                 ("wrong guest", {"simulator_udid": "0" * 36}, {}),
-                                ("wrong command guest", {"command": parent["command"].replace(udid, "0" * 36)}, {}),
-                                ("wrong exact executable", {"command": parent["command"].replace(
-                                    shlex.quote(image), shlex.quote(image + "-shadow"))}, {}),
+                                ("wrong argv guest", {"argv": argv[:3] + ["0" * 36] + argv[4:]}, {}),
+                                ("wrong exact executable", {"argv": argv[:4] +
+                                    [image + "-shadow"] + argv[5:]}, {}),
+                                ("missing argv", {"argv": None}, {}),
+                                ("malformed argv", {"argv": parent["command"]}, {}),
                                 ("late parent", {"observed_ns": child["observed_ns"] + 1}, {}),
                                 ("early parent", {"observed_ns": now - 800_000}, {}),
                                 ("invalid parent identity", {"image_sha256": "bad"}, {}),
@@ -380,7 +467,7 @@ class NativeHostConsumerTests(unittest.TestCase):
             def listing(argv, **kwargs):
                 calls.append(argv[0])
                 parent = 67086 if argv[0] == "ps" else 99999
-                return f"67383 {parent} {image.as_posix()}\n"
+                return f"67383 {parent}\n"
 
             def pidpath(pid, buffer, size):
                 self.assertEqual(pid, 67383)
@@ -393,6 +480,8 @@ class NativeHostConsumerTests(unittest.TestCase):
                                              "JAVA_HOME": str(java.parent.parent)}), \
                  patch.object(route.platform, "system", return_value="Darwin"), \
                  patch.object(route.ctypes, "CDLL", return_value=SimpleNamespace(proc_pidpath=pidpath)), \
+                 patch.object(route, "darwin_process_argv",
+                              return_value=(image.as_posix(), [image.as_posix()])), \
                  patch.object(route.subprocess, "check_output", side_effect=listing):
                 sampled = list(route.process_snapshot([image.parent], None))
                 self.assertEqual(calls, ["/bin/ps"])
@@ -1579,8 +1668,10 @@ class NativeHostConsumerTests(unittest.TestCase):
                     parent = {"module": None, "pid": 300 + index,
                               "parent_pid": 101, "image": simctl,
                               "image_sha256": "a" * 64,
+                              "argv": [simctl, "spawn", "--standalone", udid,
+                                       image, "--", "--ktest_logger=TEAMCITY"],
                               "command": f"{simctl} spawn --standalone {udid} "
-                                         f"{shlex.quote(image)} -- --ktest_logger=TEAMCITY",
+                                         f"{image} -- --ktest_logger=TEAMCITY",
                               "observed_ns": start + 10 + index * 10,
                               "simulator_udid": udid}
                     child = {**product["observed_process"], "pid": 400 + index,
@@ -1618,6 +1709,16 @@ class NativeHostConsumerTests(unittest.TestCase):
                     "finished_ns": start + 2,
                     "stdout_sha256": route.digest(b""), "stderr_sha256": route.digest(b"")}))
                 self.assertEqual(verify()["status"], "PASSED")
+                core_image = products["core"]["path"]
+                split = {**simulator_samples[0], "argv": simulator_samples[0]["argv"][:4]
+                         + core_image.split(" ", 1) + simulator_samples[0]["argv"][5:]}
+                write("runtime/process-observations.jsonl", b"".join(
+                    route.encoded(split if item is simulator_samples[0] else item)
+                    for item in simulator_samples))
+                with self.assertRaisesRegex(ValueError, "simulator|parent|process"):
+                    verify()
+                write("runtime/process-observations.jsonl", b"".join(
+                    route.encoded(item) for item in simulator_samples))
                 orphan = {**simulator_samples[1], "parent_pid": 999999}
                 products["core"]["observed_process"] = orphan
                 write("runtime/products.json", route.encoded(products))
