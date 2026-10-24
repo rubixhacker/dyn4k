@@ -1091,18 +1091,18 @@ def snapshot_archive(root, destination, *, platform_name=None):
                 before = os.stat(relative.name, dir_fd=parent_fd, follow_symlinks=False)
                 if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
                     raise ValueError("raw archive member changed before copy")
+                identity = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_size,
+                                          value.st_mtime_ns, value.st_nlink)
                 fd = os.open(relative.name, file_flags, dir_fd=parent_fd)
                 try:
                     opened = os.fstat(fd)
-                    if (opened.st_dev, opened.st_ino, opened.st_nlink) != (before.st_dev, before.st_ino, 1):
+                    if identity(opened) != identity(before):
                         raise ValueError("raw archive member changed during open")
                     with os.fdopen(fd, "rb", closefd=False) as source:
                         data = source.read()
                     after = os.fstat(fd)
                     current = os.stat(relative.name, dir_fd=parent_fd, follow_symlinks=False)
-                    identity = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_size,
-                                              value.st_mtime_ns, value.st_nlink)
-                    if identity(before) != identity(opened) or identity(after) != identity(current):
+                    if not identity(before) == identity(opened) == identity(after) == identity(current):
                         raise ValueError("raw archive member changed during copy")
                     copy = destination / relative
                     copy.parent.mkdir(parents=True, exist_ok=True)

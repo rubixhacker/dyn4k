@@ -580,8 +580,46 @@ class NativeHostConsumerTests(unittest.TestCase):
                 return original(path, flags, *args, **kwargs)
 
             with patch.object(route.os, "open", side_effect=change_mode), \
-                    self.assertRaisesRegex(ValueError, "changed during copy"):
+                    self.assertRaisesRegex(ValueError, "changed during open"):
                 route.snapshot_archive(raw, root / "snapshot")
+
+    @unittest.skipUnless(os.name == "posix", "requires POSIX file modes")
+    def test_snapshot_rejects_mode_change_during_read(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as temporary:
+            root = Path(temporary)
+            raw = root / "raw"
+            raw.mkdir()
+            (raw / "receipt.json").write_bytes(b"{}")
+            executable = raw / "runtime.program"
+            executable.write_bytes(b"program")
+            executable.chmod(0o755)
+            original_open, original_fstat = route.os.open, route.os.fstat
+            target_fd, target_calls = None, 0
+
+            def observe_open(path, flags, *args, **kwargs):
+                nonlocal target_fd
+                fd = original_open(path, flags, *args, **kwargs)
+                if path == "runtime.program":
+                    target_fd = fd
+                return fd
+
+            def change_before_post_read(fd):
+                nonlocal target_calls
+                if fd == target_fd:
+                    target_calls += 1
+                    if target_calls == 2:
+                        executable.chmod(0o644)
+                return original_fstat(fd)
+
+            snapshot = root / "snapshot"
+            with patch.object(route.os, "open", side_effect=observe_open), \
+                    patch.object(route.os, "fstat", side_effect=change_before_post_read), \
+                    self.assertRaisesRegex(ValueError, "changed during copy"):
+                route.snapshot_archive(raw, snapshot)
+
+            self.assertEqual(target_calls, 2)
+            self.assertEqual(executable.stat().st_mode & 0o777, 0o644)
+            self.assertFalse((snapshot / "runtime.program").exists())
 
     @unittest.skipUnless(os.name == "posix", "requires POSIX executable modes")
     def test_cross_run_checks_real_snapshot_modes_before_launch_boundary(self):
