@@ -519,8 +519,16 @@ def _proof(files, legacy, metadata, raw_traces, traces, events, worker, helper,
         "response_path", "agent_path", "witness_path", "mirror_path",
         "class_load_path", "argument_path")}
     selected = select_worker_exec(traces, _PINNED_JAVA)
-    require(int(selected[0]) == metadata["worker_pid"] ==
-            legacy["worker_pid"], "selected worker identity differs")
+    selected_pid = selected[0]
+    metadata_pid = metadata["worker_pid"]
+    legacy_pid = legacy["worker_pid"]
+    require(type(selected_pid) is str and
+            re.fullmatch(r"[1-9][0-9]*", selected_pid) is not None and
+            type(metadata_pid) is int and metadata_pid > 0 and
+            type(legacy_pid) is str and
+            re.fullmatch(r"[1-9][0-9]*", legacy_pid) is not None and
+            selected_pid == legacy_pid and int(selected_pid) == metadata_pid,
+            "selected worker identity differs")
     build_runtime = verify_build_runtime(traces, selected)
     command = metadata["command"]
     require(type(command) is list and command and

@@ -958,5 +958,79 @@ class FocusedReplayTest(unittest.TestCase):
             self.assertEqual(order, ["whole", "focused"])
 
 
+class FocusedWorkerIdentityProofTest(unittest.TestCase):
+    class ProofContinued(Exception):
+        pass
+
+    @staticmethod
+    def _metadata(worker_pid):
+        keys = (
+            "schema", "command", "trace_arguments", "response_path", "agent_path",
+            "witness_path", "mirror_path", "class_load_path", "argument_path",
+            "agent_identity", "witness_identity", "mirror_identity",
+            "argument_identity", "class_load_identity", "response_identity",
+            "agent_after_identity", "artifact_identity", "artifact_after_identity",
+            "runtime_identity", "runtime_after_identity", "launcher_identity",
+            "launcher_after_identity", "launcher_sha256", "helper_class_before",
+            "helper_class_after", "helper_argument_path", "helper_argument_identity",
+            "observer_interpreter_path", "observer_interpreter_identity",
+            "observer_interpreter_after_identity", "observer_interpreter_sha256",
+            "observer_command", "observer_environment_sha256", "observer_exit_code",
+            "worker_pid", "exit_code")
+        metadata = dict.fromkeys(keys)
+        metadata.update({
+            "schema": "focused-arithmetic-capture/6",
+            "trace_arguments": focused_receipt.rich_trace_arguments(),
+            "worker_pid": worker_pid,
+            "exit_code": 0,
+        })
+        return metadata
+
+    def _run_proof(self, selected_pid, metadata_pid, legacy_pid):
+        trace = (
+            f'1.000001 execve("{focused_receipt._PINNED_JAVA}", '
+            '["java", "worker.org.gradle.process.internal.worker.GradleWorkerMain", "1"], '
+            '0x0) = 0\n').encode()
+        with patch.object(focused_receipt, "verify_build_runtime",
+                          side_effect=self.ProofContinued):
+            focused_receipt._proof(
+                {}, {"worker_pid": legacy_pid}, self._metadata(metadata_pid), {},
+                {selected_pid: trace}, [], {}, {}, [], {}, {}, [], {})
+
+    def test_matching_producer_pid_representations_pass_identity_condition(self):
+        with self.assertRaises(self.ProofContinued):
+            self._run_proof("41", 41, "41")
+
+    def test_each_independently_wrong_worker_identity_is_rejected(self):
+        for selected_pid, metadata_pid, legacy_pid in (
+                ("42", 41, "41"), ("41", 42, "41"), ("41", 41, "42")):
+            with self.subTest(selected=selected_pid, metadata=metadata_pid,
+                              legacy=legacy_pid), \
+                    self.assertRaisesRegex(FocusedRejected,
+                                           "selected worker identity differs"):
+                self._run_proof(selected_pid, metadata_pid, legacy_pid)
+
+    def test_worker_identity_rejects_noncanonical_or_nonpositive_values(self):
+        invalid_selected = ("0", "-41", "+41", " 41", "041", "４１")
+        for selected_pid in invalid_selected:
+            with self.subTest(source="selected", pid=selected_pid), \
+                    self.assertRaisesRegex(FocusedRejected,
+                                           "selected worker identity differs"):
+                self._run_proof(selected_pid, 41, selected_pid)
+
+        for metadata_pid in (True, 41.0, 0, -41):
+            with self.subTest(source="metadata", pid=metadata_pid), \
+                    self.assertRaisesRegex(FocusedRejected,
+                                           "selected worker identity differs"):
+                self._run_proof("41", metadata_pid, "41")
+
+        invalid_legacy = (True, 41.0, 0, -41, "0", "-41", "+41", " 41", "041", "４１")
+        for legacy_pid in invalid_legacy:
+            with self.subTest(source="legacy", pid=legacy_pid), \
+                    self.assertRaisesRegex(FocusedRejected,
+                                           "selected worker identity differs"):
+                self._run_proof("41", 41, legacy_pid)
+
+
 if __name__ == "__main__":
     unittest.main()
