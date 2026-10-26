@@ -843,7 +843,13 @@ class OwnedProcesses:
                         Decimal(timestamp[1].decode()) * 1_000_000_000))
                     previous = self.lineage.setdefault(child, record)
                     if previous != record:
-                        raise SampleUnavailable(phase, child, "LINEAGE_CHANGED")
+                        if (previous[0] == phase and
+                                previous[1] == self.roots[phase][0]):
+                            self.lineage[child] = record
+                            if child in self.bound:
+                                self.bound[child]["parent"] = int(suffix)
+                        else:
+                            raise SampleUnavailable(phase, child, "LINEAGE_CHANGED")
 
     def refresh(self, phases):
         phases = set(phases) & set(self.roots)
