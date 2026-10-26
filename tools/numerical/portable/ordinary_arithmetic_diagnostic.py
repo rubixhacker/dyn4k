@@ -1035,9 +1035,17 @@ class OwnedProcesses:
             pid = next(pid for pid, bound in self.bound.items()
                        if bound is live[0])
             row = live[0]
-            raise SampleUnavailable(row["phase"], pid,
-                                    "CLEANUP_SURVIVOR") from failure
+            outcome = SampleUnavailable(row["phase"], pid, "CLEANUP_SURVIVOR")
+            if failure is not None:
+                outcome.detail["prior_failure_status"] = _typed_status(failure)
+                if isinstance(failure, SampleUnavailable):
+                    outcome.detail["prior_failure_detail"] = failure.detail
+            raise outcome from failure
         if unresolved is not None:
+            if failure is not None and isinstance(unresolved, SampleUnavailable):
+                unresolved.detail["prior_failure_status"] = _typed_status(failure)
+                if isinstance(failure, SampleUnavailable):
+                    unresolved.detail["prior_failure_detail"] = failure.detail
             raise unresolved from failure
         if failure is not None:
             raise failure

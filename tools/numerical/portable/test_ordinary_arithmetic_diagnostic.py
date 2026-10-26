@@ -1168,6 +1168,21 @@ class DiagnosticContractTest(unittest.TestCase):
                 owned.stop({"stage"})
         self.assertGreater(calls, 1)
         self.assertIn(11, [call.args[0] for call in sent.call_args_list])
+        with (mock.patch.object(owned, "refresh", side_effect=refresh),
+              mock.patch.object(diagnostic, "_pidfd_exited", return_value=False),
+              mock.patch.object(diagnostic, "_proc_identity", side_effect=identity),
+              mock.patch.object(Path, "read_text", return_value="10 (fixture) S "),
+              mock.patch.object(diagnostic.time, "monotonic",
+                                side_effect=(i for i in range(100))),
+              mock.patch.object(diagnostic.time, "sleep"),
+              mock.patch.object(diagnostic.signal, "pidfd_send_signal")):
+            with self.assertRaises(SampleUnavailable) as combined:
+                owned.stop({"stage"}, sample=lambda: (_ for _ in ()).throw(
+                    DiagnosticRejected("TIME_BOUND")))
+        self.assertEqual(combined.exception.detail["reason"],
+                         "CLEANUP_SURVIVOR")
+        self.assertEqual(combined.exception.detail["prior_failure_status"],
+                         "TIME_BOUND")
 
     def test_cleanup_distinguishes_exit_missing_proof_and_prior_timeout(self):
         def owned():
