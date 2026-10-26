@@ -1,6 +1,7 @@
 import io
 import hashlib
 import gc
+import inspect
 import json
 import os
 from pathlib import Path
@@ -702,13 +703,40 @@ class NativeSnapshotControlTest(unittest.TestCase):
         files = {"strace-source.tar.xz": archive.read_bytes(),
                  "strace-binary": Path(binary).read_bytes(),
                  "strace-build.json": json.dumps(record).encode()}
-        def use_retained_binary(_source, output, *, timeout):
+        def use_real_builder(source, output, *, timeout):
             self.assertEqual(timeout, 600)
-            (output / "src").mkdir(parents=True)
-            (output / "src/strace").write_bytes(files["strace-binary"])
-            return {"binary_sha256": record["binary_sha256"]}
+            destination = os.environ.get("DYN4K_REBUILD_RECORD_DIR")
+            def retain():
+                if not destination:
+                    return
+                target = Path(destination)
+                target.mkdir(mode=0o700)
+                for name in ("build-record.json", "src/strace"):
+                    path = output / name
+                    if path.is_file():
+                        saved = target / name
+                        saved.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(path, saved)
+                for path in sorted(output.glob("build-*-*.raw")):
+                    shutil.copyfile(path, target / path.name)
+                (target / "wrapper.json").write_text(json.dumps({
+                    "schema": "ordinary-real-rebuild-wrapper/1",
+                    "sha256": hashlib.sha256(
+                        inspect.getsource(use_real_builder).encode()).hexdigest(),
+                    "effect": "Call the production builder and retain its record, raw streams, and binary."
+                }, sort_keys=True) + "\n")
+            try:
+                rebuilt = builder.build(source, output, timeout=timeout)
+            except BaseException as error:
+                try:
+                    retain()
+                except Exception as retention_error:
+                    error.add_note(f"rebuild evidence retention failed: {retention_error}")
+                raise
+            retain()
+            return rebuilt
         with mock.patch.object(diagnostic, "build_owned_tracer",
-                               side_effect=use_retained_binary) as rebuild:
+                               side_effect=use_real_builder) as rebuild:
             self.assertEqual(diagnostic._tracer_identity(
                 files, {"tracer_build": record})["binary_sha256"],
                 record["binary_sha256"])
