@@ -173,6 +173,7 @@ ORDINARY_DIAGNOSTIC_LINEAGE_REMEDY_SOURCE_REVISION = "dab9cdb1e875dd569531b86a9b
 ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_SOURCE_REVISION = "4d51856e1c8133fbef2074a61ccaedd8c8d8d677"
 ORDINARY_DIAGNOSTIC_SNAPSHOT_SOURCE_REVISION = "6904520187a6cfe7d293f8d6e27a8a2c6f3bd740"
 ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_REVISION = "e12a85ff5541d60ca0ceb673b0024f670a93b1be"
+ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_REVISION = "ff6515cc7249876349adf08d5bee7d84f333c15a"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -666,6 +667,27 @@ ORDINARY_DIAGNOSTIC_CHILD_FIRST_CAPTURE_DEPENDENCIES = {
     **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
     **ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_DEPENDENCIES,
 }
+ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_DEPENDENCIES = {
+    **ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_DEPENDENCIES,
+    "tools/numerical/portable/ordinary_arithmetic_diagnostic.py":
+        "1086898a948eac00e21f12e0cd3e0cef65116ed6f9a413678dbaa83f7449cff4",
+    "tools/numerical/portable/ordinary_snapshot/build_tracer.py":
+        "1f79a34e2bf0fdd8725e2ee246232e5f73c2644c1bcd47264bdd9c434b5265e5",
+    "tools/numerical/portable/ordinary_snapshot/control.py":
+        "c7e7ad7d7ce7168ec593d12365cce9503f116219f718468495221db6a13005ce",
+    "tools/numerical/portable/ordinary_snapshot/owned_snapshot.inc":
+        "c1eeca6aaf9532e9786d9b30685150b170415822ae1283edab074830cd350566",
+    "tools/numerical/portable/ordinary_snapshot/strace-7.2.patch":
+        "e4106dfe9d1bf7a10142aa6344479a1dfac5abf84ec24d9dfd9805cb16615f59",
+    "tools/numerical/portable/ordinary_snapshot/toy.c":
+        "83a1f40706867a6091ab25364140b54b6c472055de7284a83e5676e747be6f97",
+    "tools/numerical/portable/ordinary_snapshot/test_control.py":
+        "d69f237826b9022b0a0bba63974cae70865babdd802979d2b5e1039eae46dbd1",
+}
+ORDINARY_DIAGNOSTIC_REMEDY_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_DEPENDENCIES,
+}
 P2_V6_DEPENDENCIES = {
     **P2_EXECUTABLE_LOCAL_DEPENDENCIES,
     "tools/numerical/portable/build.gradle.kts":
@@ -821,6 +843,10 @@ P2_ORDINARY_DIAGNOSTIC_SNAPSHOT_DEPENDENCIES = {
 P2_ORDINARY_DIAGNOSTIC_CHILD_FIRST_DEPENDENCIES = {
     **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
     **ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_DEPENDENCIES,
+}
+P2_ORDINARY_DIAGNOSTIC_REMEDY_DEPENDENCIES = {
+    **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_DEPENDENCIES,
 }
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_JVM8_PRODUCERS = {
@@ -1367,6 +1393,8 @@ def _prospective_checker_binding(repository, candidate_sha):
         ORDINARY_DIAGNOSTIC_SNAPSHOT_SOURCE_REVISION)
     ordinary_diagnostic_child_first_window = descends_from(
         ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_REVISION)
+    ordinary_diagnostic_remedy_window = descends_from(
+        ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_REVISION)
     observer_env_replay_window = descends_from(OBSERVER_ENV_REPLAY_SOURCE_REVISION)
     jdi_replay_cost_window = descends_from(JDI_REPLAY_COST_SOURCE_REVISION)
     replay_cost_window = descends_from(REPLAY_COST_SOURCE_REVISION)
@@ -1456,7 +1484,9 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
         if hashlib.sha256(committed).hexdigest() != expected:
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
-    executable_dependencies = (ORDINARY_DIAGNOSTIC_CHILD_FIRST_CAPTURE_DEPENDENCIES
+    executable_dependencies = (ORDINARY_DIAGNOSTIC_REMEDY_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_remedy_window else
+                               ORDINARY_DIAGNOSTIC_CHILD_FIRST_CAPTURE_DEPENDENCIES
                                if ordinary_diagnostic_child_first_window else
                                ORDINARY_DIAGNOSTIC_SNAPSHOT_CAPTURE_DEPENDENCIES
                                if ordinary_diagnostic_snapshot_window else
@@ -1500,7 +1530,7 @@ def _prospective_checker_binding(repository, candidate_sha):
                                PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES
                                if executable_window else {})
     local_dependencies = (APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
-                          ORDINARY_DIAGNOSTIC_CHILD_FIRST_CAPTURE_DEPENDENCIES)
+                          ORDINARY_DIAGNOSTIC_REMEDY_CAPTURE_DEPENDENCIES)
     for relative, expected in local_dependencies.items():
         local = Path(__file__).resolve().parents[2] / relative
         try:
@@ -1634,6 +1664,8 @@ def _p2_producer_binding(repository, candidate_sha):
         ORDINARY_DIAGNOSTIC_SNAPSHOT_SOURCE_REVISION)
     ordinary_diagnostic_child_first_window = descends_from(
         ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_REVISION)
+    ordinary_diagnostic_remedy_window = descends_from(
+        ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_REVISION)
     jdk21_jdi = descends_from(P2_JDK21_JDI_SOURCE_REVISION)
     corrected_jdi = descends_from(P2_CORRECTED_JDI_SOURCE_REVISION)
     bounded_jdi = descends_from(P2_BOUNDED_JDI_SOURCE_REVISION)
@@ -1729,7 +1761,9 @@ def _p2_producer_binding(repository, candidate_sha):
         if hashlib.sha256(committed).hexdigest() != digest:
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     if jdk21_jdi:
-        dependencies = (P2_ORDINARY_DIAGNOSTIC_CHILD_FIRST_DEPENDENCIES
+        dependencies = (P2_ORDINARY_DIAGNOSTIC_REMEDY_DEPENDENCIES
+                        if ordinary_diagnostic_remedy_window else
+                        P2_ORDINARY_DIAGNOSTIC_CHILD_FIRST_DEPENDENCIES
                         if ordinary_diagnostic_child_first_window else
                         P2_ORDINARY_DIAGNOSTIC_SNAPSHOT_DEPENDENCIES
                         if ordinary_diagnostic_snapshot_window else
@@ -1775,7 +1809,7 @@ def _p2_producer_binding(repository, candidate_sha):
                         else P2_JDK21_JDI_DEPENDENCIES)
         _source_binding(repository, candidate_sha, dependencies,
                         "JDK 21 JDI producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_CHILD_FIRST_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_REMEDY_DEPENDENCIES)
     elif corrected_jdi:
         _source_binding(repository, candidate_sha, P2_CORRECTED_JDI_DEPENDENCIES,
                         "corrected JDI producer",
