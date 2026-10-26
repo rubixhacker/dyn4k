@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 static void *thread_fork(void *unused)
@@ -63,6 +64,17 @@ int main(int argc, char **argv)
 	} else if (!strcmp(argv[1], "untraced")) {
 		child = syscall(SYS_clone, CLONE_UNTRACED | SIGCHLD,
 				0, NULL, NULL, NULL);
+	} else if (!strcmp(argv[1], "untraced_live")) {
+		child = syscall(SYS_clone, CLONE_UNTRACED | SIGCHLD,
+				0, NULL, NULL, NULL);
+	} else if (!strcmp(argv[1], "freeze_birth")) {
+		struct timespec start, now;
+		clock_gettime(CLOCK_MONOTONIC, &start);
+		do {
+			clock_gettime(CLOCK_MONOTONIC, &now);
+		} while ((now.tv_sec - start.tv_sec) * 1000000000LL +
+		         now.tv_nsec - start.tv_nsec < 20000000LL);
+		child = fork();
 	} else if (!strcmp(argv[1], "fast") ||
 		   !strcmp(argv[1], "group_escape") ||
 		   !strcmp(argv[1], "parent_exit") ||
@@ -77,6 +89,9 @@ int main(int argc, char **argv)
 	if (child == 0) {
 		if (!strcmp(argv[1], "untraced"))
 			_exit(0);
+		if (!strcmp(argv[1], "untraced_live") ||
+		    !strcmp(argv[1], "freeze_birth"))
+			execl("/bin/sleep", "sleep", "0.3", (char *) NULL);
 		if (!strcmp(argv[1], "group_escape") && setsid() < 0)
 			_exit(6);
 		if (!strcmp(argv[1], "held_child") ||

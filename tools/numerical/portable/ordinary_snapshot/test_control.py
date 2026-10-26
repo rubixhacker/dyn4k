@@ -1,18 +1,141 @@
+import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
+import signal
+import sys
 import tempfile
 import time
 import unittest
 from unittest import mock
+import zipfile
 
 from ordinary_snapshot.control import SnapshotIncomplete, SnapshotOwnedProcesses
+from ordinary_snapshot.build_tracer import build as build_tracer, run as run_build_command
 from ordinary_arithmetic_diagnostic import _pidfd_exited, _proc_identity, check_retained
 import ordinary_arithmetic_diagnostic as diagnostic
 
 
 class NativeSnapshotControlTest(unittest.TestCase):
+    def test_timed_out_build_command_kills_compiler_descendant(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            pidfile = Path(directory) / "child.pid"
+            program = ("import pathlib,subprocess,sys,time; "
+                       "child=subprocess.Popen(['/bin/sleep','5']); "
+                       "pathlib.Path(sys.argv[1]).write_text(str(child.pid)); "
+                       "time.sleep(5)")
+            result = run_build_command([sys.executable, "-c", program,
+                                        str(pidfile)], directory, os.environ, 0.3)
+            self.assertTrue(result["timed_out"])
+            self.assertEqual(result["exit_code"], 124)
+            child = int(pidfile.read_text())
+            try:
+                handle = os.pidfd_open(child)
+            except ProcessLookupError:
+                return
+            try:
+                self.assertTrue(_pidfd_exited(handle))
+            finally:
+                os.close(handle)
+
+    def test_private_build_timeout_keeps_record_and_raw_streams(self):
+        archive = os.environ.get("DYN4K_STRACE_SOURCE")
+        if not archive:
+            self.skipTest("pinned source archive path is not provided")
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            output = Path(directory) / "build"
+            with self.assertRaisesRegex(RuntimeError, "private strace build failed"):
+                build_tracer(archive, output, timeout=3)
+            record = json.loads((output / "build-record.json").read_text())
+            self.assertEqual(record["status"], "TIMEOUT")
+            self.assertGreaterEqual(len(record["commands"]), 1)
+            command = record["commands"][-1]
+            self.assertEqual(command["exit_code"], 124)
+            self.assertTrue(command["timed_out"])
+            self.assertTrue(Path(command["stdout_path"]).is_file())
+            self.assertTrue(Path(command["stderr_path"]).is_file())
+
+    def test_blocked_read_has_one_hold_deadline(self):
+        class Held:
+            resumed = False
+            def freeze(self, _phase):
+                return None
+            def resume(self):
+                self.resumed = True
+        held = Held()
+        samples = []
+        started = time.monotonic()
+        with mock.patch.object(diagnostic, "_owned_sample",
+                               side_effect=lambda *_: time.sleep(6)):
+            with self.assertRaises(SnapshotIncomplete) as failure:
+                diagnostic._take_owned_sample(samples, {}, "stage", None, {}, held)
+        self.assertEqual(failure.exception.detail["reason"], "FREEZE_TIMEOUT")
+        self.assertLess(time.monotonic() - started, 5.5)
+        self.assertTrue(held.resumed)
+        self.assertEqual(samples, [])
+
+    def test_cleanup_identity_failure_still_signals_bound_pidfds(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            owners = [subprocess.Popen(["/bin/sleep", "5"]) for _ in range(2)]
+            sentinel = subprocess.Popen(["/bin/sleep", "5"])
+            owned = SnapshotOwnedProcesses(directory, directory, _proc_identity,
+                                           _pidfd_exited, check_retained)
+            try:
+                for process in owners:
+                    identity = _proc_identity(process.pid)
+                    owned._bind("stage", process.pid, identity["start_ticks"],
+                                None, os.pidfd_open(process.pid))
+                failed_pid = owners[-1].pid
+                def read_identity(pid):
+                    if pid == failed_pid:
+                        raise OSError("injected identity failure")
+                    return _proc_identity(pid)
+                owned.read_identity = read_identity
+                with mock.patch.object(owned, "pump"):
+                    with self.assertRaises(SnapshotIncomplete) as failure:
+                        owned.stop({"stage"})
+                self.assertEqual(failure.exception.detail["reason"],
+                                 "CLEANUP_IDENTITY")
+                self.assertTrue(all(_pidfd_exited(owned.bound[process.pid]["handle"])
+                                    for process in owners))
+                self.assertIsNone(sentinel.poll())
+            finally:
+                for process in (*owners, sentinel):
+                    if process.poll() is None:
+                        process.send_signal(signal.SIGKILL)
+                    process.wait(timeout=3)
+                owned.close()
+
+    def test_cleanup_changed_numeric_pid_still_uses_bound_pidfd(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            owner = subprocess.Popen(["/bin/sleep", "5"])
+            sentinel = subprocess.Popen(["/bin/sleep", "5"])
+            owned = SnapshotOwnedProcesses(directory, directory, _proc_identity,
+                                           _pidfd_exited, check_retained)
+            try:
+                identity = _proc_identity(owner.pid)
+                owned._bind("stage", owner.pid, identity["start_ticks"], None,
+                            os.pidfd_open(owner.pid))
+                def changed_identity(pid):
+                    current = _proc_identity(pid)
+                    return {**current, "start_ticks": current["start_ticks"] + 1}
+                owned.read_identity = changed_identity
+                with mock.patch.object(owned, "pump"):
+                    with self.assertRaises(SnapshotIncomplete) as failure:
+                        owned.stop({"stage"})
+                self.assertEqual(failure.exception.detail["reason"],
+                                 "PID_IDENTITY_CHANGED")
+                self.assertTrue(_pidfd_exited(owned.bound[owner.pid]["handle"]))
+                self.assertIsNone(sentinel.poll())
+            finally:
+                for process in (owner, sentinel):
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=3)
+                owned.close()
+
     def test_source_and_binary_changes_reject_before_rebuild(self):
         binary = os.environ.get("DYN4K_PRIVATE_STRACE")
         if not binary:
@@ -183,6 +306,27 @@ class NativeSnapshotControlTest(unittest.TestCase):
                                      "wall_end_ns": samples[0]["wall_end_ns"] +
                                      10_000_000_000}
                 rejects(changed_sample, files)
+                root = roots["stage"]["pid"]
+                changed_sample = json.loads(json.dumps(samples))
+                next(row for row in changed_sample[0]["pids"]
+                     if row["pid"] == root)["start_ticks"] += 1
+                rejects(changed_sample, files)
+                controls = [json.loads(line) for line in
+                            files["snapshot-controls.jsonl"].splitlines()]
+                next(row for row in controls if row.get("operation") == "FREEZE")[
+                    "wall_ns"] -= 6_000_000_000
+                altered = dict(files)
+                altered["snapshot-controls.jsonl"] = b"".join(
+                    json.dumps(row).encode() + b"\n" for row in controls)
+                rejects(samples, altered)
+                for index in (8, 9, 10, 11):
+                    changed = json.loads(json.dumps(events))
+                    changed[events.index(birth)]["fields"][index] = (
+                        "3" if index == 11 else "0")
+                    altered = dict(files)
+                    altered["ptrace-events.jsonl"] = b"".join(
+                        json.dumps(row).encode() + b"\n" for row in changed)
+                    rejects(samples, altered)
             finally:
                 for process in processes.values():
                     if process.poll() is None:
@@ -232,7 +376,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
         modes = [(mode, False) for mode in
                  ("fast", "nested", "group_escape", "parent_exit",
                   "nonleader", "nonleader_hold", "vfork", "clone3",
-                  "held_child", "drain_child", "untraced")]
+                  "held_child", "drain_child", "untraced", "untraced_live")]
         modes.append(("fast", True))
         for mode, child_first in modes:
             with self.subTest(mode=mode, child_first=child_first), tempfile.TemporaryDirectory(
@@ -280,7 +424,35 @@ class NativeSnapshotControlTest(unittest.TestCase):
                     stdout, stderr = process.communicate(timeout=3)
                     traces, raw_events = diagnostic._raw_events(
                         diagnostic._trace_archive(trace))
-                    if mode == "untraced":
+                    if mode == "nonleader_hold":
+                        with zipfile.ZipFile(io.BytesIO(
+                                diagnostic._trace_archive(trace))) as archive:
+                            members = {name: archive.read(name)
+                                       for name in archive.namelist()}
+                        former = next(name for name, raw in members.items()
+                                      if b"<pid changed to" in raw)
+                        members[former], replaced = re.subn(
+                            rb" <pid changed to [1-9][0-9]* \.\.\.>",
+                            b" <unfinished ...>) = ?", members[former])
+                        self.assertEqual(replaced, 1)
+                        def variant_archive(rows):
+                            buffer = io.BytesIO()
+                            with zipfile.ZipFile(buffer, "w") as archive:
+                                for name in (former, *(name for name in rows
+                                                       if name != former)):
+                                    archive.writestr(name, rows[name])
+                            return buffer.getvalue()
+                        diagnostic._raw_events(variant_archive(members))
+                        malformed = dict(members)
+                        leader = next(name for name, raw in members.items()
+                                      if b"+++ superseded by execve" in raw)
+                        malformed[leader] = members[leader].replace(
+                            b"+++ superseded by execve", b"+++ unrelated event")
+                        with self.assertRaises((diagnostic.DiagnosticRejected,
+                                                diagnostic.actual_trace.TraceRejected)):
+                            diagnostic._raw_events(variant_archive(malformed))
+                    if mode in {"untraced", "untraced_live"}:
+                        self.assertEqual(process.returncode, 0, stderr)
                         with self.assertRaisesRegex(diagnostic.DiagnosticRejected,
                                                     "UNAVAILABLE"):
                             diagnostic._verify_spawn_births(
@@ -290,6 +462,18 @@ class NativeSnapshotControlTest(unittest.TestCase):
                         self.assertEqual(process.returncode, 0, stderr)
                         diagnostic._verify_spawn_births(
                             traces, raw_events, owned.births["stage"])
+                        self.assertTrue(all(os.WIFSTOPPED(row["stop_status"])
+                                            and row["ppid"] > 0 and
+                                            row["boot_ns"] > 0
+                                            for row in owned.births["stage"].values()))
+                        if mode == "nested":
+                            self.assertTrue(any(row["creator_tid"] !=
+                                                row["creator_tgid"] and
+                                                row["creator_tgid"] == row["ppid"]
+                                                for row in owned.births["stage"].values()))
+                        if mode == "vfork":
+                            self.assertTrue(all(row["shared_vm"] == 1
+                                                for row in owned.births["stage"].values()))
                         owned.stop({"stage"})
                         self.assertGreaterEqual(len(owned.births["stage"]), 1)
                 finally:
@@ -343,6 +527,109 @@ class NativeSnapshotControlTest(unittest.TestCase):
                     process.wait(timeout=3)
                 owned.close()
                 sentinel.communicate(timeout=3)
+
+    def test_child_born_during_freeze_drain(self):
+        binary = os.environ.get("DYN4K_PRIVATE_STRACE")
+        if not binary:
+            self.skipTest("private tracer path is not provided")
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            scratch = Path(directory)
+            fixture = scratch / "toy"
+            subprocess.run(["gcc", "-O2", "-pthread",
+                            str(Path(__file__).with_name("toy.c")), "-o",
+                            str(fixture)], check=True, timeout=20)
+            owned = SnapshotOwnedProcesses(scratch, scratch, _proc_identity,
+                                           _pidfd_exited, check_retained)
+            environment = owned.prepare("stage", os.environ)
+            environment["DYN4K_TEST_DRAIN_DELAY"] = "1"
+            environment["DYN4K_TEST_DRAIN_BIRTH"] = "1"
+            trace = scratch / "trace"
+            process = subprocess.Popen([binary, "-f", "-ff", "-ttt", "-e",
+                                        "trace=process", "-o", str(trace),
+                                        str(fixture), "freeze_birth"],
+                                       env=environment, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE)
+            try:
+                owned.launch("stage", process, trace)
+                until = time.monotonic() + 0.005
+                while time.monotonic() < until:
+                    owned.pump({"stage"})
+                    time.sleep(0.001)
+                held = owned.freeze("stage")
+                expected = sorted({process.pid} | {row["tgid"] for row in
+                                                    owned.threads["stage"].values()})
+                self.assertEqual(held["live_tgids"], expected)
+                controls = [json.loads(line) for line in
+                            (scratch / "snapshot-controls.jsonl").read_text().splitlines()]
+                freeze = next(row["wall_ns"] for row in controls
+                              if row.get("operation") == "FREEZE")
+                stop = next(row["wall_ns"] for row in controls
+                            if row.get("kind") == "HELD")
+                births = [json.loads(line) for line in
+                          (scratch / "ptrace-events.jsonl").read_text().splitlines()
+                          if json.loads(line)["kind"] == "BIRTH"]
+                self.assertTrue(any(freeze <= row["wall_ns"] <= stop
+                                    for row in births))
+                owned.resume()
+                deadline = time.monotonic() + 3
+                while process.poll() is None and time.monotonic() < deadline:
+                    owned.pump({"stage"})
+                    time.sleep(0.002)
+                process.communicate(timeout=3)
+                traces, raw = diagnostic._raw_events(
+                    diagnostic._trace_archive(trace))
+                diagnostic._verify_spawn_births(traces, raw,
+                                                owned.births["stage"])
+                self.assertEqual(process.returncode, 0)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=3)
+                owned.close()
+
+    def test_cleanup_drains_new_bound_child_without_signaling_sentinel(self):
+        binary = os.environ.get("DYN4K_PRIVATE_STRACE")
+        if not binary:
+            self.skipTest("private tracer path is not provided")
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            scratch = Path(directory)
+            fixture = scratch / "toy"
+            subprocess.run(["gcc", "-O2", "-pthread",
+                            str(Path(__file__).with_name("toy.c")), "-o",
+                            str(fixture)], check=True, timeout=20)
+            sentinel = subprocess.Popen(["/bin/sleep", "5"])
+            owned = SnapshotOwnedProcesses(scratch, scratch, _proc_identity,
+                                           _pidfd_exited, check_retained)
+            environment = owned.prepare("stage", os.environ)
+            trace = scratch / "trace"
+            process = subprocess.Popen([binary, "-f", "-ff", "-ttt", "-e",
+                                        "trace=process", "-o", str(trace),
+                                        str(fixture), "held_child"],
+                                       env=environment, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE)
+            try:
+                owned.launch("stage", process, trace)
+                deadline = time.monotonic() + 3
+                while not owned.births["stage"] and time.monotonic() < deadline:
+                    owned.pump({"stage"})
+                    time.sleep(0.001)
+                self.assertTrue(owned.births["stage"])
+                try:
+                    owned.stop({"stage"})
+                except SnapshotIncomplete as error:
+                    self.assertIn(error.detail["reason"],
+                                  {"TERMINAL_RECORD_MISSING", "CLEANUP_IDENTITY"})
+                self.assertTrue(all(_pidfd_exited(row["handle"])
+                                    for row in owned.bound.values()))
+                self.assertIsNone(sentinel.poll())
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.communicate(timeout=3)
+                if sentinel.poll() is None:
+                    sentinel.kill()
+                sentinel.wait(timeout=3)
+                owned.close()
 
 
 if __name__ == "__main__":

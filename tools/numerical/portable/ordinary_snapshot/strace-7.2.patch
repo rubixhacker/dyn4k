@@ -31,7 +31,7 @@
  	if (followfork) {
  		/* We assume it's a fork/vfork/clone child */
 +		if (owned_socket >= 0)
-+			owned_child_stop(pid);
++			owned_child_stop(pid, status);
  		struct tcb *tcp = alloctcb(pid);
  		after_successful_attach(tcp, post_attach_sigstop);
 @@ -3918,7 +3929,30 @@

@@ -2,6 +2,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/syscall.h>
+#include <time.h>
 
 #define OWNED_MAX_TIDS 4096
 #define OWNED_MAX_PACKET 65536
@@ -23,6 +24,11 @@ struct owned_birth {
 	unsigned long ordinal;
 	unsigned long long start_ticks;
 	long long rss_pages;
+	int kernel_ppid;
+	unsigned long long boot_ns;
+	unsigned int first_stop_status;
+	unsigned int shared_vm;
+	bool deferred_event;
 	bool event_seen;
 	bool stop_seen;
 	bool acknowledged;
@@ -36,6 +42,12 @@ static unsigned long owned_sequence;
 static unsigned long owned_snapshot_id;
 static bool owned_need_interrupt;
 static bool owned_inject_child_first;
+static bool owned_inject_drain_delay;
+static bool owned_inject_drain_birth;
+static bool owned_inject_event_failure;
+static bool owned_inject_ack_failure;
+static bool owned_inject_held_failure;
+static bool owned_inject_resume_failure;
 static volatile sig_atomic_t owned_wake;
 
 static void
@@ -163,7 +175,7 @@ owned_pidfd(int pid)
 
 static void owned_command(const char *packet);
 static void owned_release_birth_holds(void);
-static void owned_child_stop(int child_tid);
+static void owned_child_stop(int child_tid, int status);
 
 static void
 owned_send(const char *packet, int handle)
@@ -185,6 +197,8 @@ owned_send(const char *packet, int handle)
 		owned_fail("EVENT_SEND");
 	if (handle >= 0 && close(handle))
 		owned_fail("PIDFD_CLOSE");
+	if (owned_inject_ack_failure && !strncmp(packet, "BIRTH ", 6))
+		owned_fail("ACK_READ");
 	for (;;) {
 		char reply[256];
 		ssize_t size = recv(owned_socket, reply, sizeof(reply) - 1, 0);
@@ -218,12 +232,15 @@ owned_join(struct owned_birth *birth)
 {
 	if (!birth->event_seen || !birth->stop_seen || birth->acknowledged)
 		return;
+	if (owned_inject_event_failure)
+		owned_fail("EVENT_SEND");
 	char payload[256];
 	int size = snprintf(payload, sizeof(payload),
-		"%lu %d %d %d %d %u %llu %lld",
+		"%lu %d %d %d %d %u %llu %lld %d %llu %u %u",
 		birth->ordinal, birth->creator_tid, birth->creator_tgid,
 		birth->tid, birth->tgid, birth->event, birth->start_ticks,
-		birth->rss_pages);
+		birth->rss_pages, birth->kernel_ppid, birth->boot_ns,
+		birth->first_stop_status, birth->shared_vm);
 	if (size <= 0 || (size_t) size >= sizeof(payload))
 		owned_fail("BIRTH_LENGTH");
 	owned_record("BIRTH", payload,
@@ -241,38 +258,51 @@ owned_birth_event(int creator_tid, unsigned int event, unsigned long child)
 	struct owned_birth *birth = owned_birth_row((int) child, true);
 	if (birth->event_seen || birth->acknowledged)
 		owned_fail("DUPLICATE_BIRTH");
-	if (owned_inject_child_first && !birth->stop_seen)
-		owned_child_stop((int) child);
 	unsigned long long start = 0;
 	long long rss = -1;
 	int creator_tgid = 0, ppid = 0;
 	owned_proc(creator_tid, &creator_tgid, &start, &rss, &ppid);
-	birth->event_seen = true;
+	birth->event_seen = !owned_inject_child_first;
+	birth->deferred_event = owned_inject_child_first;
 	birth->creator_tid = creator_tid;
 	birth->creator_tgid = creator_tgid;
 	birth->event = event;
+	owned_inject_drain_birth = false;
+	birth->shared_vm = event == PTRACE_EVENT_VFORK ? 1 :
+			   event == PTRACE_EVENT_CLONE ? 2 : 0;
+	birth->ordinal = 1;
 	for (size_t i = 0; i < owned_birth_count; ++i)
-		if (owned_births[i].event_seen &&
+		if (&owned_births[i] != birth && owned_births[i].event_seen &&
 		    owned_births[i].creator_tid == creator_tid)
 			++birth->ordinal;
 	owned_join(birth);
 }
 
 static void
-owned_child_stop(int child_tid)
+owned_child_stop(int child_tid, int status)
 {
 	struct owned_birth *birth = owned_birth_row(child_tid, true);
-	if (owned_inject_child_first && birth->stop_seen && birth->acknowledged)
-		return;
 	if (birth->stop_seen || birth->acknowledged)
 		owned_fail("DUPLICATE_CHILD_STOP");
 	long long rss = -1;
 	int ppid = 0;
 	owned_proc(child_tid, &birth->tgid, &birth->start_ticks, &rss, &ppid);
 	birth->rss_pages = rss;
+	birth->kernel_ppid = ppid;
+	struct timespec boot;
+	if (clock_gettime(CLOCK_BOOTTIME, &boot) < 0)
+		owned_fail("BOOT_CLOCK");
+	birth->boot_ns = (unsigned long long) boot.tv_sec * 1000000000ULL + boot.tv_nsec;
+	birth->first_stop_status = (unsigned int) status;
+	if (birth->tgid != child_tid)
+		birth->shared_vm = 1;
 	birth->stop_seen = true;
 	struct owned_tid *row = owned_tid_row(child_tid, true);
 	row->tgid = birth->tgid;
+	if (birth->deferred_event) {
+		birth->event_seen = true;
+		birth->deferred_event = false;
+	}
 	owned_join(birth);
 }
 
@@ -328,6 +358,10 @@ owned_exit(int tid, int status)
 static bool
 owned_hold_restart(struct tcb *tcp, unsigned int op, unsigned int sig)
 {
+	if (owned_freezing && owned_inject_drain_birth &&
+	    tcp->pid == strace_child) {
+		return false;
+	}
 	struct owned_tid *row = owned_tid_row(tcp->pid, true);
 	if (!row->tgid) {
 		unsigned long long start = 0;
@@ -356,6 +390,12 @@ owned_after_restart(struct tcb *tcp)
 static void
 owned_interrupt_running(void)
 {
+	if (owned_inject_drain_delay) {
+		owned_inject_drain_delay = false;
+		struct timespec delay = {.tv_nsec = 60000000};
+		while (nanosleep(&delay, &delay) < 0 && errno == EINTR)
+			;
+	}
 	for (size_t i = 0; i < owned_tid_count; ++i) {
 		struct owned_tid *row = &owned_tids[i];
 		if (row->tid && !row->held &&
@@ -385,6 +425,8 @@ owned_resume(void)
 {
 	if (!owned_freezing || !owned_held)
 		owned_fail("RESUME_STATE");
+	if (owned_inject_resume_failure)
+		owned_fail("RESUME_FAILED");
 	for (size_t i = 0; i < owned_tid_count; ++i) {
 		struct owned_tid *row = &owned_tids[i];
 		if (!row->tid)
@@ -455,6 +497,8 @@ owned_try_held(void)
 	for (size_t i = 0; i < owned_birth_count; ++i)
 		if (!owned_births[i].acknowledged)
 			return;
+	if (owned_inject_held_failure)
+		owned_fail("HELD_FAILED");
 	char payload[OWNED_MAX_PACKET - 128];
 	int size = snprintf(payload, sizeof(payload), "%lu", owned_snapshot_id);
 	for (size_t i = 0; i < owned_tid_count; ++i) {
@@ -480,6 +524,12 @@ owned_init(void)
 	if (!path)
 		return;
 	owned_inject_child_first = getenv("DYN4K_TEST_CHILD_FIRST") != NULL;
+	owned_inject_drain_delay = getenv("DYN4K_TEST_DRAIN_DELAY") != NULL;
+	owned_inject_drain_birth = getenv("DYN4K_TEST_DRAIN_BIRTH") != NULL;
+	owned_inject_event_failure = getenv("DYN4K_TEST_EVENT_FAILURE") != NULL;
+	owned_inject_ack_failure = getenv("DYN4K_TEST_ACK_FAILURE") != NULL;
+	owned_inject_held_failure = getenv("DYN4K_TEST_HELD_FAILURE") != NULL;
+	owned_inject_resume_failure = getenv("DYN4K_TEST_RESUME_FAILURE") != NULL;
 	if (!use_seize || !followfork || nprocs != 1 || strace_child <= 0 ||
 	    strlen(path) >= sizeof(((struct sockaddr_un *) 0)->sun_path))
 		owned_fail("UNSUPPORTED_TRACER_MODE");

@@ -1303,23 +1303,42 @@ def _owned_sample(groups, phase, worker_pid=None, commands=None, owned=None):
 
 
 def _take_owned_sample(samples, groups, phase, worker_pid, commands, owned):
-    owned.freeze(phase)
-    failure = None
+    prior_handler = signal.getsignal(signal.SIGALRM)
+    prior_timer = signal.getitimer(signal.ITIMER_REAL)
+    started = time.monotonic()
+    def expire_window(_signum, _frame):
+        raise SnapshotIncomplete(phase, None, "FREEZE_TIMEOUT")
+    use_window_timer = prior_timer[0] == 0 or prior_timer[0] > 5
+    if use_window_timer:
+        signal.signal(signal.SIGALRM, expire_window)
+        signal.setitimer(signal.ITIMER_REAL, 5)
     try:
-        sample = _owned_sample(groups, phase, worker_pid, commands, owned)
-        _sample_bound(sample)
+        owned.freeze(phase)
+        failure = None
+        try:
+            sample = _owned_sample(groups, phase, worker_pid, commands, owned)
+            _sample_bound(sample)
+        except Exception as error:
+            failure = error
+        try:
+            owned.resume()
+        except SnapshotIncomplete as error:
+            if failure is not None:
+                error.detail["prior_failure_status"] = _typed_status(failure)
+            raise
+        if failure is not None:
+            raise failure
         if sample["pids"]:
             samples.append(sample)
-    except Exception as error:
-        failure = error
-    try:
-        owned.resume()
-    except SnapshotIncomplete as error:
-        if failure is not None:
-            error.detail["prior_failure_status"] = _typed_status(failure)
-        raise
-    if failure is not None:
-        raise failure
+    finally:
+        if use_window_timer:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, prior_handler)
+            if prior_timer[0]:
+                signal.setitimer(signal.ITIMER_REAL,
+                                 max(0.000001, prior_timer[0] -
+                                     (time.monotonic() - started)),
+                                 prior_timer[1])
 
 
 def _trace_archive(prefix):
@@ -2000,6 +2019,42 @@ def _raw_events(raw):
             timestamp = current_lines[resumed[0]].split(" ", 1)[0]
             current_lines[resumed[0]] = timestamp + " " + replacement + "\n"
             traces[current] = "".join(current_lines).encode("utf-8")
+    for current, data in tuple(traces.items()):
+        current_lines = data.decode("utf-8").splitlines(keepends=True)
+        for marker in current_lines:
+            transfer = re.fullmatch(
+                r"([0-9]+\.[0-9]+) \+\+\+ superseded by execve in pid ([1-9][0-9]*) \+\+\+\n",
+                marker)
+            if transfer is None:
+                continue
+            former = transfer[2]
+            _require(former in traces and former != current,
+                     "diagnostic non-leader exec source differs")
+            former_lines = traces[former].decode("utf-8").splitlines(keepends=True)
+            abandoned = [(index, re.fullmatch(
+                r"([0-9]+\.[0-9]+) (execve(?:at)?\(.*) <unfinished \.\.\.>\) = \?\n",
+                line)) for index, line in enumerate(former_lines)]
+            abandoned = [(index, match) for index, match in abandoned if match]
+            if not abandoned:
+                continue
+            resumed = [index for index, line in enumerate(current_lines) if
+                       line.endswith(" <... execve resumed>) = 0\n")]
+            _require(sum(line.endswith(
+                         f" +++ superseded by execve in pid {former} +++\n")
+                         for line in current_lines) == 1 and
+                     not any("<pid changed to" in line
+                             for line in former_lines) and
+                     len(abandoned) == len(resumed) == 1 and
+                     Decimal(abandoned[0][1][1]) <= Decimal(transfer[1]) <=
+                     Decimal(current_lines[resumed[0]].split(" ", 1)[0]),
+                     "diagnostic non-leader exec completion differs")
+            index, call = abandoned[0]
+            stamp = current_lines[resumed[0]].split(" ", 1)[0]
+            current_lines[resumed[0]] = stamp + " " + call[2] + ") = 0\n"
+            former_lines[index] = (call[1] + " +++ execve transferred to pid " +
+                                   current + " +++\n")
+            traces[current] = "".join(current_lines).encode("utf-8")
+            traces[former] = "".join(former_lines).encode("utf-8")
     normalized, aborted = actual_trace.normalize_rich_traces(traces)
     _require(not aborted, "diagnostic raw process call is incomplete")
     return normalized, _events(normalized, ())
@@ -2508,6 +2563,7 @@ def _bound_snapshot(samples, metadata, files):
         _require(len(origin) == 1, "diagnostic snapshot raw origin differs")
         active = {}
         born = {}
+        birth_ppids = {}
         current_ticks = {}
         terminal = set()
         former_execs = set()
@@ -2556,20 +2612,29 @@ def _bound_snapshot(samples, metadata, files):
                              group, metadata["launch_roots"][phase]["pid"])
                 current_ticks[tid] = ticks
             elif kind == "BIRTH":
-                _require(len(values) == 8,
+                _require(len(values) == 12,
                          "diagnostic snapshot birth differs")
-                ordinal, creator, creator_group, child, group, event, ticks, rss = values
+                (ordinal, creator, creator_group, child, group, event, ticks, rss,
+                 ppid, boot_ns, stop_status, shared_vm) = values
                 _require(ordinal > 0 and creator in active and
                          creator_group == active[creator] and child not in born and
                          child in traced and raw_forks.get(child) ==
                          (creator, child != group) and
                          row["pidfd_pid"] == (child if child == group else None) and
                          event in {1, 2, 3} and ticks > 0 and
+                         ppid > 0 and boot_ns > 0 and
+                         os.WIFSTOPPED(stop_status) and
+                         shared_vm == (0 if event == 1 else 1 if event == 2 else
+                                       1 if child != group else 2) and
+                         abs(row["wall_ns"] - boot_ns -
+                             clock["boot_time_seconds"] * 1_000_000_000) <=
+                             2_000_000_000 and
                          ordinal == 1 + sum(parent == creator for _, parent, _, _
                                             in born.values()),
                          "diagnostic snapshot creator or birth differs")
                 active[child] = group
                 born[child] = (ticks, creator, group, creator_group)
+                birth_ppids[child] = ppid
                 if child == group:
                     current_ticks[group] = ticks
             elif kind == "EXEC":
@@ -2619,6 +2684,9 @@ def _bound_snapshot(samples, metadata, files):
             _require(type(identity) is dict and
                      identity.get("birth_start_ticks") == ticks and
                      identity.get("parent_pid") == creator and
+                     identity.get("kernel_ppid") == (
+                         metadata["launch_roots"][phase]["pid"]
+                         if tid in origin else birth_ppids[tid]) and
                      identity.get("creator_tgid") == creator_group and
                      tid not in owners,
                      "diagnostic snapshot owned identity differs")
@@ -2634,6 +2702,8 @@ def _bound_snapshot(samples, metadata, files):
                  metadata["launch_roots"][phase]["start_ticks"] and
                  bound[str(root_pid)]["birth_start_ticks"] ==
                  metadata["launch_roots"][phase]["start_ticks"] and
+                 bound[str(root_pid)]["kernel_ppid"] ==
+                 metadata["launch_roots"][phase]["parent_pid"] and
                  root_pid not in owners,
                  "diagnostic snapshot tracer root differs")
         owners[root_pid] = phase
@@ -2653,8 +2723,15 @@ def _bound_snapshot(samples, metadata, files):
                  {row["pid"] for row in sample["pids"]} == groups,
                  "diagnostic snapshot sample membership differs")
         for row in sample["pids"]:
-            if row["pid"] in {metadata["launch_roots"][item]["pid"]
-                               for item in phases}:
+            root_owner = next((item for item in phases if
+                               row["pid"] == metadata["launch_roots"][item]["pid"]),
+                              None)
+            if root_owner is not None:
+                _require(row["start_ticks"] ==
+                         metadata["launch_roots"][root_owner]["start_ticks"] and
+                         row["start_ticks"] ==
+                         inventory[root_owner][str(row["pid"])]["start_ticks"],
+                         "diagnostic sampled tracer root tick differs")
                 continue
             owner = next(item for item in phases
                          if row["pid"] in held_ticks[(item, sid)])
@@ -2670,7 +2747,8 @@ def _bound_snapshot(samples, metadata, files):
                      sample["held_sequences"][item] == receipt["sequence"] and
                      freeze["wall_ns"] <= receipt["wall_ns"] <=
                      sample["wall_start_ns"] <= sample["wall_end_ns"] <=
-                     resume["wall_ns"] <= resumed[0]["wall_ns"],
+                     resume["wall_ns"] <= resumed[0]["wall_ns"] and
+                     resumed[0]["wall_ns"] - freeze["wall_ns"] <= 5_000_000_000,
                      "diagnostic snapshot control window differs")
     used = {(item, sample["snapshot_id"])
             for sample in samples for item in sample["held_sequences"]}

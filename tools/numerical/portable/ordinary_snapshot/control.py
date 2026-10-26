@@ -40,6 +40,7 @@ class SnapshotOwnedProcesses:
         self.holds = {}
         self.snapshot_id = 0
         self.snapshot_info = None
+        self.window_deadline = None
 
     def prepare(self, phase, environment):
         if phase not in PHASES or phase in self.servers:
@@ -179,14 +180,20 @@ class SnapshotOwnedProcesses:
             self.threads[phase][tid] = {"tgid": tgid, "start_ticks": ticks,
                                          "creator_tid": None, "terminal": False}
         elif kind == "BIRTH":
-            if len(parts) != 10:
+            if len(parts) != 14:
                 raise SnapshotIncomplete(phase, None, "BIRTH_RECORD")
-            ordinal, creator, creator_group, child, group, event, ticks, rss = numbers
+            (ordinal, creator, creator_group, child, group, event, ticks, rss,
+             ppid, boot_ns, stop_status, shared_vm) = numbers
             active = self.threads[phase]
             if (not ordinal or creator not in active or
                     active[creator]["tgid"] != creator_group or
                     child in active or child in self.births[phase] or
-                    not ticks or event not in {1, 2, 3} or
+                    not ticks or not ppid or not boot_ns or not stop_status or
+                    shared_vm not in {0, 1, 2} or event not in {1, 2, 3} or
+                    (event == 1 and shared_vm != 0) or
+                    (event == 2 and shared_vm != 1) or
+                    (event == 3 and shared_vm != (1 if child != group else 2)) or
+                    not os.WIFSTOPPED(stop_status) or
                     (child == group) != (handle is not None)):
                 raise SnapshotIncomplete(phase, child, "BIRTH_IDENTITY")
             if ordinal != 1 + sum(row["creator_tid"] == creator for row in
@@ -196,13 +203,21 @@ class SnapshotOwnedProcesses:
                 raise SnapshotIncomplete(phase, child, "THREAD_GROUP")
             if handle is not None:
                 self._bind(phase, child, ticks, creator, handle, creator_group)
+                identity = self.bound[child]["identity"]
             else:
                 identity = self.read_identity(child)
                 if identity["start_ticks"] != ticks:
                     raise SnapshotIncomplete(phase, child, "THREAD_IDENTITY")
+            if (identity["parent_pid"] != ppid or
+                    abs(time.clock_gettime_ns(time.CLOCK_BOOTTIME) - boot_ns) >
+                    2_000_000_000):
+                raise SnapshotIncomplete(phase, child, "BIRTH_OBSERVATION")
             active[child] = {"tgid": group, "start_ticks": ticks,
                              "creator_tid": creator, "terminal": False}
-            self.births[phase][child] = active[child]
+            self.births[phase][child] = {**active[child], "ppid": ppid,
+                "boot_ns": boot_ns, "stop_status": stop_status,
+                "shared_vm": shared_vm, "creator_tgid": creator_group,
+                "event": event, "ordinal": ordinal}
         elif kind == "EXEC":
             if len(parts) != 6 or handle is None:
                 raise SnapshotIncomplete(phase, None, "EXEC_RECORD")
@@ -360,13 +375,14 @@ class SnapshotOwnedProcesses:
         phases = tuple(item for item in phases if item in self.channels)
         if not phases:
             raise SnapshotIncomplete(phase, None, "FREEZE_PHASE")
+        self.window_deadline = time.monotonic() + 5
         self.pump(phases)
         self.snapshot_id += 1
         for item in phases:
             self.holds[item] = {"id": self.snapshot_id, "held": False,
                                 "resumed": False}
             self._command(item, "FREEZE", self.snapshot_id)
-        self._wait_all(phases, "held", time.monotonic() + 5)
+        self._wait_all(phases, "held", self.window_deadline)
         groups = {group for item in phases
                   for group in self.holds[item]["roster"].values()}
         groups.update(self.roots[item][0] for item in phases)
@@ -383,8 +399,9 @@ class SnapshotOwnedProcesses:
         phases = self.snapshot_info["phases"]
         for phase in phases:
             self._command(phase, "RESUME", self.snapshot_id)
-        self._wait_all(phases, "resumed", time.monotonic() + 5)
+        self._wait_all(phases, "resumed", self.window_deadline)
         self.snapshot_info = None
+        self.window_deadline = None
 
     def refresh(self, phases):
         if self.snapshot_info is None:
@@ -420,6 +437,7 @@ class SnapshotOwnedProcesses:
         return {phase: {str(pid): {"start_ticks": row["identity"]["start_ticks"],
                                    "birth_start_ticks": row["birth_start_ticks"],
                                    "parent_pid": row["parent"],
+                                   "kernel_ppid": row["identity"]["parent_pid"],
                                    "creator_tgid": row["creator_tgid"]}
                         for pid, row in self.bound.items() if row["phase"] == phase}
                 for phase in self.roots}
@@ -444,28 +462,42 @@ class SnapshotOwnedProcesses:
                         not self.pidfd_exited(row["handle"])]
                 if not live:
                     if any(self.threads.get(phase) for phase in phases):
-                        raise SnapshotIncomplete(None, None, "TERMINAL_RECORD_MISSING")
+                        missing = SnapshotIncomplete(None, None,
+                                                     "TERMINAL_RECORD_MISSING")
+                        if failure:
+                            missing.detail["prior_failure"] = (
+                                failure.detail if isinstance(failure, SnapshotIncomplete)
+                                else type(failure).__name__)
+                        raise missing
                     if failure:
                         raise failure
                     return
                 for pid, row in reversed(live):
                     try:
                         current = self.read_identity(pid)
+                        changed = (current["start_ticks"] !=
+                                   row["identity"]["start_ticks"])
                     except (OSError, ValueError, IndexError, KeyError) as error:
-                        raise SnapshotIncomplete(row["phase"], pid,
-                                                 "CLEANUP_IDENTITY", error) from error
-                    if current["start_ticks"] != row["identity"]["start_ticks"]:
-                        raise SnapshotIncomplete(row["phase"], pid,
-                                                 "PID_IDENTITY_CHANGED")
+                        failure = failure or SnapshotIncomplete(
+                            row["phase"], pid, "CLEANUP_IDENTITY", error)
+                        changed = False
+                    if changed:
+                        failure = failure or SnapshotIncomplete(
+                            row["phase"], pid, "PID_IDENTITY_CHANGED")
                     try:
                         signal.pidfd_send_signal(row["handle"], signum)
                     except ProcessLookupError:
                         pass
                     except OSError as error:
-                        raise SnapshotIncomplete(row["phase"], pid,
-                                                 "CLEANUP_SIGNAL", error) from error
+                        failure = failure or SnapshotIncomplete(
+                            row["phase"], pid, "CLEANUP_SIGNAL", error)
                 time.sleep(0.01)
-        raise SnapshotIncomplete(None, None, "CLEANUP_SURVIVOR")
+        survivor = SnapshotIncomplete(None, None, "CLEANUP_SURVIVOR")
+        if failure:
+            survivor.detail["prior_failure"] = (
+                failure.detail if isinstance(failure, SnapshotIncomplete)
+                else type(failure).__name__)
+        raise survivor
 
     def close(self):
         for row in self.bound.values():

@@ -45,25 +45,37 @@ also checks the official strace 7.2 source archive by SHA-256, the committed
 patch and include file, and a byte-for-byte rebuild of the private tracer.
 The capture uses only that private binary. The source archive SHA-256 is
 `4bde6246926890dcee824f6e6ac42a06752f47d77e5097d86e3c0d6d4b709fe5`.
-The build uses two compiler jobs and a 600-second limit.
+The build uses two compiler jobs and one 600-second deadline across extraction,
+patching, configuration, and compilation. It selects and records the compiler
+path and hash. It retains raw command output and a structured record on
+failure or timeout.
 
 The `owned-snapshot/1` binding records a child birth while ptrace holds its
 first stop. It joins the creator event and child stop in either order before
 acknowledging the birth. The record contains creator TID and TGID, child TID
-and TGID, live start tick, and a transferred pidfd for each new process
-group. A snapshot freezes every traced thread, drains births and exits,
-records the exact held roster, reads one RSS value per live TGID, and resumes
-each saved ptrace operation and signal. The tracer root is included in RSS.
+and TGID, kernel PPID, live start tick, boot-clock observation, actual
+first-stop status, and shared-address-space state. A `vfork` child is marked
+as shared before exec. A process clone event carries an unknown shared-space
+state until raw clone flags are checked. The tracer transfers a pidfd for
+each new process group. A snapshot freezes every traced thread, drains births
+and exits, records the exact held roster, and reads one RSS value per live
+TGID. It resumes each saved ptrace operation and signal. One five-second
+deadline covers FREEZE, the held read, and RESUME. The tracer root is included
+in RSS.
 An unknown executable stays in the `other` role. Missing RSS, an unproved
 exit, a failed hold or resume, and a cleanup survivor give a typed incomplete
-result. Cleanup addresses only pidfds bound to this capture.
+result. Cleanup signals every bound pidfd even if a later `/proc` identity
+read fails. It retains that uncertainty and proves exits where possible.
+Cleanup never signals an unbound PID.
 
 Replay checks every birth against the raw fork or clone result, every exit
 against its raw trace, the exact held roster and start ticks, and each
-sample's FREEZE and RESUME window. It rejects a raw spawn without a birth
-record, including a successful untraced clone. Event and control journals,
-source and binary files, and raw traces pass archive limits and literal and
-decoded privacy checks. Earlier `trace-lineage/2` and `trace-lineage/3`
+sample's FREEZE and RESUME window. It binds sampled tracer-root start ticks
+to the independent launch identity and rejects windows over five seconds.
+It rejects a raw spawn without a birth record, including a successful untraced
+clone. Event and control journals, source and binary files, and raw traces
+pass archive limits and literal and decoded privacy checks. Earlier
+`trace-lineage/2` and `trace-lineage/3`
 archives keep their original replay rules. A new snapshot does not qualify
 an earlier archive or convert an unavailable start tick into a measured
 identity.
