@@ -134,6 +134,26 @@ class NativeSnapshotControlTest(unittest.TestCase):
                 builder._live_group_members(123, {})
             close.assert_called_once_with(42)
 
+    def test_reused_group_leader_rejects_before_and_after_scan(self):
+        for ticks in ((18,), (17, 18)):
+            with self.subTest(ticks=ticks):
+                class Stat:
+                    reads = 0
+                    def read_text(self):
+                        value = ticks[self.reads]
+                        self.reads += 1
+                        return "123 (replacement) S 1 123 " + "0 " * 16 + f"{value}\n"
+                class Proc:
+                    def iterdir(self):
+                        return []
+                stat = Stat()
+                with mock.patch.object(builder, "Path", side_effect=lambda path:
+                                       stat if path == "/proc/123/stat" else Proc()), \
+                     mock.patch.object(builder.os, "pidfd_open",
+                                       side_effect=AssertionError("unrelated PID bound")):
+                    with self.assertRaises(builder.OwnedGroupIdentityError):
+                        builder._live_group_members(123, {123: (42, 17)})
+
     def test_outer_alarm_does_not_interrupt_owned_build_cleanup(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
             root = Path(directory)

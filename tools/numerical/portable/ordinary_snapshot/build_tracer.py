@@ -34,8 +34,23 @@ def write_record(path, record):
     os.replace(pending, path)
 
 
+def _assert_group_leader_identity(group, handles):
+    if group not in handles:
+        return
+    try:
+        fields = Path(f"/proc/{group}/stat").read_text().rsplit(")", 1)[1].split()
+        start_ticks = int(fields[19])
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError, IndexError) as error:
+        raise RuntimeError("owned build group identity is uncertain") from error
+    if start_ticks != handles[group][1]:
+        raise OwnedGroupIdentityError("owned build group identity is uncertain")
+
+
 def _live_group_members(group, handles):
     live = []
+    _assert_group_leader_identity(group, handles)
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
             continue
@@ -65,6 +80,7 @@ def _live_group_members(group, handles):
                 live.append(pid)
         except (OSError, ValueError, IndexError) as error:
             raise RuntimeError("owned build group identity is uncertain") from error
+    _assert_group_leader_identity(group, handles)
     return live
 
 
