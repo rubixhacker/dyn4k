@@ -1797,8 +1797,13 @@ class IndependentGateSeamTests(unittest.TestCase):
         sample_hash = independent_gates.ORDINARY_DIAGNOSTIC_SAMPLE_CAPTURE_DEPENDENCIES[source]
         sample_revision = independent_gates.ORDINARY_DIAGNOSTIC_SAMPLE_SOURCE_REVISION
         self.assertNotEqual(new_hash, sample_hash)
+        fixed_hash = independent_gates.ORDINARY_DIAGNOSTIC_SAMPLE_FIXED_CAPTURE_DEPENDENCIES[source]
+        fixed_revision = independent_gates.ORDINARY_DIAGNOSTIC_SAMPLE_FIXED_SOURCE_REVISION
+        self.assertNotEqual(fixed_revision, "bf4bfa36840b6513525fa0e3d303a9c487c6e57b")
+        self.assertNotEqual(sample_hash, fixed_hash)
         for revision, expected in ((historical, old_hash), (revised, new_hash),
-                                   (sample_revision, sample_hash), ("HEAD", sample_hash)):
+                                   (sample_revision, sample_hash),
+                                   (fixed_revision, fixed_hash), ("HEAD", fixed_hash)):
             with self.subTest(revision=revision):
                 committed = subprocess.check_output(
                     ["git", "--no-replace-objects", "show", f"{revision}:{source}"], cwd=ROOT)
@@ -1809,7 +1814,9 @@ class IndependentGateSeamTests(unittest.TestCase):
                                if revision == historical else
                                independent_gates.P2_ORDINARY_DIAGNOSTIC_JAR_DEPENDENCIES
                                if revision == revised else
-                               independent_gates.P2_ORDINARY_DIAGNOSTIC_SAMPLE_DEPENDENCIES)
+                               independent_gates.P2_ORDINARY_DIAGNOSTIC_SAMPLE_DEPENDENCIES
+                               if revision == sample_revision else
+                               independent_gates.P2_ORDINARY_DIAGNOSTIC_SAMPLE_FIXED_DEPENDENCIES)
                 self.assertEqual(expected, expected_p2[source])
                 self.assertEqual(independent_gates.APPROVED_P2_OBSERVER_ENV_REPLAY_PRODUCERS,
                                  independent_gates._p2_producer_binding(ROOT, revision))
