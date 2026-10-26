@@ -734,10 +734,12 @@ def _stage_identity(files, metadata):
              captured_file_identity(JDK21 / "bin/java"),
              "diagnostic staged source or runtime identity differs")
     _, events = _raw_events(files["stage-process-traces.zip"])
-    executed = [list(parsed[1]) for _, _, _, call in events
+    executed = [(stamp, list(parsed[1])) for stamp, _, _, call in events
                 if (parsed := successful_execve(call)) is not None and
                 parsed[0] == str(ROOT / "gradlew")]
-    _require(all(executed.count(command) == 1 for command in commands),
+    _require(len(executed) == len(commands) and
+             [command for _, command in executed] == commands and
+             all(left[0] < right[0] for left, right in zip(executed, executed[1:])),
              "diagnostic staged command execution differs")
 
 
@@ -764,41 +766,6 @@ def _process_group(process):
     return process.pid
 
 
-def _stop_owned(processes):
-    def still_owned(group):
-        for path in Path("/proc").iterdir():
-            if not path.name.isdecimal():
-                continue
-            try:
-                raw = (path / "stat").read_text()
-                fields = raw[raw.rfind(")") + 2:].split()
-                if int(fields[2]) == int(fields[3]) == group:
-                    return True
-            except (OSError, ValueError, IndexError):
-                continue
-        return False
-
-    for process in reversed(processes):
-        if not still_owned(process.pid):
-            continue
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            continue
-        deadline = time.monotonic() + 5
-        while still_owned(process.pid) and time.monotonic() < deadline:
-            time.sleep(0.05)
-        if still_owned(process.pid):
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            pass
-
-
 def _proc_identity(pid):
     raw = (Path("/proc") / str(pid) / "stat").read_text()
     fields = raw[raw.rfind(")") + 2:].split()
@@ -806,6 +773,216 @@ def _proc_identity(pid):
             "group_pid": int(fields[2]), "session_pid": int(fields[3]),
             "start_ticks": int(fields[19]),
             "affinity": sorted(os.sched_getaffinity(pid))}
+
+
+class OwnedProcesses:
+    def __init__(self):
+        self.roots = {}
+        self.bound = {}
+        self.lineage = {}
+        self.offsets = {}
+        self.partial = {}
+        self.trace_first = {}
+
+    def launch(self, phase, process, trace_prefix):
+        identity = _proc_identity(process.pid)
+        self.roots[phase] = (process.pid, Path(trace_prefix))
+        self._bind(phase, identity, None)
+
+    def _bind(self, phase, identity, parent):
+        pid = identity["pid"]
+        prior = self.bound.get(pid)
+        if prior is not None:
+            if prior["identity"]["start_ticks"] != identity["start_ticks"]:
+                raise SampleUnavailable(phase, pid, "PID_IDENTITY_CHANGED")
+            return
+        try:
+            handle = os.pidfd_open(pid)
+        except (OSError, ValueError, IndexError) as error:
+            raise SampleUnavailable(phase, pid, "IDENTITY_READ_FAILED", error) from error
+        try:
+            checked = _proc_identity(pid)
+        except (OSError, ValueError, IndexError) as error:
+            os.close(handle)
+            raise SampleUnavailable(phase, pid, "IDENTITY_READ_FAILED", error) from error
+        if checked["start_ticks"] != identity["start_ticks"]:
+            os.close(handle)
+            raise SampleUnavailable(phase, pid, "PID_IDENTITY_CHANGED")
+        self.bound[pid] = {"phase": phase, "parent": parent,
+                           "identity": checked, "handle": handle}
+
+    def _trace_forks(self, phase):
+        _, prefix = self.roots[phase]
+        for path in prefix.parent.glob(prefix.name + ".*"):
+            suffix = path.name.removeprefix(prefix.name + ".")
+            if not suffix.isdecimal():
+                continue
+            try:
+                with path.open("rb") as stream:
+                    stream.seek(self.offsets.get(path, 0))
+                    data = stream.read()
+                    self.offsets[path] = stream.tell()
+            except OSError as error:
+                raise SampleUnavailable(phase, int(suffix), "TRACE_READ_FAILED", error) from error
+            complete = self.partial.get(path, b"") + data
+            lines = complete.split(b"\n")
+            self.partial[path] = lines.pop()
+            for line in lines:
+                if int(suffix) not in self.trace_first:
+                    timestamp = re.match(rb"([0-9]+\.[0-9]+) ", line)
+                    if timestamp is not None:
+                        self.trace_first[int(suffix)] = int(
+                            Decimal(timestamp[1].decode()) * 1_000_000_000)
+                match = re.search(rb"(?:clone|clone3|fork|vfork)\(.*\) = ([1-9][0-9]*)$", line)
+                if match is not None:
+                    child = int(match[1])
+                    timestamp = re.match(rb"([0-9]+\.[0-9]+) ", line)
+                    if timestamp is None:
+                        raise SampleUnavailable(phase, child, "TRACE_TIME_MISSING")
+                    record = (phase, int(suffix), int(
+                        Decimal(timestamp[1].decode()) * 1_000_000_000))
+                    previous = self.lineage.setdefault(child, record)
+                    if previous != record:
+                        raise SampleUnavailable(phase, child, "LINEAGE_CHANGED")
+
+    def refresh(self, phases):
+        phases = set(phases) & set(self.roots)
+        for phase in phases:
+            self._trace_forks(phase)
+        for phase in phases:
+            _, prefix = self.roots[phase]
+            traced = {int(path.name.removeprefix(prefix.name + "."))
+                      for path in prefix.parent.glob(prefix.name + ".*")
+                      if path.name.removeprefix(prefix.name + ".").isdecimal()}
+            origin = traced - set(self.lineage)
+            if len(origin) == 1:
+                pid = next(iter(origin))
+                self.lineage.setdefault(pid, (phase, self.roots[phase][0],
+                                               self.trace_first.get(pid, 0)))
+        visible = {}
+        for path in Path("/proc").iterdir():
+            if not path.name.isdecimal():
+                continue
+            pid = int(path.name)
+            try:
+                raw = (path / "stat").read_text()
+                fields = raw[raw.rfind(")") + 2:].split()
+                if fields[0] == "Z":
+                    continue
+                visible[pid] = (int(fields[1]), int(fields[19]))
+            except (OSError, ValueError, IndexError):
+                if pid in self.bound:
+                    raise SampleUnavailable(self.bound[pid]["phase"], pid,
+                                            "STAT_READ_FAILED")
+        pending = set(visible) - set(self.bound)
+        while pending:
+            progressed = False
+            for pid in tuple(pending):
+                parent, ticks = visible[pid]
+                traced = self.lineage.get(pid)
+                if traced is not None:
+                    phase, lineage_parent, fork_time = traced
+                    if phase not in phases:
+                        continue
+                    cursor = lineage_parent
+                    visited = {pid}
+                    while cursor not in self.bound and cursor in self.lineage:
+                        if cursor in visited or self.lineage[cursor][0] != phase:
+                            raise SampleUnavailable(phase, pid, "LINEAGE_CHANGED")
+                        visited.add(cursor)
+                        cursor = self.lineage[cursor][1]
+                    if cursor not in self.bound or self.bound[cursor]["phase"] != phase:
+                        continue
+                    if (cursor in visible and visible[cursor][1] !=
+                            self.bound[cursor]["identity"]["start_ticks"]):
+                        raise SampleUnavailable(phase, cursor, "PID_IDENTITY_CHANGED")
+                    birth_ns = (int(next(line.split()[1] for line in
+                                    Path("/proc/stat").read_text().splitlines()
+                                    if line.startswith("btime "))) * 1_000_000_000 +
+                                ticks * 1_000_000_000 // os.sysconf("SC_CLK_TCK"))
+                    if fork_time and abs(birth_ns - fork_time) > 2_000_000_000:
+                        raise SampleUnavailable(phase, pid, "PID_IDENTITY_CHANGED")
+                    owner_parent = lineage_parent
+                elif parent in self.bound and self.bound[parent]["phase"] in phases:
+                    phase = self.bound[parent]["phase"]
+                    if (parent not in visible or visible[parent][1] !=
+                            self.bound[parent]["identity"]["start_ticks"]):
+                        raise SampleUnavailable(phase, parent, "PID_IDENTITY_CHANGED")
+                    if ticks < self.bound[parent]["identity"]["start_ticks"]:
+                        continue
+                    owner_parent = parent
+                else:
+                    continue
+                try:
+                    identity = _proc_identity(pid)
+                except (OSError, ValueError, IndexError) as error:
+                    raise SampleUnavailable(phase, pid, "IDENTITY_READ_FAILED", error) from error
+                if identity["start_ticks"] != ticks:
+                    raise SampleUnavailable(phase, pid, "PID_IDENTITY_CHANGED")
+                self._bind(phase, identity, owner_parent)
+                pending.remove(pid)
+                progressed = True
+            if not progressed:
+                break
+        for pid, bound in self.bound.items():
+            if bound["phase"] not in phases or pid not in visible:
+                continue
+            if visible[pid][1] != bound["identity"]["start_ticks"]:
+                raise SampleUnavailable(bound["phase"], pid, "PID_IDENTITY_CHANGED")
+        return {pid for pid, bound in self.bound.items()
+                if bound["phase"] in phases and pid in visible}
+
+    def evidence(self):
+        return {phase: {str(pid): {"start_ticks": row["identity"]["start_ticks"],
+                                   "parent_pid": row["parent"]}
+                        for pid, row in self.bound.items() if row["phase"] == phase}
+                for phase in self.roots}
+
+    def stop(self, phases=None, sample=None):
+        phases = set(self.roots) if phases is None else set(phases)
+        failure = None
+        for signum in (signal.SIGTERM, signal.SIGKILL):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if sample is not None and failure is None:
+                    try:
+                        sample()
+                    except DiagnosticRejected as error:
+                        failure = error
+                live = []
+                for pid, row in self.bound.items():
+                    if row["phase"] not in phases:
+                        continue
+                    try:
+                        current = _proc_identity(pid)
+                    except (OSError, ValueError, IndexError):
+                        continue
+                    if current["start_ticks"] != row["identity"]["start_ticks"]:
+                        continue
+                    try:
+                        raw = (Path("/proc") / str(pid) / "stat").read_text()
+                    except OSError:
+                        continue
+                    if raw[raw.rfind(")") + 2:].startswith("Z "):
+                        continue
+                    live.append(row)
+                if not live:
+                    if failure is not None:
+                        raise failure
+                    return
+                for row in reversed(live):
+                    try:
+                        signal.pidfd_send_signal(row["handle"], signum)
+                    except ProcessLookupError:
+                        pass
+                time.sleep(0.05)
+        if failure is not None:
+            raise failure
+
+    def close(self):
+        for row in self.bound.values():
+            os.close(row["handle"])
+        self.bound.clear()
 
 
 def _command_argv(command):
@@ -867,23 +1044,39 @@ def _executed_role(path, argv):
     return None
 
 
-def _sample_role(pid, group, groups, worker_pid, command, path):
+def _sample_role(pid, group, groups, worker_pid, command, path, owner=None):
     if pid == group:
         return "tracer"
     role = _executed_role(path, _command_argv(command))
-    if group == groups.get("helper"):
+    if owner == "helper" or group == groups.get("helper"):
         return "helper" if role == "helper" else "other"
-    if group == groups.get("observer"):
+    if owner == "observer" or group == groups.get("observer"):
         return "observer" if role == "observer" else "other"
     if role == "worker" and worker_pid is not None and pid != worker_pid:
         return "other"
     return role if role in ("gradle", "worker") else "other"
 
 
-def _owned_sample(groups, phase, worker_pid=None, commands=None):
+def _bound_role(pid, owner, root_pid, worker_pid, command, path):
+    if pid == root_pid:
+        return "tracer"
+    executed = _executed_role(path, _command_argv(command))
+    return ("helper" if owner == "helper" and executed == "helper" else
+            "observer" if owner == "observer" and executed == "observer" else
+            "worker" if executed == "worker" and
+            (worker_pid is None or pid == worker_pid) else
+            "gradle" if executed == "gradle" else "other")
+
+
+def _owned_sample(groups, phase, worker_pid=None, commands=None, owned=None):
     wall_start = time.time_ns()
     pids = []
-    for path in Path("/proc").iterdir():
+    selected = None if owned is None else owned.refresh(
+        {"stage"} if phase == "stage" else
+        {"observer"} if phase == "observer" else {"target", "helper"})
+    paths = (Path("/proc").iterdir() if selected is None else
+             (Path("/proc") / str(pid) for pid in sorted(selected)))
+    for path in paths:
         if not path.name.isdecimal():
             continue
         try:
@@ -899,7 +1092,7 @@ def _owned_sample(groups, phase, worker_pid=None, commands=None):
                                     error) from error
         except (ValueError, IndexError) as error:
             raise SampleUnavailable(phase, int(path.name), "STAT_MALFORMED") from error
-        if group not in groups.values():
+        if selected is None and group not in groups.values():
             continue
         try:
             identity = _proc_identity(pid)
@@ -938,7 +1131,10 @@ def _owned_sample(groups, phase, worker_pid=None, commands=None):
             raise SampleUnavailable(phase, pid, "COMMAND_MISSING")
         if not argv[0]:
             raise SampleUnavailable(phase, pid, "COMMAND_MALFORMED")
-        role = _sample_role(pid, group, groups, worker_pid, command, executable)
+        owner = owned.bound[pid]["phase"] if owned is not None else None
+        role = (_bound_role(pid, owner, owned.roots[owner][0], worker_pid,
+                            command, executable) if owned is not None else
+                _sample_role(pid, group, groups, worker_pid, command, executable))
         digest = hashlib.sha256(command).hexdigest()
         if commands is not None:
             _require(digest not in commands or commands[digest] == argv,
@@ -976,13 +1172,16 @@ def _pin_child(cpus):
 
 
 def _run_capture_process(command, cwd, environment, log, budget,
-                         samples, active, cpus, commands, *, deadline=None):
+                         samples, active, cpus, commands, *, deadline=None,
+                         owned=None, trace_prefix=None):
     with Path(log).open("xb") as stream:
         process = subprocess.Popen(command, cwd=cwd, env=environment, stdout=stream,
                                    stderr=subprocess.STDOUT, start_new_session=True,
                                    preexec_fn=lambda: _pin_child(cpus))
         active.append(process)
         group = _process_group(process)
+        if owned is not None:
+            owned.launch("stage", process, trace_prefix)
         began = time.monotonic_ns()
         identity = _proc_identity(process.pid)
         next_budget = 0
@@ -993,7 +1192,8 @@ def _run_capture_process(command, cwd, environment, log, budget,
                 next_budget = now + 250000000
             if deadline is not None and time.monotonic_ns() - began > deadline:
                 raise DiagnosticRejected("TIME_BOUND")
-            sample = _owned_sample({"gradle": group}, "stage", commands=commands)
+            sample = _owned_sample({"gradle": group}, "stage", commands=commands,
+                                   owned=owned)
             if sample["pids"]:
                 _sample_bound(sample)
                 samples.append(sample)
@@ -1001,6 +1201,10 @@ def _run_capture_process(command, cwd, environment, log, budget,
         budget.check()
         _read_checked(log)
         _require(process.returncode == 0, "diagnostic source stage failed")
+        if owned is not None:
+            owned.refresh({"stage"})
+            owned.stop({"stage"}, sample=lambda: _append_owned_sample(
+                samples, {"gradle": group}, "stage", None, commands, owned))
         active.remove(process)
         return began, time.monotonic_ns(), identity
 
@@ -1032,6 +1236,13 @@ def _sample_bound(sample):
         _require(prior == row, "diagnostic sampled PID changed within one sample")
     if sum(row["rss_kib"] or 0 for row in seen.values()) > RSS_CEILING_KIB:
         raise DiagnosticRejected("RSS_BOUND")
+
+
+def _append_owned_sample(samples, groups, phase, worker_pid, commands, owned):
+    sample = _owned_sample(groups, phase, worker_pid, commands, owned)
+    if sample["pids"]:
+        _sample_bound(sample)
+        samples.append(sample)
 
 
 def _typed_status(error):
@@ -1184,6 +1395,7 @@ def capture(output, allocation):
              "diagnostic allocated CPUs are unavailable")
     active = []
     samples = []
+    owned = OwnedProcesses()
     resource_commands = {}
     private = Path(tempfile.mkdtemp(prefix="ordinary-diagnostic-",
                                     dir=os.environ["TMPDIR"]))
@@ -1219,7 +1431,8 @@ def capture(output, allocation):
         stage_start, stage_end, stage_root = _run_capture_process(
             stage_trace_command, ROOT, environment, private / "stage.log", budget,
             samples, active, cpus, resource_commands,
-            deadline=900 * 1000000000)
+            deadline=900 * 1000000000, owned=owned,
+            trace_prefix=stage_trace_prefix)
         _seal_existing(private / "stage.log", output / "stage.log")
         _write_checked(output / "stage-process-traces.zip",
                        _trace_archive(stage_trace_prefix), "trace_zip")
@@ -1259,6 +1472,7 @@ def capture(output, allocation):
                                       preexec_fn=lambda: _pin_child(cpus))
             active.append(target)
             target_group = _process_group(target)
+            owned.launch("target", target, trace_prefix)
             target_root = _proc_identity(target.pid)
             worker_pid = None
             response_path = None
@@ -1284,7 +1498,7 @@ def capture(output, allocation):
                     if helper is not None and helper.poll() is None:
                         groups["helper"] = helper.pid
                     sample = _owned_sample(groups, "target", worker_pid,
-                                           resource_commands)
+                                           resource_commands, owned=owned)
                     if sample["pids"]:
                         _sample_bound(sample)
                         samples.append(sample)
@@ -1317,6 +1531,7 @@ def capture(output, allocation):
                             preexec_fn=lambda: _pin_child(cpus))
                         active.append(helper)
                         _process_group(helper)
+                        owned.launch("helper", helper, helper_prefix)
                         helper_root = _proc_identity(helper.pid)
                 if helper is not None:
                     if attach_observed_at is None and (
@@ -1340,11 +1555,15 @@ def capture(output, allocation):
                         _require(helper.returncode == 0 and cap_observed_at is not None,
                                  "DETACH_UNACKNOWLEDGED")
                 time.sleep(0.02)
-        target_exit_at = time.monotonic_ns()
         _require(target.returncode == 0 and helper is not None and
                  helper.poll() == 0 and helper_exit_at is not None and
                  worker_pid is not None and response_path is not None and
                  xml.is_file(), "TARGET_FAILED")
+        owned.refresh({"target", "helper"})
+        owned.stop({"target", "helper"}, sample=lambda: _append_owned_sample(
+            samples, {"gradle": target_group, "helper": helper.pid},
+            "target", worker_pid, resource_commands, owned))
+        target_exit_at = time.monotonic_ns()
         active.remove(target)
         active.remove(helper)
         _seal_existing(private / "gradle.log", output / "gradle.log")
@@ -1367,16 +1586,21 @@ def capture(output, allocation):
                 preexec_fn=lambda: _pin_child(cpus))
             active.append(observer)
             observer_group = _process_group(observer)
+            owned.launch("observer", observer, observer_prefix)
             observer_root = _proc_identity(observer.pid)
             while observer.poll() is None:
                 budget.check()
                 sample = _owned_sample({"observer": observer_group}, "observer",
-                                       commands=resource_commands)
+                                       commands=resource_commands, owned=owned)
                 if sample["pids"]:
                     _sample_bound(sample)
                     samples.append(sample)
                 time.sleep(0.05)
         _require(observer.returncode == 0, "diagnostic output observer failed")
+        owned.refresh({"observer"})
+        owned.stop({"observer"}, sample=lambda: _append_owned_sample(
+            samples, {"observer": observer_group}, "observer", None,
+            resource_commands, owned))
         active.remove(observer)
         observer_exit = time.monotonic_ns()
         _seal_existing(private / "observer.log", output / "observer.log")
@@ -1404,6 +1628,8 @@ def capture(output, allocation):
             "helper_root_pid": helper.pid, "observer_root_pid": observer.pid,
             "launch_roots": {"stage": stage_root, "target": target_root,
                              "helper": helper_root, "observer": observer_root},
+            "ownership_binding": "trace-lineage/2",
+            "owned_processes": owned.evidence(),
             "resource_commands": resource_commands,
             "command": command, "helper_command": helper_command,
             "observer_command": observer_command,
@@ -1443,7 +1669,20 @@ def capture(output, allocation):
         _write_checked(output / "diagnostic.json", _report_bytes(report), "report")
         return report
     except Exception as error:
-        _stop_owned(active)
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        try:
+            owned.refresh(set(owned.roots))
+        except DiagnosticRejected:
+            pass
+        owned.stop()
+        for process in active:
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=1)
         report = {"schema": SCHEMA, "status": _typed_status(error),
                   "qualification": "UNPASSED", "method": METHOD,
                   "case_id": CASE, "call_cap": CAP, "runtime": "INCOMPLETE",
@@ -1455,6 +1694,7 @@ def capture(output, allocation):
             _write_checked(output / "diagnostic.json", _report_bytes(report), "report")
         return report
     finally:
+        owned.close()
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous_handler)
         if previous_timer != (0.0, 0.0):
@@ -1811,6 +2051,100 @@ def _resource_execs(files, metadata=None):
     return trace_sets, executions
 
 
+def _bound_lineage(samples, metadata, files):
+    _require(metadata.get("ownership_binding") == "trace-lineage/2",
+             "diagnostic ownership binding differs")
+    inventory = metadata.get("owned_processes")
+    _require(type(inventory) is dict and set(inventory) ==
+             {"stage", "target", "helper", "observer"},
+             "diagnostic owned process inventory differs")
+    owners = {}
+    trace_names = {"stage": "stage-process-traces.zip",
+                   "target": "all-process-traces.zip",
+                   "helper": "helper-traces.zip",
+                   "observer": "observer-traces.zip"}
+    windows = {}
+    for phase, name in trace_names.items():
+        root = metadata["launch_roots"][phase]
+        bound = inventory[phase]
+        _require(type(bound) is dict and str(root["pid"]) in bound,
+                 "diagnostic owned process inventory differs")
+        traces, events = _raw_events(files[name])
+        traced = {int(pid) for pid in traces}
+        forks = {}
+        thread_ids = set()
+        for stamp, tid, _, call in events:
+            match = re.search(r"(?:clone|clone3|fork|vfork)\(.*\) = ([1-9][0-9]*)$", call)
+            if match is None:
+                continue
+            child = int(match[1])
+            parent = int(tid)
+            _require(child in traced and child not in forks,
+                     "diagnostic traced process lineage differs")
+            forks[child] = parent
+            if "CLONE_THREAD" in call:
+                thread_ids.add(child)
+        origin = traced - set(forks)
+        _require(len(origin) == 1,
+                 "diagnostic traced launch origin differs")
+        origin_pid = next(iter(origin))
+        processes = traced - thread_ids
+        _require({int(pid) for pid in bound} <= processes | {root["pid"]},
+                 "UNAVAILABLE")
+        for pid_text, identity in bound.items():
+            pid = int(pid_text)
+            _require(type(identity) is dict and set(identity) ==
+                     {"start_ticks", "parent_pid"} and
+                     type(identity["start_ticks"]) is int and
+                     identity["start_ticks"] > 0 and
+                     (identity["parent_pid"] is None if pid == root["pid"] else
+                      type(identity["parent_pid"]) is int),
+                     "diagnostic owned process identity differs")
+            if pid == root["pid"]:
+                _require(identity["start_ticks"] == root["start_ticks"],
+                         "diagnostic owned root identity differs")
+            else:
+                _require(pid in processes and
+                         (pid == origin_pid and identity["parent_pid"] == root["pid"] or
+                          pid != origin_pid and
+                          identity["parent_pid"] in traced and
+                          identity["parent_pid"] != pid),
+                         "diagnostic owned process lineage differs")
+                cursor = pid
+                visited = set()
+                while cursor != origin_pid:
+                    _require(cursor in forks and cursor not in visited,
+                             "diagnostic owned process lineage differs")
+                    visited.add(cursor)
+                    cursor = forks[cursor]
+                _require(root["start_ticks"] <= identity["start_ticks"],
+                         "diagnostic owned process birth differs")
+            _require(pid not in owners,
+                     "diagnostic owned PID occurs in multiple launches")
+            owners[pid] = phase
+        for pid in processes:
+            stamps = [int(stamp * 1_000_000_000) for stamp, tid, _, _ in events
+                      if int(tid) == pid]
+            _require(stamps, "diagnostic owned process trace is empty")
+            windows[pid] = (phase, min(stamps), max(stamps))
+    observed = {row["pid"] for sample in samples for row in sample["pids"]}
+    _require(observed <= set(owners),
+             "diagnostic sampled PID is not owned")
+    for pid, (phase, first, last) in windows.items():
+        if last - first < 1_000_000_000:
+            continue
+        phase_samples = [sample for sample in samples
+                         if sample["phase"] == ("target" if phase == "helper" else phase)
+                         and any(row["pid"] == pid for row in sample["pids"])]
+        _require(phase_samples and
+                 phase_samples[0]["wall_start_ns"] <= first + 1_000_000_000 and
+                 phase_samples[-1]["wall_end_ns"] >= last - 1_000_000_000 and
+                 all(right["wall_start_ns"] - left["wall_end_ns"] <= 1_000_000_000
+                     for left, right in zip(phase_samples, phase_samples[1:])),
+                 "UNAVAILABLE")
+    return owners, inventory
+
+
 def _resource_ownership(samples, metadata, files, allocation):
     roots = metadata.get("launch_roots")
     cpus = allocation.get("cpu_set")
@@ -1839,6 +2173,11 @@ def _resource_ownership(samples, metadata, files, allocation):
                  root["affinity"] == sorted(cpus),
                  "diagnostic resource launch identity differs")
     trace_sets, executions = _resource_execs(files, metadata)
+    binding = metadata.get("ownership_binding")
+    _require(binding in (None, "trace-lineage/2"),
+             "diagnostic ownership binding differs")
+    owners, inventory = (_bound_lineage(samples, metadata, files)
+                         if binding is not None else ({}, None))
     _require(metadata["worker_pid"] in trace_sets["target"] and
              metadata["helper_pid"] in trace_sets["helper"],
              "diagnostic selected resource trace differs")
@@ -1865,27 +2204,33 @@ def _resource_ownership(samples, metadata, files, allocation):
         for row in sample["pids"]:
             pid = row["pid"]
             group = row["group_pid"]
-            owner = ("stage" if phase == "stage" else
+            owner = (owners[pid] if binding is not None else
+                     "stage" if phase == "stage" else
                      "observer" if phase == "observer" else
                      "helper" if group == roots["helper"]["pid"] else "target")
             root = roots[owner]
             parent = members.get(row["parent_pid"])
-            _require(group == root["pid"] and
+            _require((binding is not None and
+                      row["start_ticks"] == inventory[owner][str(pid)]["start_ticks"] and
+                      phase == ("target" if owner == "helper" else owner) or
+                      binding is None and group == root["pid"] and
                      row["session_pid"] == root["pid"] and
                      row["start_ticks"] >= root["start_ticks"] and
                      (pid == root["pid"] or parent is not None and
                       parent["start_ticks"] <= row["start_ticks"] and
                       parent["group_pid"] == group) and
-                     set(row["affinity"]) <= set(cpus) and
                      (pid == root["pid"] and
                       row["start_ticks"] == root["start_ticks"] or
-                      pid != root["pid"] and pid in trace_sets[owner]),
+                      pid != root["pid"] and pid in trace_sets[owner])) and
+                     set(row["affinity"]) <= set(cpus),
                      "diagnostic sampled PID ownership differs")
             digest = row["command_sha256"]
             _require(digest in commands, "diagnostic sampled command is missing")
             used_commands.add(digest)
-            identity = (row["start_ticks"], row["parent_pid"], group,
-                        row["session_pid"], owner, tuple(row["affinity"]))
+            identity = ((row["start_ticks"], owner, tuple(row["affinity"]))
+                        if binding is not None else
+                        (row["start_ticks"], row["parent_pid"], group,
+                         row["session_pid"], owner, tuple(row["affinity"])))
             prior = seen.get(pid)
             _require(prior is None or prior[0] == identity,
                      "diagnostic sampled PID identity changed")
@@ -1938,10 +2283,14 @@ def _resource_ownership(samples, metadata, files, allocation):
             roles = set(row["roles"])
             groups = {"helper": roots["helper"]["pid"],
                       "observer": roots["observer"]["pid"]}
-            expected_role = _sample_role(pid, group, groups,
+            expected_role = (_bound_role(pid, owner, root["pid"],
                                          metadata["worker_pid"],
-                                         _command_bytes(commands[digest]),
-                                         image_path)
+                                         _command_bytes(commands[digest]), image_path)
+                             if binding is not None else
+                             _sample_role(pid, group, groups,
+                                          metadata["worker_pid"],
+                                          _command_bytes(commands[digest]),
+                                          image_path))
             _require(len(roles) == 1 and
                      roles == {expected_role} and
                      (owner == "target" or "worker" not in roles) and

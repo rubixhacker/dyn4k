@@ -23,7 +23,7 @@ from ordinary_arithmetic_diagnostic import (
     _last_complete_observation, _resource_ownership, _zip_checked,
     _verify_worker_raw_subset,
     _owned_sample, _resource_evidence, _executed_role, _observer_command,
-    _sample_role, _resource_execs,
+    _sample_role, _resource_execs, OwnedProcesses, _bound_lineage,
     _source_archive, _verify_source_archive, JDK21, ROOT, SampleUnavailable,
 )
 import ordinary_arithmetic_diagnostic as diagnostic
@@ -284,6 +284,19 @@ class DiagnosticContractTest(unittest.TestCase):
                 with self.assertRaisesRegex(DiagnosticRejected,
                                             "diagnostic staged command execution differs"):
                     diagnostic._stage_identity(files, metadata)
+            extra = (2, 102, None, f'execve({json.dumps(commands[1][0])}, '
+                     f'{json.dumps([commands[1][0], "-p", str(diagnostic.PORTABLE), "jvmTest"])}, 0) = 0')
+            reversed_events = [(0, events[1][1], None, events[1][3]),
+                               (1, events[0][1], None, events[0][3])]
+            for invalid in (reversed_events, events + [extra], events + [events[1]],
+                            events + [events[0]],
+                            [(0, events[0][1], None, events[0][3]),
+                             (0, events[1][1], None, events[1][3])]):
+                with self.subTest(invalid=invalid), mock.patch.object(
+                        diagnostic, "_raw_events", return_value=({}, invalid)):
+                    with self.assertRaisesRegex(DiagnosticRejected,
+                                                "diagnostic staged command execution differs"):
+                        diagnostic._stage_identity(files, metadata)
 
     def test_root_allocation_is_separate_from_sampled_rss_limit(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
@@ -953,6 +966,121 @@ class DiagnosticContractTest(unittest.TestCase):
         finally:
             child.terminate()
             child.wait(timeout=5)
+
+    def test_traced_descendant_survives_group_change_and_is_cleaned_by_identity(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            prefix = Path(directory) / "trace"
+            script = ("import subprocess,sys; "
+                      "subprocess.Popen([sys.executable,'-c',"
+                      "'import os,time; os.setsid(); time.sleep(15)']); "
+                      "sys.exit(0)")
+            sentinel = subprocess.Popen(["sleep", "20"], start_new_session=True)
+            launch = subprocess.Popen(["strace", "-ff", "-ttt", "-e",
+                                       "trace=process", "-o", str(prefix),
+                                       sys.executable, "-c", script],
+                                      start_new_session=True,
+                                      stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL)
+            owned = OwnedProcesses()
+            try:
+                owned.launch("stage", launch, prefix)
+                child = None
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and child is None:
+                    sample = _owned_sample({"gradle": launch.pid}, "stage",
+                                           owned=owned)
+                    candidates = [row for row in sample["pids"]
+                                  if row["pid"] != launch.pid and
+                                  row["session_pid"] == row["pid"]]
+                    if candidates:
+                        child = candidates[-1]["pid"]
+                    time.sleep(0.02)
+                self.assertIsNotNone(child)
+                self.assertNotEqual(os.getpgid(child), launch.pid)
+                time.sleep(0.1)
+                owned.refresh({"stage"})
+                self.assertIn(child, owned.bound)
+                self.assertNotEqual(diagnostic._proc_identity(child)["parent_pid"],
+                                    owned.bound[child]["parent"])
+                self.assertTrue(any(row["pid"] == child for row in
+                                    _owned_sample({"gradle": launch.pid}, "stage",
+                                                  owned=owned)["pids"]))
+                read_text = Path.read_text
+                def without_rss(path, *args, **kwargs):
+                    if path == Path(f"/proc/{child}/status"):
+                        return "Name:\tchild\n"
+                    return read_text(path, *args, **kwargs)
+                with mock.patch.object(Path, "read_text", without_rss):
+                    with self.assertRaisesRegex(DiagnosticRejected, "UNAVAILABLE") as missing:
+                        _owned_sample({"gradle": launch.pid}, "stage", owned=owned)
+                self.assertEqual(missing.exception.detail["reason"], "RSS_MISSING")
+                actual_identity = diagnostic._proc_identity
+                with mock.patch.object(diagnostic, "_proc_identity",
+                                       side_effect=lambda pid: ({**actual_identity(pid),
+                                                                "start_ticks": -1} if pid == child else
+                                                               actual_identity(pid))):
+                    owned.stop({"stage"})
+                self.assertTrue(Path(f"/proc/{child}").exists())
+            finally:
+                owned.stop({"stage"})
+                launch.wait(timeout=8)
+                child_path = Path(f"/proc/{child}/stat") if child is not None else None
+                self.assertTrue(child_path is None or not child_path.exists() or
+                                child_path.read_text().split(") ", 1)[1].startswith("Z "))
+                owned.close()
+                sentinel_alive = sentinel.poll() is None
+                sentinel.terminate()
+                sentinel.wait(timeout=5)
+                self.assertTrue(sentinel_alive)
+
+    def test_new_replay_requires_daemon_trace_lifetime_and_owned_membership(self):
+        def archive(entries):
+            return _zip_checked({f"trace.{pid}": text.encode()
+                                 for pid, text in entries.items()}, "trace_zip")
+        files = {
+            "stage-process-traces.zip": archive({
+                11: ("100.000000 execve(\"/bin/sh\", [\"sh\"], 0) = 0\n"
+                     "100.100000 clone(child_stack=NULL, flags=SIGCHLD) = 12\n"
+                     "100.200000 +++ exited with 0 +++\n"),
+                12: ("100.100001 execve(\"/bin/sh\", [\"sh\"], 0) = 0\n"
+                     "103.000000 +++ exited with 0 +++\n")}),
+            "all-process-traces.zip": archive({21:
+                "104.000000 execve(\"/bin/sh\", [\"sh\"], 0) = 0\n"
+                "104.100000 +++ exited with 0 +++\n"}),
+            "helper-traces.zip": archive({31:
+                "104.000000 execve(\"/bin/sh\", [\"sh\"], 0) = 0\n"
+                "104.100000 +++ exited with 0 +++\n"}),
+            "observer-traces.zip": archive({41:
+                "105.000000 execve(\"/bin/sh\", [\"sh\"], 0) = 0\n"
+                "105.100000 +++ exited with 0 +++\n"})}
+        roots = {phase: {"pid": pid, "start_ticks": pid}
+                 for phase, pid in (("stage", 10), ("target", 20),
+                                    ("helper", 30), ("observer", 40))}
+        processes = {phase: {str(root["pid"]): {"start_ticks": root["start_ticks"],
+                                                  "parent_pid": None},
+                             str(root["pid"] + 1): {"start_ticks": root["start_ticks"] + 1,
+                                                     "parent_pid": root["pid"]}}
+                     for phase, root in roots.items()}
+        processes["stage"]["12"] = {"start_ticks": 12, "parent_pid": 11}
+        metadata = {"ownership_binding": "trace-lineage/2",
+                    "launch_roots": roots, "owned_processes": processes}
+        samples = [{"phase": "stage", "wall_start_ns": at,
+                    "wall_end_ns": at + 100_000_000,
+                    "pids": [{"pid": 12}]}
+                   for at in (100_200_000_000, 101_100_000_000,
+                              102_000_000_000, 102_900_000_000)]
+        owners, _ = _bound_lineage(samples, metadata, files)
+        self.assertEqual(owners[12], "stage")
+        with self.assertRaisesRegex(DiagnosticRejected, "UNAVAILABLE"):
+            _bound_lineage([], metadata, files)
+        bad = copy.deepcopy(metadata)
+        bad["owned_processes"]["stage"]["12"]["parent_pid"] = 21
+        with self.assertRaisesRegex(DiagnosticRejected, "lineage differs"):
+            _bound_lineage(samples, bad, files)
+        extra = copy.deepcopy(samples)
+        extra[0]["pids"].append({"pid": 999})
+        with self.assertRaisesRegex(DiagnosticRejected, "not owned"):
+            _bound_lineage(extra, metadata, files)
 
     def test_exited_child_is_absent_and_zombie_is_not_sampled_as_live(self):
         exited = subprocess.Popen(["true"], start_new_session=True)

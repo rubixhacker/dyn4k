@@ -63,6 +63,17 @@ A command or executable change without raw exec proof fails replay. A
 process-only trace records the staging phase, where the Gradle wrapper can
 exec Java.
 
+The staging replay requires exactly two successful wrapper executions in
+order: core publication, then portable `jvmTestClasses`. It rejects another
+wrapper execution and equal or reversed execution times. A new ownership
+binding records each live descendant's process start tick and its traced
+lineage. Sampling keeps that binding when a child changes its process group or
+session, or when its parent exits. Cleanup uses process handles tied to those
+identities. Replay checks the raw fork lineage and requires samples across
+each traced process lifetime of at least one second, with no gap above one
+second. A missing required sample gives `UNAVAILABLE`. Earlier source windows
+retain their prior replay contract.
+
 `tracer` measures the supervisor's traced process roots. `other` measures
 owned processes whose executable and entry point do not prove a Gradle,
 worker, helper, or observer role. These processes remain in aggregate RSS.
