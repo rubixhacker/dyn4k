@@ -1,4 +1,6 @@
 import io
+import hashlib
+import gc
 import json
 import os
 from pathlib import Path
@@ -18,6 +20,7 @@ import zipfile
 
 from ordinary_snapshot.control import SnapshotIncomplete, SnapshotOwnedProcesses
 from ordinary_snapshot.build_tracer import build as build_tracer, run as run_build_command
+from ordinary_snapshot import build_tracer as builder
 from ordinary_arithmetic_diagnostic import _pidfd_exited, _proc_identity, check_retained
 import ordinary_arithmetic_diagnostic as diagnostic
 
@@ -25,41 +28,281 @@ import ordinary_arithmetic_diagnostic as diagnostic
 class NativeAttempt:
     def __init__(self, label):
         self.label = label
-        self.directory = None
         self.scratch = None
+        self.process_exit = None
 
     def __enter__(self):
-        self.directory = tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"])
-        self.scratch = Path(self.directory.name)
+        self.scratch = Path(tempfile.mkdtemp(dir=os.environ["TMPDIR"]))
         return self
 
-    def capture(self, stdout, stderr):
+    def capture(self, stdout, stderr, exit_code=None):
+        self.process_exit = exit_code
         (self.scratch / "stdout.raw").write_bytes(stdout)
         (self.scratch / "stderr.raw").write_bytes(stderr)
 
     def __exit__(self, error_type, error, traceback):
+        if error_type is None:
+            shutil.rmtree(self.scratch)
+            return False
+        root = Path(os.environ.get("DYN4K_NATIVE_FAILURES",
+                                   Path.cwd() / "ordinary-snapshot-native-failures"))
+        target = root / f"{self.label}-{uuid.uuid4().hex}"
+        archive_error = None
         try:
-            if error_type is not None:
-                root = Path(os.environ.get("DYN4K_NATIVE_FAILURES",
-                                           Path.cwd() / "ordinary-snapshot-native-failures"))
-                target = root / f"{self.label}-{uuid.uuid4().hex}"
-                target.mkdir(parents=True, mode=0o700)
-                for path in self.scratch.iterdir():
-                    if (path.name.startswith("trace.") or path.name in
-                            {"ptrace-events.jsonl", "snapshot-controls.jsonl",
-                             "stdout.raw", "stderr.raw"}):
-                        shutil.copyfile(path, target / path.name)
-                (target / "outcome.json").write_text(json.dumps({
-                    "status": "FAILED", "error_type": error_type.__name__,
-                    "error": str(error), "files": sorted(item.name for item in
-                                                         target.iterdir())}) + "\n")
-                print(f"native attempt retained: {target}", file=sys.stderr)
-        finally:
-            self.directory.cleanup()
+            target.mkdir(parents=True, mode=0o700)
+            for path in self.scratch.iterdir():
+                if (path.name.startswith("trace.") or path.name in
+                        {"ptrace-events.jsonl", "snapshot-controls.jsonl",
+                         "stdout.raw", "stderr.raw"}):
+                    shutil.copyfile(path, target / path.name)
+        except OSError as failure:
+            archive_error = failure
+        outcome = {
+            "status": "FAILED", "error_type": error_type.__name__,
+            "error": str(error),
+            "archive_status": "FAILED" if archive_error else "COMPLETE",
+            "streams": {name: "OBSERVED" if (self.scratch / f"{name}.raw").exists()
+                        else "UNAVAILABLE" for name in ("stdout", "stderr")},
+            "process_exit": (self.process_exit if self.process_exit is not None
+                             else "NOT_OBSERVED"),
+        }
+        if archive_error:
+            outcome.update({"archive_error_type": type(archive_error).__name__,
+                            "archive_error": str(archive_error),
+                            "scratch_path": str(self.scratch)})
+        else:
+            outcome["files"] = sorted(item.name for item in target.iterdir())
+        if target.is_dir():
+            try:
+                (target / "outcome.json").write_text(json.dumps(outcome) + "\n")
+            except OSError as failure:
+                archive_error = failure
+                outcome.update({"archive_status": "FAILED",
+                                "archive_error_type": type(failure).__name__,
+                                "archive_error": str(failure),
+                                "scratch_path": str(self.scratch)})
+        if archive_error and not (target / "outcome.json").is_file():
+            try:
+                (self.scratch / "outcome.json").write_text(json.dumps(outcome) + "\n")
+            except OSError as failure:
+                print(f"native outcome write failed: {failure}; scratch: {self.scratch}",
+                      file=sys.stderr)
+        if archive_error is None:
+            shutil.rmtree(self.scratch)
+            print(f"native attempt retained: {target}", file=sys.stderr)
+        else:
+            print(f"native archive failed: {archive_error}; scratch: {self.scratch}",
+                  file=sys.stderr)
         return False
 
 
 class NativeSnapshotControlTest(unittest.TestCase):
+    def test_live_replacement_cannot_use_exited_cached_pidfd(self):
+        class Stat:
+            def read_text(self):
+                return "456 (replacement) S 1 123 " + "0 " * 16 + "17\n"
+        class Entry:
+            name = "456"
+            def __truediv__(self, name):
+                self.assertEqual(name, "stat")
+                return Stat()
+        entry = Entry()
+        entry.assertEqual = self.assertEqual
+        with mock.patch.object(builder, "Path") as path, mock.patch.object(
+                builder.select, "select", return_value=([42], [], [])):
+            path.return_value.iterdir.return_value = [entry]
+            with self.assertRaisesRegex(RuntimeError, "identity"):
+                builder._live_group_members(123, {456: (42, 17)})
+
+    def test_group_identity_change_during_pidfd_open_is_incomplete(self):
+        class Stat:
+            reads = 0
+            def read_text(self):
+                self.reads += 1
+                ticks = 17 if self.reads == 1 else 18
+                return "456 (replacement) S 1 123 " + "0 " * 16 + f"{ticks}\n"
+        stat = Stat()
+        class Entry:
+            name = "456"
+            def __truediv__(self, name):
+                return stat
+        with mock.patch.object(builder, "Path") as path, mock.patch.object(
+                builder.os, "pidfd_open", return_value=42), mock.patch.object(
+                builder.os, "close") as close:
+            path.return_value.iterdir.return_value = [Entry()]
+            with self.assertRaisesRegex(RuntimeError, "identity"):
+                builder._live_group_members(123, {})
+            close.assert_called_once_with(42)
+
+    def test_outer_alarm_does_not_interrupt_owned_build_cleanup(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory)
+            pidfile = root / "child.pid"
+            output = root / "build"
+            child = None
+            def stage(_archive, _output, *, timeout):
+                nonlocal child
+                observed = []
+                def watch():
+                    until = time.monotonic() + 1
+                    while time.monotonic() < until:
+                        try:
+                            observed.append(os.pidfd_open(int(pidfile.read_text())))
+                            return
+                        except (FileNotFoundError, ValueError, ProcessLookupError):
+                            time.sleep(0.001)
+                watcher = threading.Thread(target=watch)
+                watcher.start()
+                command = run_build_command([sys.executable,
+                    str(Path(__file__).with_name("adverse_build_child.py")),
+                    str(pidfile)], root, os.environ, 0.2)
+                watcher.join(timeout=1)
+                child = observed[0]
+                record = json.loads((output / "build-record.json").read_text())
+                for name in ("stdout", "stderr"):
+                    raw = output / f"build-0-{name}.raw"
+                    raw.write_bytes(command[name])
+                    command[name + "_path"] = str(raw)
+                    command[name + "_sha256"] = hashlib.sha256(command[name]).hexdigest()
+                record["commands"] = [{key: value for key, value in command.items()
+                                       if key not in {"stdout", "stderr"}}]
+                builder.write_record(output / "build-record.json", record)
+                return record
+            try:
+                with mock.patch.object(builder, "_build", stage):
+                    build_tracer("unused", output, timeout=0.35)
+                self.assertTrue(select.select([child], [], [], 0)[0])
+                self.assertEqual(len(json.loads((output / "build-record.json").read_text())[
+                    "commands"]), 1)
+                command = json.loads((output / "build-record.json").read_text())[
+                    "commands"][0]
+                self.assertTrue(command["timed_out"])
+                for name in ("stdout", "stderr"):
+                    self.assertEqual(hashlib.sha256(Path(command[name + "_path"]).read_bytes()
+                                                ).hexdigest(), command[name + "_sha256"])
+            finally:
+                if child is not None:
+                    if not select.select([child], [], [], 0)[0]:
+                        signal.pidfd_send_signal(child, signal.SIGKILL)
+                        select.select([child], [], [], 3)
+                    os.close(child)
+
+    def test_normal_build_stage_uses_production_deadline(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            output = Path(directory) / "build"
+            def stage(_archive, _output, *, timeout):
+                self.assertEqual(timeout, 600)
+                command = run_build_command([sys.executable, "-c", "print('ready')"],
+                                            directory, os.environ, timeout)
+                self.assertEqual((command["exit_code"], command["stdout"]),
+                                 (0, b"ready\n"))
+                return command
+            started = time.monotonic()
+            with mock.patch.object(builder, "_build", stage):
+                build_tracer("unused", output)
+            self.assertLess(time.monotonic() - started, 2)
+
+    def test_uncertain_group_identity_records_incomplete_cleanup(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            sentinel = subprocess.Popen(["/bin/sleep", "5"])
+            try:
+                with mock.patch.object(builder, "_live_group_members",
+                                       side_effect=RuntimeError("identity uncertain")):
+                    result = run_build_command([sys.executable, "-c",
+                                                "import time; time.sleep(5)"],
+                                               directory, os.environ, 0.1)
+                self.assertEqual(result["cleanup_status"], "INCOMPLETE")
+                self.assertEqual(result["cleanup_error"], "identity uncertain")
+                self.assertTrue(result["timed_out"])
+                self.assertIsNone(sentinel.poll())
+            finally:
+                if sentinel.poll() is None:
+                    sentinel.kill()
+                sentinel.wait(timeout=3)
+
+    def test_archive_failure_preserves_original_and_scratch(self):
+        for partial in (False, True):
+            with self.subTest(partial=partial), tempfile.TemporaryDirectory(
+                    dir=os.environ["TMPDIR"]) as directory:
+                root = Path(directory) / "failures"
+                original = shutil.copyfile
+                calls = 0
+                def fail_copy(source, target):
+                    nonlocal calls
+                    calls += 1
+                    if not partial or calls == 2:
+                        raise OSError("injected copy failure")
+                    return original(source, target)
+                with mock.patch.dict(os.environ, {"DYN4K_NATIVE_FAILURES": str(root)}), \
+                     mock.patch.object(shutil, "copyfile", side_effect=fail_copy):
+                    with self.assertRaisesRegex(RuntimeError, "original failure"):
+                        with NativeAttempt("copy") as attempt:
+                            scratch = attempt.scratch
+                            (scratch / "trace.1").write_bytes(b"trace")
+                            attempt.capture(b"out", b"err")
+                            raise RuntimeError("original failure")
+                del attempt
+                gc.collect()
+                self.assertTrue(scratch.exists())
+                self.assertEqual((scratch / "trace.1").read_bytes(), b"trace")
+                outcome = next(root.rglob("outcome.json"))
+                row = json.loads(outcome.read_text())
+                self.assertEqual(row["archive_status"], "FAILED")
+                self.assertEqual(row["scratch_path"], str(scratch))
+                self.assertEqual(row["error"], "original failure")
+                self.assertEqual(row["archive_error"], "injected copy failure")
+                shutil.rmtree(scratch)
+
+    def test_archive_target_creation_failure_keeps_scratch_outcome(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory) / "failures"
+            original_mkdir = Path.mkdir
+            def fail_target(path, *args, **kwargs):
+                if path.parent == root:
+                    raise OSError("injected target failure")
+                return original_mkdir(path, *args, **kwargs)
+            with mock.patch.dict(os.environ, {"DYN4K_NATIVE_FAILURES": str(root)}), \
+                 mock.patch.object(Path, "mkdir", fail_target):
+                with self.assertRaisesRegex(RuntimeError, "original failure"):
+                    with NativeAttempt("target") as attempt:
+                        scratch = attempt.scratch
+                        (scratch / "trace.1").write_bytes(b"trace")
+                        raise RuntimeError("original failure")
+            row = json.loads((scratch / "outcome.json").read_text())
+            self.assertEqual(row["archive_error"], "injected target failure")
+            self.assertEqual(row["scratch_path"], str(scratch))
+            self.assertEqual((scratch / "trace.1").read_bytes(), b"trace")
+            shutil.rmtree(scratch)
+
+    def test_missing_native_observations_are_explicit(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory) / "failures"
+            with mock.patch.dict(os.environ, {"DYN4K_NATIVE_FAILURES": str(root)}):
+                with self.assertRaisesRegex(RuntimeError, "before capture"):
+                    with NativeAttempt("missing") as attempt:
+                        (attempt.scratch / "trace.1").write_bytes(b"trace")
+                        raise RuntimeError("before capture")
+            row = json.loads(next(root.rglob("outcome.json")).read_text())
+            self.assertEqual(row["streams"], {"stdout": "UNAVAILABLE",
+                                               "stderr": "UNAVAILABLE"})
+            self.assertEqual(row["process_exit"], "NOT_OBSERVED")
+
+    def test_native_outcome_retains_observed_exit_and_streams(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory) / "failures"
+            with mock.patch.dict(os.environ, {"DYN4K_NATIVE_FAILURES": str(root)}):
+                with self.assertRaisesRegex(RuntimeError, "after capture"):
+                    with NativeAttempt("observed") as attempt:
+                        attempt.capture(b"", b"failure", exit_code=7)
+                        raise RuntimeError("after capture")
+            outcome = next(root.rglob("outcome.json"))
+            row = json.loads(outcome.read_text())
+            self.assertEqual(row["process_exit"], 7)
+            self.assertEqual(row["streams"], {"stdout": "OBSERVED",
+                                               "stderr": "OBSERVED"})
+            self.assertEqual((outcome.parent / "stdout.raw").read_bytes(), b"")
+            self.assertEqual((outcome.parent / "stderr.raw").read_bytes(), b"failure")
+
     def test_timed_out_build_command_reaps_term_ignoring_descendant(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
             pidfile = Path(directory) / "child.pid"
@@ -549,7 +792,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
                             break
                         time.sleep(0.005)
                     stdout, stderr = process.communicate(timeout=3)
-                    attempt.capture(stdout, stderr)
+                    attempt.capture(stdout, stderr, process.returncode)
                     if (os.environ.get("DYN4K_INJECT_NATIVE_FAILURE") == mode
                             and not child_first):
                         raise RuntimeError("injected native lifecycle failure")
@@ -612,7 +855,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
                         process.kill()
                     final_stdout, final_stderr = process.communicate(timeout=3)
                     if not (scratch / "stdout.raw").exists():
-                        attempt.capture(final_stdout, final_stderr)
+                        attempt.capture(final_stdout, final_stderr, process.returncode)
                     owned.close()
 
     def test_held_process_has_exact_live_identity_and_resumes(self):
@@ -649,7 +892,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
                     owned.pump({"stage"})
                     time.sleep(0.005)
                 stdout, stderr = process.communicate(timeout=3)
-                attempt.capture(stdout, stderr)
+                attempt.capture(stdout, stderr, process.returncode)
                 self.assertEqual((process.returncode, stdout, stderr), (0, b"", b""))
                 owned.stop({"stage"})
                 self.assertIsNone(sentinel.poll())
@@ -660,7 +903,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
                     process.kill()
                 final_stdout, final_stderr = process.communicate(timeout=3)
                 if not (scratch / "stdout.raw").exists():
-                    attempt.capture(final_stdout, final_stderr)
+                    attempt.capture(final_stdout, final_stderr, process.returncode)
                 owned.close()
                 sentinel.communicate(timeout=3)
 
@@ -712,7 +955,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
                     owned.pump({"stage"})
                     time.sleep(0.002)
                 stdout, stderr = process.communicate(timeout=3)
-                attempt.capture(stdout, stderr)
+                attempt.capture(stdout, stderr, process.returncode)
                 traces, raw = diagnostic._raw_events(
                     diagnostic._trace_archive(trace))
                 diagnostic._verify_spawn_births(traces, raw,
@@ -723,7 +966,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
                     process.kill()
                 final_stdout, final_stderr = process.communicate(timeout=3)
                 if not (scratch / "stdout.raw").exists():
-                    attempt.capture(final_stdout, final_stderr)
+                    attempt.capture(final_stdout, final_stderr, process.returncode)
                 owned.close()
 
     def test_cleanup_drains_new_bound_child_without_signaling_sentinel(self):
@@ -765,7 +1008,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
                 if process.poll() is None:
                     process.kill()
                 stdout, stderr = process.communicate(timeout=3)
-                attempt.capture(stdout, stderr)
+                attempt.capture(stdout, stderr, process.returncode)
                 if sentinel.poll() is None:
                     sentinel.kill()
                 sentinel.wait(timeout=3)

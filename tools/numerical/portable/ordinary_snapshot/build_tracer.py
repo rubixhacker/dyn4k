@@ -1,4 +1,5 @@
 import argparse
+from contextvars import ContextVar
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ SOURCE_SHA256 = "06525ee83048d477139312ad96e750585354e5f9f56663bdde0f959dce5b16d
 HERE = Path(__file__).resolve().parent
 PATCH = HERE / "strace-7.2.patch"
 INCLUDE = HERE / "owned_snapshot.inc"
+_BUILD_DEADLINE = ContextVar("ordinary_build_deadline", default=None)
 
 
 def digest(path):
@@ -38,12 +40,27 @@ def _live_group_members(group, handles):
             if int(fields[2]) != group or fields[0] in {"Z", "X"}:
                 continue
             pid = int(entry.name)
-            if pid not in handles:
-                handles[pid] = os.pidfd_open(pid)
-            if not select.select([handles[pid]], [], [], 0)[0]:
+            start_ticks = int(fields[19])
+            if pid in handles:
+                handle, bound_ticks = handles[pid]
+                if bound_ticks != start_ticks or select.select([handle], [], [], 0)[0]:
+                    raise RuntimeError("owned build group identity is uncertain")
+            else:
+                handle = os.pidfd_open(pid)
+                try:
+                    again = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+                    if (int(again[2]) != group or again[0] in {"Z", "X"} or
+                            int(again[19]) != start_ticks or
+                            select.select([handle], [], [], 0)[0]):
+                        raise RuntimeError("owned build group identity is uncertain")
+                    handles[pid] = (handle, start_ticks)
+                except BaseException:
+                    os.close(handle)
+                    raise
+            if not select.select([handle], [], [], 0)[0]:
                 live.append(pid)
-        except (FileNotFoundError, ProcessLookupError):
-            continue
+        except (OSError, ValueError, IndexError) as error:
+            raise RuntimeError("owned build group identity is uncertain") from error
     return live
 
 
@@ -51,58 +68,106 @@ def _wait_group_exit(process, handles, deadline):
     while time.monotonic() < deadline:
         live = _live_group_members(process.pid, handles)
         if not live and all(select.select([handle], [], [], 0)[0]
-                            for handle in handles.values()):
+                            for handle, _ in handles.values()):
             process.poll()
             return process.returncode is not None
         time.sleep(0.02)
     return (not _live_group_members(process.pid, handles) and
             all(select.select([handle], [], [], 0)[0]
-                for handle in handles.values()) and process.poll() is not None)
+                for handle, _ in handles.values()) and process.poll() is not None)
 
 
 def run(argv, cwd, environment, timeout):
     started = time.time_ns()
+    build_deadline = _BUILD_DEADLINE.get()
+    if build_deadline is not None:
+        remaining = max(0, build_deadline - time.monotonic())
+        reserve = min(5, remaining * 0.8)
+        timeout = min(timeout, max(0, remaining - reserve))
     if timeout <= 0:
         return {"argv": argv, "cwd": str(cwd), "utc_start_ns": started,
                 "utc_end_ns": time.time_ns(), "exit_code": 124,
-                "timed_out": True, "stdout": b"", "stderr": b"build deadline expired"}
+                "process_exit_code": "NOT_OBSERVED", "timed_out": True,
+                "cleanup_status": "NOT_STARTED", "streams_complete": False,
+                "stdout": b"", "stderr": b"build deadline expired"}
+    prior_handler = signal.getsignal(signal.SIGALRM) if build_deadline is not None else None
+    if build_deadline is not None:
+        signal.signal(signal.SIGALRM, lambda _signum, _frame: None)
     try:
         process = subprocess.Popen(argv, cwd=cwd, env=environment,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    start_new_session=True)
     except OSError as error:
+        if build_deadline is not None:
+            signal.signal(signal.SIGALRM, prior_handler)
         return {"argv": argv, "cwd": str(cwd), "utc_start_ns": started,
                 "utc_end_ns": time.time_ns(), "exit_code": 127,
-                "timed_out": False, "stdout": b"",
+                "process_exit_code": "NOT_OBSERVED", "timed_out": False,
+                "cleanup_status": "NOT_STARTED", "streams_complete": False,
+                "stdout": b"",
                 "stderr": str(error).encode("utf-8", "replace")}
+    if build_deadline is not None:
+        remaining = max(0, build_deadline - time.monotonic())
+        timeout = min(timeout, max(0, remaining - min(5, remaining * 0.8)))
     timed_out = False
     handles = {}
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
-    except (subprocess.TimeoutExpired, TimeoutError):
-        timed_out = True
         try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            if not _wait_group_exit(process, handles, time.monotonic() + 2):
+            stdout, stderr = process.communicate(timeout=timeout)
+        except (subprocess.TimeoutExpired, TimeoutError) as timeout_error:
+            timed_out = True
+            stdout = timeout_error.stdout or b""
+            stderr = timeout_error.stderr or b""
+            cleanup_error = None
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            cleanup_deadline = (build_deadline if build_deadline is not None else
+                                time.monotonic() + 4.5)
+            try:
+                exited = _wait_group_exit(process, handles,
+                    min(cleanup_deadline, time.monotonic() + 2))
+            except RuntimeError as error:
+                exited = False
+                cleanup_error = str(error)
+            if not exited:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-                if not _wait_group_exit(process, handles, time.monotonic() + 2):
-                    raise RuntimeError("owned build group exit could not be established")
+                try:
+                    exited = _wait_group_exit(process, handles, cleanup_deadline)
+                except RuntimeError as error:
+                    exited = False
+                    cleanup_error = str(error)
             try:
-                stdout, stderr = process.communicate(timeout=0.5)
+                stdout, stderr = process.communicate(timeout=max(
+                    0, min(0.5, cleanup_deadline - time.monotonic())))
+                streams_complete = True
             except subprocess.TimeoutExpired as error:
-                raise RuntimeError("owned build streams did not close after group exit") from error
-        finally:
-            for handle in handles.values():
-                os.close(handle)
+                stdout = error.stdout or stdout
+                stderr = error.stderr or stderr
+                streams_complete = False
+            cleanup_status = ("COMPLETE" if exited and streams_complete and
+                              cleanup_error is None else "INCOMPLETE")
+        else:
+            cleanup_status = "COMPLETE"
+            cleanup_error = None
+            streams_complete = True
+    finally:
+        for handle, _ in handles.values():
+            os.close(handle)
+        process.stdout.close()
+        process.stderr.close()
+        if build_deadline is not None:
+            signal.signal(signal.SIGALRM, prior_handler)
     return {"argv": argv, "cwd": str(cwd), "utc_start_ns": started,
             "utc_end_ns": time.time_ns(), "exit_code": 124 if timed_out else process.returncode,
-            "timed_out": timed_out, "stdout": stdout, "stderr": stderr}
+            "process_exit_code": (process.poll() if process.returncode is not None
+                                  else "NOT_OBSERVED"), "timed_out": timed_out,
+            "cleanup_status": cleanup_status, "cleanup_error": cleanup_error,
+            "streams_complete": streams_complete, "stdout": stdout, "stderr": stderr}
 
 
 def build(archive, output, *, timeout=600):
@@ -119,6 +184,7 @@ def build(archive, output, *, timeout=600):
     prior_handler = signal.getsignal(signal.SIGALRM)
     prior_timer = signal.getitimer(signal.ITIMER_REAL)
     started = time.monotonic()
+    deadline_token = _BUILD_DEADLINE.set(started + timeout)
     use_timer = prior_timer[0] == 0 or prior_timer[0] > timeout
     def expire_build(_signum, _frame):
         raise TimeoutError("private build deadline expired")
@@ -135,6 +201,7 @@ def build(archive, output, *, timeout=600):
             write_record(record_path, record)
         raise
     finally:
+        _BUILD_DEADLINE.reset(deadline_token)
         if use_timer:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, prior_handler)
@@ -146,7 +213,7 @@ def build(archive, output, *, timeout=600):
 
 
 def _build(archive, output, *, timeout):
-    deadline = time.monotonic() + timeout
+    deadline = _BUILD_DEADLINE.get() or time.monotonic() + timeout
     archive = Path(archive).resolve()
     output = Path(output).resolve()
     if digest(archive) != ARCHIVE_SHA256:
