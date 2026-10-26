@@ -471,6 +471,12 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 ("name: Test migration guide checks",
                  "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
                  "PYTHONPATH=docs/guide python3 -B -m unittest -v test_checks"),
+                ("name: Install migration image decoder",
+                 "sudo apt-get update && sudo apt-get install --yes imagemagick"),
+                ("name: Test migration scene validators",
+                 "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
+                 "python3 -B -m unittest -v tools.migration.test_truck_camera "
+                 "tools.migration.test_validation"),
             ],
             step_contract,
         )
@@ -706,6 +712,16 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "docs/guide/check_examples.py"),
             ("five-test guide check suite", "-m unittest -v test_checks",
              "-m unittest -v"),
+            ("migration decoder installation removed",
+             "      - name: Install migration image decoder\n"
+             "        run: sudo apt-get update && sudo apt-get install --yes imagemagick\n",
+             ""),
+            ("truck camera migration module omitted",
+             "tools.migration.test_truck_camera",
+             "tools.migration.test_truck_camera_missing"),
+            ("scene validation migration module omitted",
+             "tools.migration.test_validation",
+             "tools.migration.test_validation_missing"),
         )
         for name, old, new in mutations:
             with self.subTest(mutation=name):
@@ -841,7 +857,9 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "      - name: Test independent qualification gate seams",
              "      - name: Test portable qualification source modules",
              "      - name: Check migration guide links and claims",
-             "      - name: Test migration guide checks"],
+             "      - name: Test migration guide checks",
+             "      - name: Install migration image decoder",
+             "      - name: Test migration scene validators"],
             step_names,
         )
         step = re.search(
