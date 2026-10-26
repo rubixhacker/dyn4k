@@ -26,6 +26,9 @@ class NativeSnapshotControlTest(unittest.TestCase):
         files = {"strace-source.tar.xz": archive.read_bytes(),
                  "strace-binary": Path(binary).read_bytes(),
                  "strace-build.json": json.dumps(record).encode()}
+        self.assertEqual(diagnostic._tracer_identity(
+            files, {"tracer_build": record})["binary_sha256"],
+            record["binary_sha256"])
         for name in ("strace-source.tar.xz", "strace-binary"):
             with self.subTest(name=name):
                 altered = dict(files)
