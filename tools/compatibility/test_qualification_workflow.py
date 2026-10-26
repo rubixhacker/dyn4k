@@ -401,6 +401,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "python3 -B -m unittest -v "
                  "test_actual_arithmetic test_actual_capture_receipt "
                  "test_actual_capture_v6 test_actual_trace "
+                 "test_ordinary_arithmetic_diagnostic "
                  "test_capture_actual test_rotation_oracle test_rotation_marker "
                  "test_prospective_compare test_witness test_source_guard "
                  "test_jdi_bridge test_pulley_jdi_v1 test_pulley_jdi_v2 "
@@ -898,6 +899,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "python3 -B -m unittest -v "
             "test_actual_arithmetic test_actual_capture_receipt "
             "test_actual_capture_v6 test_actual_trace "
+            "test_ordinary_arithmetic_diagnostic "
             "test_capture_actual test_rotation_oracle test_rotation_marker "
             "test_prospective_compare test_witness test_source_guard "
             "test_jdi_bridge test_pulley_jdi_v1 test_pulley_jdi_v2 "
@@ -1050,6 +1052,21 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     self.assert_source_checks_job_contract(
                         source.replace(target, replacement, 1))
+
+    def test_source_contract_rejects_ordinary_arithmetic_diagnostic_omission(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assert_source_checks_job_contract(source)
+        numerical = re.search(
+            r"(?ms)^      - name: Test source-only numerical regressions\n"
+            r".*?(?=^      - (?:name|uses): |\Z)", source,
+        )
+        self.assertIsNotNone(numerical)
+        diagnostic = "              test_ordinary_arithmetic_diagnostic \\\n"
+        self.assertEqual(1, numerical.group(0).count(diagnostic))
+        replacement = numerical.group(0).replace(diagnostic, "", 1)
+        with self.assertRaises(AssertionError):
+            self.assert_source_checks_job_contract(
+                source.replace(numerical.group(0), replacement, 1))
 
     def test_numeric_class_witness_configuration_rejects_explicit_bad_jdk(self):
         module_path = Path(__file__).resolve().parents[1] / "numerical/portable"
