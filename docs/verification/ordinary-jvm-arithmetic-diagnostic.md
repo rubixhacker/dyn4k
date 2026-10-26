@@ -75,6 +75,8 @@ socket handshake finish. A failed read or handshake remains incomplete, and
 cleanup uses the retained pidfd to stop the launched process. If pidfd opening
 fails, the capture reports incomplete ownership and does not signal its
 numeric PID.
+Launch rejects a PID that is already bound before opening another pidfd. The
+first root and its pidfd remain available for cleanup.
 Cleanup never signals an unbound PID.
 
 Replay checks every birth against the raw fork or clone result, every exit

@@ -83,6 +83,8 @@ class SnapshotOwnedProcesses:
     def launch(self, phase, process, trace_prefix):
         if phase not in self.servers or phase in self.roots:
             raise SnapshotIncomplete(phase, process.pid, "LAUNCH_STATE")
+        if process.pid in self.bound:
+            raise SnapshotIncomplete(phase, process.pid, "DUPLICATE_PID_OR_HANDLE")
         try:
             handle = os.pidfd_open(process.pid)
         except OSError as error:

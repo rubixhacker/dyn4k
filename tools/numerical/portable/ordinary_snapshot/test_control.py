@@ -240,6 +240,60 @@ class NativeAttempt:
 
 
 class NativeSnapshotControlTest(unittest.TestCase):
+    def test_duplicate_launch_keeps_original_root_and_closes_its_handle(self):
+        for second_phase in ("stage", "target"):
+            with self.subTest(second_phase=second_phase), tempfile.TemporaryDirectory(
+                    dir=os.environ["TMPDIR"]) as directory:
+                sentinel = subprocess.Popen(["/bin/sleep", "30"])
+                process = subprocess.Popen(["/bin/sleep", "30"],
+                                           start_new_session=True)
+                reads = 0
+                inject_duplicate = False
+                def read_identity(pid):
+                    nonlocal reads
+                    reads += 1
+                    if reads == 2 or inject_duplicate:
+                        raise OSError("injected identity read failure")
+                    return _proc_identity(pid)
+                owned = SnapshotOwnedProcesses(directory, directory, read_identity,
+                                               _pidfd_exited, check_retained)
+                owned.prepare("stage", os.environ.copy())
+                owned.prepare("target", os.environ.copy())
+                handle = None
+                try:
+                    with self.assertRaises(SnapshotIncomplete) as first:
+                        owned.launch("stage", process, Path(directory) / "stage-trace")
+                    self.assertEqual(first.exception.detail["reason"],
+                                     "IDENTITY_READ_FAILED")
+                    original = owned.bound[process.pid]
+                    handle = original["handle"]
+                    inject_duplicate = second_phase == "target"
+                    with self.assertRaises(SnapshotIncomplete) as duplicate:
+                        owned.launch(second_phase, process,
+                                     Path(directory) / "target-trace")
+                    inject_duplicate = False
+                    self.assertEqual(duplicate.exception.detail["reason"],
+                                     "LAUNCH_STATE" if second_phase == "stage" else
+                                     "DUPLICATE_PID_OR_HANDLE")
+                    self.assertIs(owned.bound[process.pid], original)
+                    self.assertEqual(owned.roots, {
+                        "stage": (process.pid, Path(directory) / "stage-trace")})
+                    owned.stop({"stage"})
+                    process.wait(timeout=3)
+                    self.assertTrue(_pidfd_exited(handle))
+                    self.assertIsNone(sentinel.poll())
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=3)
+                    if sentinel.poll() is None:
+                        sentinel.kill()
+                    sentinel.wait(timeout=3)
+                    owned.close()
+                    if handle is not None:
+                        with self.assertRaises(OSError):
+                            os.fstat(handle)
+
     def test_launch_identity_failure_cleans_owned_child_and_preserves_sentinel(self):
         for failed_read in (1, 2):
             with self.subTest(failed_read=failed_read), tempfile.TemporaryDirectory(
