@@ -473,7 +473,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
                  "PYTHONPATH=docs/guide python3 -B -m unittest -v test_checks"),
                 ("name: Install migration image decoder",
-                 "sudo apt-get update && sudo apt-get install --yes imagemagick"),
+                 "sudo apt-get update && sudo apt-get install --yes --no-install-recommends imagemagick"),
                 ("name: Test migration scene validators",
                  "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
                  "python3 -B -m unittest -v tools.migration.test_truck_camera "
@@ -715,7 +715,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "-m unittest -v"),
             ("migration decoder installation removed",
              "      - name: Install migration image decoder\n"
-             "        run: sudo apt-get update && sudo apt-get install --yes imagemagick\n",
+             "        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends imagemagick\n",
              ""),
             ("truck camera migration module omitted",
              "tools.migration.test_truck_camera",
