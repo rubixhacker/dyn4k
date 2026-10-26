@@ -171,6 +171,10 @@ class DiagnosticContractTest(unittest.TestCase):
                   b'SENTINEL=portable-capture-check"]}}\n')
         with self.assertRaises(DiagnosticRejected):
             check_retained(leaked, "report")
+        trace = (b'1.0 write(1, "\\u0044YN4K_CAPTURE_ENV_'
+                 b'SENTINEL=portable-capture-check", 50) = 50\n')
+        with self.assertRaises(DiagnosticRejected):
+            check_retained(trace, "trace")
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
             from ordinary_arithmetic_diagnostic import _write_checked, _read_checked
             path = Path(directory) / "sample.json"

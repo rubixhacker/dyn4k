@@ -95,6 +95,10 @@ def _privacy(raw, binary=False):
         return
     inspected = (b"\n".join(re.findall(rb"[\x20-\x7e]{4,}", raw))
                  if binary else raw)
+    if not binary and b"\\u" in raw:
+        for token in actual_trace.QUOTED_BYTES.finditer(raw):
+            if b"\\u" in token.group():
+                _json_privacy(token.group())
     try:
         if trace_exposes_environment(inspected):
             raise DiagnosticRejected("diagnostic evidence exposed the environment")
