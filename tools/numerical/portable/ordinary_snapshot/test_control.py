@@ -68,10 +68,13 @@ class NativeSnapshotControlTest(unittest.TestCase):
             observed = []
             def open_child():
                 until = time.monotonic() + 3
-                while not pidfile.exists() and time.monotonic() < until:
+                while time.monotonic() < until:
+                    try:
+                        observed.append(os.pidfd_open(int(pidfile.read_text())))
+                        return
+                    except (FileNotFoundError, ValueError, ProcessLookupError):
+                        pass
                     time.sleep(0.001)
-                if pidfile.exists():
-                    observed.append(os.pidfd_open(int(pidfile.read_text())))
             watcher = threading.Thread(target=open_child)
             watcher.start()
             try:
