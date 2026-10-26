@@ -6,7 +6,8 @@ import struct
 import sys
 from pathlib import Path
 
-from truck_timeline import FRAMES as TRUCK_FRAMES, validate as validate_truck_timeline
+from truck_timeline import (FRAMES as TRUCK_FRAMES, MAX_PNG_BYTES, valid_png,
+                            validate as validate_truck_timeline)
 
 
 SCENES = {"Tracking", "Pyramid", "Crank", "Billiards", "Truck"}
@@ -29,10 +30,11 @@ def read_text(path):
 
 def read_png(path):
     try:
-        data = path.read_bytes()
+        with path.open("rb") as image:
+            data = image.read(MAX_PNG_BYTES + 1)
     except OSError:
         return None
-    if len(data) < 24 or data[:16] != b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR":
+    if not valid_png(data):
         return None
     width, height = struct.unpack(">II", data[16:24])
     return {"width": width, "height": height, "sha256": hashlib.sha256(data).hexdigest()}

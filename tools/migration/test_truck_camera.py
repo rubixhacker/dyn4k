@@ -1,14 +1,20 @@
 import hashlib
 import json
+import subprocess
 import struct
+import sys
 import tempfile
 import time
 import unittest
 import zlib
 from pathlib import Path
+from unittest.mock import patch
 
 from tools.migration.truck_camera import TruckRun
 from tools.migration.truck_timeline import FOLLOW_PIXELS, FRAMES, validate
+
+sys.path.insert(0, str(Path(__file__).parent))
+from validate_plain import validate as validate_plain
 
 
 def _png_chunk(kind, data):
@@ -77,6 +83,29 @@ class TruckTimelineTest(unittest.TestCase):
         (directory / "truck-timeline.jsonl").write_text(
             "".join(json.dumps(row) + "\n" for row in rows))
 
+    def make_plain_context(self, directory, scene):
+        (directory / "launch.txt").write_text(
+            "main=org.dyn4j.samples.%s\nclasspath=/classes:/lib/dyn4j.jar\n" % scene)
+        (directory / "application.log").write_text("Controls:\n")
+        markers = {
+            "Truck": "keydown Right\nkey s\n",
+            "Pyramid": "drag left mouse\nkey r\n",
+        }
+        (directory / "inputs.log").write_text("scene=%s\n%s" % (scene, markers[scene]))
+        (directory / "termination.json").write_text(json.dumps({
+            "close_requested": True, "exited_after_close": True,
+            "forced_termination": False, "exit_code": 0,
+        }))
+
+    def make_plain_truck(self, directory):
+        rows = self.make_evidence(directory)
+        self.write_rows(directory, rows)
+        self.make_plain_context(directory, "Truck")
+        (directory / "late.png").write_bytes(valid_png())
+
+    def plain_frame_status(self, result, name):
+        return next(item["status"] for item in result["checks"] if item["id"] == name)
+
     def test_complete_timeline_reports_integrity_without_visual_claim(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
@@ -129,6 +158,26 @@ class TruckTimelineTest(unittest.TestCase):
             self.write_rows(directory, rows)
             self.assertFalse(validate(directory)[0], "release associated with another gesture")
 
+    def test_pointer_release_precedes_next_position_across_gesture_boundaries(self):
+        boundaries = (
+            ("setup-up", "follow-01-position", "setup to drive"),
+            ("follow-01-up", "follow-02-down", "neighboring gestures"),
+            ("follow-13-up", "brake-follow-1-position", "drive to brake"),
+            ("brake-follow-1-up", "brake-follow-2-down", "brake gestures"),
+        )
+        for release_name, next_name, label in boundaries:
+            with self.subTest(boundary=label), tempfile.TemporaryDirectory() as temp:
+                directory = Path(temp)
+                rows = self.make_evidence(directory)
+                release = next(row for row in rows if row["kind"] == "pointer" and row["name"] == release_name)
+                next_event = next(row for row in rows if row["kind"] == "pointer" and row["name"] == next_name)
+                release["start_ns"] = next_event["start_ns"]
+                release["end_ns"] = release["start_ns"] + 1
+                self.write_rows(directory, rows)
+                passed, evidence = validate(directory)
+                self.assertFalse(passed, label)
+                self.assertEqual("camera pointer gestures overlap", evidence, label)
+
     def test_pointer_gesture_rejects_missing_or_duplicate_intervals(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
@@ -155,6 +204,77 @@ class TruckTimelineTest(unittest.TestCase):
             pointer_up["end_ns"] = pointer_up["start_ns"] + 1
             self.write_rows(directory, rows)
             self.assertTrue(validate(directory)[0])
+
+    def test_plain_admission_decodes_late_and_interaction_frames(self):
+        valid = valid_png()
+        corrupt = bytearray(valid)
+        corrupt[41] ^= 1
+        idat_crc = 41 + int.from_bytes(valid[33:37], "big")
+        corrupt[idat_crc:idat_crc + 4] = zlib.crc32(corrupt[37:idat_crc]).to_bytes(4, "big")
+        malformed = {
+            "header only": valid[:24],
+            "corrupt compressed pixels": bytes(corrupt),
+            "truncated": valid[:-12],
+            "oversized": valid + b"x" * (16 * 1024 * 1024 + 1 - len(valid)),
+        }
+
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            self.make_plain_truck(directory)
+            accepted = validate_plain("Truck", directory)
+            self.assertEqual((19, 19, 0), (accepted["expected"], accepted["passed"], accepted["failed"]))
+            self.assertEqual("UNREVIEWED", accepted["visual_review_status"])
+            self.assertEqual({"width": 1024, "height": 768,
+                              "sha256": hashlib.sha256(valid).hexdigest()}, accepted["frames"]["late"])
+
+        for label, data in malformed.items():
+            with self.subTest(frame="late", case=label), tempfile.TemporaryDirectory() as temp:
+                directory = Path(temp)
+                self.make_plain_truck(directory)
+                (directory / "late.png").write_bytes(data)
+                result = validate_plain("Truck", directory)
+                self.assertEqual(19, result["expected"])
+                self.assertEqual("failed", self.plain_frame_status(result, "late_frame"), label)
+                self.assertEqual(1, result["failed"], label)
+                self.assertEqual("passed", self.plain_frame_status(result, "truck_timeline"), label)
+
+        for label, failure in (("missing decoder", FileNotFoundError("identify")),
+                               ("decoder timeout", subprocess.TimeoutExpired("identify", 5))):
+            with self.subTest(frame="late", case=label), tempfile.TemporaryDirectory() as temp:
+                directory = Path(temp)
+                self.make_plain_truck(directory)
+                with patch("truck_timeline.subprocess.run", side_effect=failure):
+                    result = validate_plain("Truck", directory)
+                self.assertEqual(19, result["expected"])
+                self.assertEqual("failed", self.plain_frame_status(result, "late_frame"), label)
+
+        for label, data in (("valid", valid), *malformed.items()):
+            with self.subTest(frame="interaction", case=label), tempfile.TemporaryDirectory() as temp:
+                directory = Path(temp)
+                self.make_plain_context(directory, "Pyramid")
+                for name in ("initial", "after-input", "late", "interaction"):
+                    (directory / (name + ".png")).write_bytes(valid)
+                (directory / "interaction.png").write_bytes(data)
+                result = validate_plain("Pyramid", directory)
+                self.assertEqual(10, result["expected"])
+                self.assertEqual("passed" if label == "valid" else "failed",
+                                 self.plain_frame_status(result, "interaction_frame"), label)
+                if label != "valid":
+                    self.assertEqual(1, result["failed"], label)
+                if label == "valid":
+                    self.assertEqual(hashlib.sha256(valid).hexdigest(), result["frames"]["interaction"]["sha256"])
+
+        for label, failure in (("missing decoder", FileNotFoundError("identify")),
+                               ("decoder timeout", subprocess.TimeoutExpired("identify", 5))):
+            with self.subTest(frame="interaction", case=label), tempfile.TemporaryDirectory() as temp:
+                directory = Path(temp)
+                self.make_plain_context(directory, "Pyramid")
+                for name in ("initial", "after-input", "late", "interaction"):
+                    (directory / (name + ".png")).write_bytes(valid)
+                with patch("truck_timeline.subprocess.run", side_effect=failure):
+                    result = validate_plain("Pyramid", directory)
+                self.assertEqual(10, result["expected"])
+                self.assertEqual("failed", self.plain_frame_status(result, "interaction_frame"), label)
 
     def test_png_requires_complete_valid_pixels_crc_and_bounded_size(self):
         with tempfile.TemporaryDirectory() as temp:

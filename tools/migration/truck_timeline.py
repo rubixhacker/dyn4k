@@ -13,7 +13,7 @@ PNG_HEIGHT = 768
 MAX_PNG_BYTES = 16 * 1024 * 1024
 
 
-def _valid_png(data):
+def valid_png(data):
     if (len(data) > MAX_PNG_BYTES or len(data) < 24 or
             not data.startswith(PNG_SIGNATURE) or
             int.from_bytes(data[16:20], "big") != PNG_WIDTH or
@@ -92,6 +92,9 @@ def validate(directory):
                 <= up["start_ns"] <= up["end_ns"])
            for position, down, move, up in pointer_events):
         return False, "camera pointer gesture out of order"
+    if any(previous[3]["end_ns"] > following[0]["start_ns"]
+           for previous, following in zip(pointer_events, pointer_events[1:])):
+        return False, "camera pointer gestures overlap"
     if not (setup["end_ns"] < frames[0]["start_ns"] < right_down["start_ns"]
             <= right_down["end_ns"] < frames[1]["start_ns"]):
         return False, "setup or drive start out of order"
@@ -148,7 +151,7 @@ def validate(directory):
         except OSError:
             return False, "missing frame " + name
         if (frame.get("file") != name or digest.get("file") != name or
-                not _valid_png(data) or
+                not valid_png(data) or
                 digest.get("sha256") != hashlib.sha256(data).hexdigest()):
             return False, "invalid or changed frame " + name
         if frame["end_ns"] > digest["start_ns"]:
