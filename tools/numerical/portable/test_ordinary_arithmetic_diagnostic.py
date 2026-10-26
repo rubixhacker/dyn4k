@@ -1,7 +1,9 @@
 import io
+import copy
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 from contextlib import redirect_stdout
@@ -17,7 +19,9 @@ from ordinary_arithmetic_diagnostic import (
     main, verify_archive, _supervisor_phases, _replay_failure,
     _last_complete_observation, _resource_ownership, _zip_checked,
     _verify_worker_raw_subset,
-    _owned_sample, _resource_evidence,
+    _owned_sample, _resource_evidence, _executed_role, _observer_command,
+    _sample_role, _resource_execs,
+    JDK21, ROOT,
 )
 from actual_arithmetic import CaptureRejected, verify_capture_receipt
 import actual_arithmetic
@@ -54,12 +58,21 @@ def resource_replay_fixture():
         return stream.getvalue()
 
     clock = 1700000000
-    shell = ["sh", "gradlew"]
-    java = ["java", "-cp", "x", "GradleDaemon"]
+    wrapper = str(ROOT / "gradlew")
+    jdk = str(JDK21 / "bin/java")
+    shell = ["sh", wrapper]
+    java = [jdk, "-cp", str(Path.home() /
+            ".gradle/wrapper/dists/gradle-9.5.0-bin/test/gradle-9.5.0/lib/gradle-daemon-main-9.5.0.jar"),
+            "org.gradle.launcher.daemon.bootstrap.GradleDaemon", "9.5.0"]
     tracer_child = ["sleep", "1"]
-    worker = ["java", "GradleWorkerMain"]
-    helper = ["java", "OrdinaryArithmeticProbe"]
-    observer = ["python", "ordinary-diagnostic-observer"]
+    worker = [jdk, "@" + str(Path.home() / ".gradle/.tmp/gradle-worker-classpath123txt"),
+              "worker.org.gradle.process.internal.worker.GradleWorkerMain",
+              "'Gradle Test Executor 1'"]
+    helper = [jdk, "--add-modules", "jdk.jdi", "-cp", "/tmp/helper-classes",
+              "OrdinaryArithmeticProbe", "attach", "/tmp/helper-output",
+              "127.0.0.1", "12345", "600"]
+    observer = list(_observer_command(("/tmp/xml", "/tmp/class-log",
+                                       "/tmp/arguments", "/tmp/lifecycle")))
     target_root = ["strace", "-ff"]
     helper_root = ["strace", "helper"]
     observer_root = ["strace", "observer"]
@@ -67,26 +80,26 @@ def resource_replay_fixture():
                 helper_root, observer_root)
     files = {
         "stage-process-traces.zip": archive({
-            11: (f'{clock - 2}.100000 execve("/bin/sh", ["sh", "gradlew"], 0) = 0\n'
-                 f'{clock - 2}.300000 execve("/usr/bin/java", '
-                 '["java", "-cp", "x", "GradleDaemon"], 0) = 0\n'
+            11: (f'{clock - 2}.100000 execve("/bin/sh", {json.dumps(shell)}, 0) = 0\n'
+                 f'{clock - 2}.300000 execve({json.dumps(jdk)}, '
+                 f'{json.dumps(java)}, 0) = 0\n'
                  f'{clock - 2}.800000 +++ exited with 0 +++\n')}),
         "all-process-traces.zip": archive({
-            101: (f'{clock}.100000 execve("/bin/sh", ["sh", "gradlew"], 0) = 0\n'
-                  f'{clock}.300000 execve("/usr/bin/java", '
-                  '["java", "-cp", "x", "GradleDaemon"], 0) = 0\n'
+            101: (f'{clock}.100000 execve("/bin/sh", {json.dumps(shell)}, 0) = 0\n'
+                  f'{clock}.300000 execve({json.dumps(jdk)}, '
+                  f'{json.dumps(java)}, 0) = 0\n'
                   f'{clock}.500000 execve("/usr/bin/sleep", ["sleep", "1"], 0) = 0\n'
                   f'{clock}.800000 +++ exited with 0 +++\n'),
-            102: (f'{clock}.120000 execve("/usr/bin/java", '
-                  '["java", "GradleWorkerMain"], 0) = 0\n'
+            102: (f'{clock}.120000 execve({json.dumps(jdk)}, '
+                  f'{json.dumps(worker)}, 0) = 0\n'
                   f'{clock}.800000 +++ exited with 0 +++\n')}),
         "helper-traces.zip": archive({
-            201: (f'{clock}.150000 execve("/usr/bin/java", '
-                  '["java", "OrdinaryArithmeticProbe"], 0) = 0\n'
+            201: (f'{clock}.150000 execve({json.dumps(jdk)}, '
+                  f'{json.dumps(helper)}, 0) = 0\n'
                   f'{clock}.800000 +++ exited with 0 +++\n')}),
         "observer-traces.zip": archive({
-            301: (f'{clock}.900000 execve("/usr/bin/python", '
-                  '["python", "ordinary-diagnostic-observer"], 0) = 0\n'
+            301: (f'{clock}.900000 execve({json.dumps(sys.executable)}, '
+                  f'{json.dumps(observer)}, 0) = 0\n'
                   f'{clock + 1}.200000 +++ exited with 0 +++\n')})}
 
     def root(pid):
@@ -130,13 +143,54 @@ def resource_replay_fixture():
                   worker_row, helper_leader, helper_row]},
         {"time_ns": 4_400_000_000, "wall_start_ns": base + 590_000_000,
          "wall_end_ns": base + 610_000_000, "phase": "target",
-         "pids": [leader, {**child, "roles": ["tracer"],
+         "pids": [leader, {**child, "roles": ["other"],
                   "command_sha256": command_hash(tracer_child)}, worker_row,
                   helper_leader, helper_row]},
         {"time_ns": 7_000_000_000, "wall_start_ns": base + 990_000_000,
          "wall_end_ns": base + 1_010_000_000, "phase": "observer",
          "pids": [observer_leader, observer_row]}]
     return samples, metadata, files, {"cpu_set": [12, 13]}
+
+
+def changed_resource_image(samples, metadata, files, pid, path, argv):
+    samples = copy.deepcopy(samples)
+    metadata = copy.deepcopy(metadata)
+    files = dict(files)
+    phase = ("helper" if pid == 201 else "observer" if pid == 301 else "target")
+    archive_name = {"target": "all-process-traces.zip",
+                    "helper": "helper-traces.zip",
+                    "observer": "observer-traces.zip"}[phase]
+    index = {101: 1, 201: 0, 301: 3}[pid]
+    old_digest = samples[index]["pids"][{101: 1, 201: 4, 301: 1}[pid]]["command_sha256"]
+    old_argv = metadata["resource_commands"].pop(old_digest)
+    new_digest = hashlib.sha256(("\0".join(argv) + "\0").encode()).hexdigest()
+    metadata["resource_commands"][new_digest] = argv
+    for sample in samples:
+        for row in sample["pids"]:
+            if row["pid"] == pid and row["command_sha256"] == old_digest:
+                row["command_sha256"] = new_digest
+    source = zipfile.ZipFile(io.BytesIO(files[archive_name]))
+    output = io.BytesIO()
+    changed = 0
+    with source, zipfile.ZipFile(output, "w") as writer:
+        for name in source.namelist():
+            raw = source.read(name)
+            if name == f"trace.{pid}":
+                lines = raw.decode().splitlines(keepends=True)
+                for line_index, line in enumerate(lines):
+                    if " execve(" not in line or not line.endswith(" = 0\n"):
+                        continue
+                    if json.dumps(old_argv) not in line:
+                        continue
+                    prefix = line[:line.index("execve(")]
+                    lines[line_index] = (prefix + "execve(" + json.dumps(path) +
+                                         ", " + json.dumps(argv) + ", 0) = 0\n")
+                    changed += 1
+                raw = "".join(lines).encode()
+            writer.writestr(name, raw)
+    assert changed == 1
+    files[archive_name] = output.getvalue()
+    return samples, metadata, files
 
 
 class DiagnosticContractTest(unittest.TestCase):
@@ -401,8 +455,10 @@ class DiagnosticContractTest(unittest.TestCase):
         _resource_ownership(samples, metadata, files, allocation)
         observed = _resource_evidence(samples, metadata, files, allocation)
         self.assertEqual(observed["observed_role_peak_kib"]["gradle"], 100)
+        self.assertEqual(observed["observed_role_peak_kib"]["tracer"], 200)
+        self.assertEqual(observed["observed_role_peak_kib"]["other"], 100)
         self.assertEqual(observed["sampled_aggregate_peak_kib"], 500)
-        self.assertEqual(samples[2]["pids"][1]["roles"], ["tracer"])
+        self.assertEqual(samples[2]["pids"][1]["roles"], ["other"])
         for change in ({"pid": 999999999}, {"start_ticks": 999},
                        {"parent_pid": 200}, {"group_pid": 200},
                        {"session_pid": 200}, {"affinity": [11]},
@@ -444,13 +500,111 @@ class DiagnosticContractTest(unittest.TestCase):
             changed[1]["time_ns"] = 7_600_000_000
             _resource_ownership(changed, metadata, files, allocation)
 
+    def test_roles_require_executed_path_and_entry_point(self):
+        samples, metadata, files, allocation = resource_replay_fixture()
+        jdk = str(JDK21 / "bin/java")
+        daemon = metadata["resource_commands"][samples[1]["pids"][1]["command_sha256"]]
+        helper = metadata["resource_commands"][samples[0]["pids"][4]["command_sha256"]]
+        observer = metadata["resource_commands"][samples[3]["pids"][1]["command_sha256"]]
+        _, executions = _resource_execs(files)
+        self.assertEqual(executions["target"][101][1][1], jdk)
+        self.assertEqual(_executed_role(jdk, daemon), "gradle")
+        self.assertEqual(_executed_role(jdk, helper), "helper")
+        self.assertEqual(_executed_role(sys.executable, observer), "observer")
+        self.assertEqual(_executed_role(str(ROOT / "gradlew"),
+                                         [str(ROOT / "gradlew"), "jvmTest"]), "gradle")
+        self.assertEqual(_executed_role(jdk, [jdk, "-jar",
+            str(ROOT / "gradle/wrapper/gradle-wrapper.jar"), "jvmTest"]), "gradle")
+        self.assertEqual(_executed_role(jdk, [jdk,
+            "@" + str(Path.home() / ".gradle/.tmp/gradle-worker-classpath123txt"),
+            "worker.org.gradle.process.internal.worker.GradleWorkerMain",
+            "'Gradle Test Executor 1'"]), "worker")
+        bad_gradle = (
+            ("/usr/bin/python3", daemon),
+            ("/usr/bin/python3", [jdk, *daemon[1:]]),
+            ("/tmp/gradlew-helper", [str(ROOT / "gradlew")]),
+            (jdk, [jdk, "-Dtag=GradleDaemon", "NotGradle", "9.5.0"]),
+            (jdk, [jdk, "NotGradle", "org.gradle.launcher.daemon.bootstrap.GradleDaemon"]),
+            (jdk, [jdk, "-cp", "/tmp/GradleDaemon/lib.jar", "NotGradle"]),
+            (jdk, [jdk, "com.example.GradleDaemonProbe", "9.5.0"]),
+            (jdk, [jdk, "org.gradle.launcher.daemon.bootstrap.GradleDaemonProbe", "9.5.0"]),
+        )
+        for path, argv in bad_gradle:
+            with self.subTest(path=path, argv=argv):
+                self.assertIsNone(_executed_role(path, argv))
+        self.assertIsNone(_executed_role(jdk, [*helper[:5],
+            "com.example.NotOrdinaryArithmeticProbe", *helper[6:]]))
+        self.assertIsNone(_executed_role(sys.executable, [*observer[:4],
+            observer[4].replace("ordinary-diagnostic-observer",
+                                "ordinary-diagnostic-observer-extra"), *observer[5:]]))
+
+    def test_replay_rejects_genuine_execs_with_spoofed_roles(self):
+        samples, metadata, files, allocation = resource_replay_fixture()
+        jdk = str(JDK21 / "bin/java")
+        daemon = metadata["resource_commands"][samples[1]["pids"][1]["command_sha256"]]
+        helper = metadata["resource_commands"][samples[0]["pids"][4]["command_sha256"]]
+        observer = metadata["resource_commands"][samples[3]["pids"][1]["command_sha256"]]
+        controls = (
+            (101, "/usr/bin/python3", daemon),
+            (101, "/usr/bin/python3", [jdk, *daemon[1:]]),
+            (101, "/tmp/gradlew-helper", [str(ROOT / "gradlew")]),
+            (101, jdk, [jdk, "-Dtag=GradleDaemon", "NotGradle", "9.5.0"]),
+            (101, jdk, [jdk, "NotGradle", daemon[-2]]),
+            (101, jdk, [jdk, "com.example.GradleDaemonProbe", "9.5.0"]),
+            (201, jdk, [*helper[:5], "com.example.NotOrdinaryArithmeticProbe",
+                        *helper[6:]]),
+            (301, sys.executable, [*observer[:4], observer[4].replace(
+                "ordinary-diagnostic-observer", "ordinary-diagnostic-observer-extra"),
+                *observer[5:]]),
+        )
+        for pid, path, argv in controls:
+            with self.subTest(pid=pid, path=path, argv=argv):
+                changed, changed_meta, changed_files = changed_resource_image(
+                    samples, metadata, files, pid, path, argv)
+                with self.assertRaisesRegex(
+                        DiagnosticRejected, "role differs|observer resource identity"):
+                    _resource_ownership(changed, changed_meta, changed_files, allocation)
+        unrelated, unrelated_meta, unrelated_files = changed_resource_image(
+            samples, metadata, files, 101, "/usr/bin/python3", [jdk, *daemon[1:]])
+        unrelated[1]["pids"][1]["roles"] = ["other"]
+        retained = _resource_evidence(unrelated, unrelated_meta, unrelated_files,
+                                      allocation)
+        self.assertEqual(retained["sampled_aggregate_peak_kib"], 500)
+        self.assertEqual(retained["observed_role_peak_kib"]["other"], 100)
+        changed = copy.deepcopy(samples)
+        changed[1]["pids"][1]["roles"] = ["tracer"]
+        with self.assertRaisesRegex(DiagnosticRejected, "role differs"):
+            _resource_ownership(changed, metadata, files, allocation)
+        _resource_ownership(samples, metadata, files, allocation)
+        self.assertEqual([sample["pids"][1]["roles"] for sample in samples[:3]],
+                         [["gradle"], ["gradle"], ["other"]])
+
+    def test_live_sample_uses_executable_instead_of_spoofed_argv_zero(self):
+        jdk = str(JDK21 / "bin/java")
+        script = ("import subprocess,sys; p=subprocess.Popen("
+                  "[sys.argv[1], '5'], executable='/usr/bin/sleep'); "
+                  "print(p.pid, flush=True); p.wait()")
+        leader = subprocess.Popen([sys.executable, "-B", "-c", script, jdk],
+                                  stdout=subprocess.PIPE, start_new_session=True)
+        try:
+            child_pid = int(leader.stdout.readline())
+            sample = _owned_sample({"gradle": leader.pid}, "stage")
+            row = next(item for item in sample["pids"] if item["pid"] == child_pid)
+            self.assertEqual(row["roles"], ["other"])
+            self.assertEqual(row["command_sha256"], hashlib.sha256(
+                (jdk + "\0" + "5\0").encode()).hexdigest())
+        finally:
+            os.killpg(leader.pid, signal.SIGTERM)
+            leader.wait(timeout=5)
+            leader.stdout.close()
+
     def test_stage_exec_requires_its_retained_process_trace(self):
         samples, metadata, files, allocation = resource_replay_fixture()
         command_hashes = metadata["resource_commands"]
         shell = next(digest for digest, argv in command_hashes.items()
-                     if argv == ["sh", "gradlew"])
+                     if argv[:1] == ["sh"])
         java = next(digest for digest, argv in command_hashes.items()
-                    if argv == ["java", "-cp", "x", "GradleDaemon"])
+                    if "org.gradle.launcher.daemon.bootstrap.GradleDaemon" in argv)
         stage_command = ["strace", "stage"]
         stage_hash = hashlib.sha256(("\0".join(stage_command) + "\0").encode()).hexdigest()
         metadata = {**metadata, "stage_trace_command": stage_command,

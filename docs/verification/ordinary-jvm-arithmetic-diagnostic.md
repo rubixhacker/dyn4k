@@ -48,12 +48,20 @@ raw trace subset with the full process trace. Each sampled PID records its
 parent, process group, session, start tick, command hash, and observed CPU
 affinity. Replay checks those records against launch groups, trace members,
 the allocated CPU set, and the process phase.
-The capture retains each distinct sampled command once. Replay rebuilds its
-hash, checks the role against that command and PID, and binds changes to
-successful executions in the retained process trace. Each sample also records
-the wall clock interval used to compare it with trace timestamps. A command
-change without that evidence fails replay. A process-only trace also records
-the source staging phase, where the Gradle wrapper can exec Java.
+The capture retains each distinct sampled command once. It reads the running
+executable from `/proc`. Replay rebuilds the command hash and matches it to a
+successful raw exec path and argument list. The role check uses that path,
+the executable's entry point, the selected PID, and its process ancestry.
+It also checks the sample's wall clock interval against trace timestamps.
+A command or executable change without raw exec proof fails replay. A
+process-only trace records the staging phase, where the Gradle wrapper can
+exec Java.
+
+`tracer` measures the supervisor's traced process roots. `other` measures
+owned processes whose executable and entry point do not prove a Gradle,
+worker, helper, or observer role. These processes remain in aggregate RSS.
+An `other` measurement does not establish a specific process role. Missing
+raw exec, identity, or RSS evidence cannot support a positive diagnostic.
 
 It recomputes `diagnostic.json` exactly. A changed report or an extra
 `receipt.json` fails archive admission.

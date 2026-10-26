@@ -34,7 +34,7 @@ from capture_actual import (
 )
 from numeric_producer import captured_file_identity
 from numeric_producer_trace import (
-    _events, quoted, select_worker_exec, successful_execve,
+    _events, java_entry_point, quoted, select_worker_exec, successful_execve,
     verify_stable_input,
 )
 
@@ -45,6 +45,7 @@ CASE = "long-free-60"
 CAP = 64
 RSS_CEILING_KIB = 10 * 1024 * 1024
 REQUIRED_ROLES = frozenset({"gradle", "worker", "helper", "tracer", "observer"})
+ALLOWED_ROLES = REQUIRED_ROLES | {"other"}
 CALLER = "org.dyn4j.dynamics.AbstractPhysicsBody.integratePosition$lambda$0"
 HEX64 = re.compile(r"[0-9a-f]{16}\Z")
 LIFECYCLE = ("attach", "armed", "class-prepared", "first-entry", "cap-entry-reached",
@@ -341,7 +342,7 @@ def verify_resource_samples(samples, required_roles=REQUIRED_ROLES):
                      type(row["command_sha256"]) is str and
                      re.fullmatch(r"[0-9a-f]{64}", row["command_sha256"]) is not None and
                      type(row["roles"]) is list and row["roles"] and
-                     all(role in required_roles for role in row["roles"]) and
+                     all(role in required_roles | {"other"} for role in row["roles"]) and
                      (row["rss_kib"] is None or
                       type(row["rss_kib"]) is int and row["rss_kib"] >= 0),
                      "diagnostic owned PID sample differs")
@@ -722,19 +723,66 @@ def _command_argv(command):
         raise DiagnosticRejected("UNAVAILABLE") from error
 
 
-def _sample_role(pid, group, groups, worker_pid, command):
+def _executed_role(path, argv):
+    if not path or not argv:
+        return None
+    wrapper = str(ROOT / "gradlew")
+    java = str(JDK21 / "bin/java")
+    gradle_distribution = Path.home() / ".gradle/wrapper/dists/gradle-9.5.0-bin"
+    if path == wrapper and argv[0] == wrapper:
+        return "gradle"
+    if (os.path.realpath(path) == os.path.realpath("/bin/sh") and
+            argv[0] in ("sh", "/bin/sh") and len(argv) > 1 and
+            argv[1] == wrapper):
+        return "gradle"
+    if os.path.realpath(path) == os.path.realpath(java) and argv[0] == java:
+        entry = java_entry_point(argv)
+        if entry is None:
+            return None
+        kind, main, index = entry
+        if kind == "jar" and main == str(ROOT / "gradle/wrapper/gradle-wrapper.jar"):
+            return "gradle"
+        if kind != "class":
+            return None
+        if (main == "org.gradle.launcher.daemon.bootstrap.GradleDaemon" and
+                index == len(argv) - 2 and argv[-1] == "9.5.0" and
+                any(argv[position] == "-cp" and position + 1 < index and
+                    Path(argv[position + 1]).is_relative_to(gradle_distribution) and
+                    Path(argv[position + 1]).relative_to(
+                        gradle_distribution).parts[1:] ==
+                    ("gradle-9.5.0", "lib", "gradle-daemon-main-9.5.0.jar")
+                    for position in range(1, index))):
+            return "gradle"
+        if (main == "worker.org.gradle.process.internal.worker.GradleWorkerMain" and
+                index == len(argv) - 2 and
+                re.fullmatch(r"'Gradle Test Executor [1-9][0-9]*'", argv[-1]) and
+                any(re.fullmatch(r"@" + re.escape(str(Path.home() / ".gradle/.tmp")) +
+                                 r"/gradle-worker-classpath[0-9]+txt", arg)
+                    for arg in argv[1:index])):
+            return "worker"
+        if (main == "OrdinaryArithmeticProbe" and index == len(argv) - 6 and
+                argv[index + 1] == "attach" and argv[index + 3] == "127.0.0.1" and
+                argv[index + 4].isdecimal() and argv[index + 5] == "600" and
+                "-cp" in argv[:index]):
+            return "helper"
+    if (os.path.realpath(path) == os.path.realpath(sys.executable) and
+            argv[0] == sys.executable and len(argv) == 9 and
+            tuple(argv) == _observer_command(argv[5:])):
+        return "observer"
+    return None
+
+
+def _sample_role(pid, group, groups, worker_pid, command, path):
     if pid == group:
         return "tracer"
+    role = _executed_role(path, _command_argv(command))
     if group == groups.get("helper"):
-        return "helper" if b"OrdinaryArithmeticProbe" in command else "tracer"
+        return "helper" if role == "helper" else "other"
     if group == groups.get("observer"):
-        return "observer" if b"ordinary-diagnostic-observer" in command else "tracer"
-    if pid == worker_pid:
-        return "worker"
-    if any(token in command for token in
-           (b"GradleDaemon", b"gradlew", b"GradleWorkerMain")):
-        return "gradle"
-    return "tracer"
+        return "observer" if role == "observer" else "other"
+    if role == "worker" and worker_pid is not None and pid != worker_pid:
+        return "other"
+    return role if role in ("gradle", "worker") else "other"
 
 
 def _owned_sample(groups, phase, worker_pid=None, commands=None):
@@ -755,11 +803,12 @@ def _owned_sample(groups, phase, worker_pid=None, commands=None):
         try:
             identity = _proc_identity(pid)
             command = (path / "cmdline").read_bytes()
+            executable = os.readlink(path / "exe")
             status = (path / "status").read_text()
         except (OSError, ValueError, IndexError) as error:
             raise DiagnosticRejected("UNAVAILABLE") from error
         match = re.search(r"^VmRSS:\s+([0-9]+) kB$", status, re.M)
-        role = _sample_role(pid, group, groups, worker_pid, command)
+        role = _sample_role(pid, group, groups, worker_pid, command, executable)
         digest = hashlib.sha256(command).hexdigest()
         if commands is not None:
             argv = _command_argv(command)
@@ -927,8 +976,10 @@ def _worker_descendants(raw_traces, worker_pid):
 def _helper_pid(raw_traces):
     selected = []
     for pid, raw in raw_traces.items():
-        if any(" execve(" in line and "OrdinaryArithmeticProbe" in line and
-               line.endswith(" = 0") for line in raw.decode("utf-8").splitlines()):
+        if any((parsed := successful_execve(line.split(" ", 1)[1])) is not None and
+               _executed_role(parsed[0], parsed[1]) == "helper"
+               for line in raw.decode("utf-8").splitlines()
+               if " execve(" in line and line.endswith(" = 0")):
             selected.append(int(pid))
     _require(len(selected) == 1, "diagnostic selected helper is ambiguous")
     return selected[0]
@@ -1602,6 +1653,7 @@ def _resource_execs(files):
                      "diagnostic sampled command execution is unproved")
             phase_execs.setdefault(int(tid), []).append(
                 (int(stamp * 1_000_000_000),
+                 parsed[0],
                  hashlib.sha256(_command_bytes(list(parsed[1]))).hexdigest()))
         executions[phase] = phase_execs
     return trace_sets, executions
@@ -1640,8 +1692,10 @@ def _resource_ownership(samples, metadata, files, allocation):
              "diagnostic selected resource trace differs")
     observer_traces, _ = _raw_events(files["observer-traces.zip"])
     observer_processes = [int(pid) for pid, raw in observer_traces.items()
-        if any(" execve(" in line and "ordinary-diagnostic-observer" in line and
-               line.endswith(" = 0") for line in raw.decode("utf-8").splitlines())]
+        if any((parsed := successful_execve(line.split(" ", 1)[1])) is not None and
+               _executed_role(parsed[0], parsed[1]) == "observer"
+               for line in raw.decode("utf-8").splitlines()
+               if " execve(" in line and line.endswith(" = 0"))]
     _require(len(observer_processes) == 1,
              "diagnostic selected observer resource identity differs")
     seen = {}
@@ -1655,6 +1709,7 @@ def _resource_ownership(samples, metadata, files, allocation):
         _require(intervals[phase][0] <= sample["time_ns"] <= intervals[phase][1],
                  "diagnostic resource sample is outside its process lifetime")
         members = {row["pid"]: row for row in sample["pids"]}
+        current_images = {}
         for row in sample["pids"]:
             pid = row["pid"]
             group = row["group_pid"]
@@ -1693,33 +1748,48 @@ def _resource_ownership(samples, metadata, files, allocation):
                 _require(digest == hashlib.sha256(
                     _command_bytes(expected)).hexdigest(),
                     "diagnostic sampled tracer command differs")
+                image_path = None
             else:
                 images = executions[owner].get(pid, [])
                 inherited = parent["command_sha256"] if parent else None
                 candidates = []
                 if not images or images[0][0] >= sample["wall_start_ns"]:
-                    candidates.append(inherited)
-                for index, (at, image_digest) in enumerate(images):
+                    inherited_path = current_images.get(row["parent_pid"])
+                    if inherited_path is None and row["parent_pid"] in seen:
+                        inherited_path = seen[row["parent_pid"]][3]
+                    candidates.append((inherited_path, inherited))
+                for index, (at, path, image_digest) in enumerate(images):
                     until = (images[index + 1][0] if index + 1 < len(images)
                              else None)
                     if at <= sample["wall_end_ns"] and (
                             until is None or until >= sample["wall_start_ns"]):
-                        candidates.append(image_digest)
-                _require(digest in candidates,
+                        candidates.append((path, image_digest))
+                paths = {path for path, image_digest in candidates
+                         if image_digest == digest}
+                _require(len(paths) == 1,
                          "diagnostic sampled command lacks raw execution proof")
+                image_path = paths.pop()
             if prior is not None and digest != prior[1]:
                 _require(any(
                     prior[2] <= at <= sample["wall_end_ns"] and
                     image_digest == digest
-                    for at, image_digest in executions[owner].get(pid, [])),
+                    for at, _, image_digest in executions[owner].get(pid, [])),
                     "diagnostic sampled command transition is unproved")
-            seen[pid] = (identity, digest, sample["wall_start_ns"])
+            if prior is not None and image_path != prior[3]:
+                _require(any(
+                    prior[2] <= at <= sample["wall_end_ns"] and
+                    path == image_path and image_digest == digest
+                    for at, path, image_digest in executions[owner].get(pid, [])),
+                    "diagnostic sampled executable transition is unproved")
+            current_images[pid] = image_path
+            seen[pid] = (identity, digest, sample["wall_start_ns"], image_path)
             roles = set(row["roles"])
             groups = {"helper": roots["helper"]["pid"],
                       "observer": roots["observer"]["pid"]}
             expected_role = _sample_role(pid, group, groups,
                                          metadata["worker_pid"],
-                                         _command_bytes(commands[digest]))
+                                         _command_bytes(commands[digest]),
+                                         image_path)
             _require(len(roles) == 1 and
                      roles == {expected_role} and
                      (owner == "target" or "worker" not in roles) and
@@ -1737,7 +1807,7 @@ def _resource_evidence(samples, metadata, files, allocation):
     _resource_ownership(samples, metadata, files, allocation)
     if result["status"] != "OBSERVED_UNDER_CEILING":
         raise DiagnosticRejected(result["status"])
-    peaks = {role: None for role in REQUIRED_ROLES}
+    peaks = {role: None for role in ALLOWED_ROLES}
     pid_peaks = {}
     for sample in result["samples"]:
         for row in sample["pids"]:
@@ -1747,15 +1817,16 @@ def _resource_evidence(samples, metadata, files, allocation):
                 pid_peaks[key] = {
                     "rss_kib": max(previous["rss_kib"], row["rss_kib"]),
                     "roles": sorted(set(previous["roles"]) | set(row["roles"]))}
-        for role in REQUIRED_ROLES:
+        for role in ALLOWED_ROLES:
             members = [row for row in sample["pids"] if role in row["roles"]]
             if members and all(row["rss_kib"] is not None for row in members):
                 current = sum(row["rss_kib"] for row in members)
                 peaks[role] = max(peaks[role] or 0, current)
-    _require(all(value is not None for value in peaks.values()),
+    _require(all(peaks[role] is not None for role in REQUIRED_ROLES),
              "diagnostic role RSS measurement is unavailable")
     return {"sampled_aggregate_peak_kib": result["peak_aggregate_kib"],
-            "observed_role_peak_kib": dict(sorted(peaks.items())),
+            "observed_role_peak_kib": dict(sorted(
+                (role, value) for role, value in peaks.items() if value is not None)),
             "observed_pid_peak_kib": dict(sorted(pid_peaks.items())),
             "samples": result["samples"],
             "physical_containment": "UNPROVED"}
