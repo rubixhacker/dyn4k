@@ -65,14 +65,22 @@ exec Java.
 
 The staging replay requires exactly two successful wrapper executions in
 order: core publication, then portable `jvmTestClasses`. It rejects another
-wrapper execution and equal or reversed execution times. A new ownership
-binding records each live descendant's process start tick and its traced
-lineage. Sampling keeps that binding when a child changes its process group or
-session, or when its parent exits. Cleanup uses process handles tied to those
-identities. Replay checks the raw fork lineage and requires samples across
-each traced process lifetime of at least one second, with no gap above one
-second. A missing required sample gives `UNAVAILABLE`. Earlier source windows
-retain their prior replay contract.
+wrapper execution and equal or reversed execution times. The
+`trace-lineage/3` source binding records each observed descendant's start tick
+and traced parent. Replay requires an identity for every traced process
+descendant, including one that exits before a sample. A trace does not supply
+a missing `/proc` start tick. That case is `UNAVAILABLE`.
+Replay compares the parent with the raw fork edge. The one traced process
+without a fork edge is the tracer origin; its provisional parent must be the
+launch root. Retained boot time and clock ticks bind each start tick to the
+raw fork or origin timestamp using the collector's existing two-second clock
+allowance. A sampled process also needs an exact matching start tick.
+Sampling keeps the binding when a child changes group or session, or when its
+parent exits. Replay requires samples across each traced process lifetime of
+at least one second, with no gap above one second. A missing required sample
+gives `UNAVAILABLE`. The earlier `trace-lineage/2` source binding keeps its
+prior replay contract. Cleanup refreshes ownership and reports a typed
+incomplete result when an owned identity survives or exit cannot be proved.
 
 `tracer` measures the supervisor's traced process roots. `other` measures
 owned processes whose executable and entry point do not prove a Gradle,

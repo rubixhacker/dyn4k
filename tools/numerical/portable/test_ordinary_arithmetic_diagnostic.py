@@ -1018,8 +1018,14 @@ class DiagnosticContractTest(unittest.TestCase):
                 with mock.patch.object(diagnostic, "_proc_identity",
                                        side_effect=lambda pid: ({**actual_identity(pid),
                                                                 "start_ticks": -1} if pid == child else
-                                                               actual_identity(pid))):
-                    owned.stop({"stage"})
+                                                               actual_identity(pid))), \
+                     mock.patch.object(diagnostic.time, "monotonic",
+                                       side_effect=(i for i in range(100))), \
+                     mock.patch.object(diagnostic.time, "sleep"):
+                    with self.assertRaises(SampleUnavailable) as changed:
+                        owned.stop({"stage"})
+                self.assertEqual(changed.exception.detail["reason"],
+                                 "PID_IDENTITY_CHANGED")
                 self.assertTrue(Path(f"/proc/{child}").exists())
             finally:
                 owned.stop({"stage"})
@@ -1081,6 +1087,115 @@ class DiagnosticContractTest(unittest.TestCase):
         extra[0]["pids"].append({"pid": 999})
         with self.assertRaisesRegex(DiagnosticRejected, "not owned"):
             _bound_lineage(extra, metadata, files)
+
+    def test_strict_lineage_rejects_missing_short_child_and_changed_identity(self):
+        def archive(entries):
+            return _zip_checked({f"trace.{pid}": raw.encode()
+                                 for pid, raw in entries.items()}, "trace_zip")
+        files = {"stage-process-traces.zip": archive({
+            11: ("100.000000 execve(\"/bin/sh\", [\"sh\"], 0) = 0\n"
+                 "100.100000 clone(child_stack=NULL, flags=SIGCHLD) = 12\n"
+                 "100.200000 clone(child_stack=NULL, flags=SIGCHLD) = 13\n"
+                 "100.250000 clone(child_stack=NULL, flags=CLONE_THREAD) = 14\n"
+                 "100.300000 +++ exited with 0 +++\n"),
+            12: ("100.100001 execve(\"/bin/sh\", [\"sh\"], 0) = 0\n"
+                 "101.000000 execve(\"/bin/true\", [\"true\"], 0) = 0\n"
+                 "103.000000 +++ exited with 0 +++\n"),
+            13: ("100.200001 execve(\"/bin/sh\", [\"sh\"], 0) = 0\n"
+                 "100.400000 +++ exited with 0 +++\n"),
+            14: "100.250001 +++ exited with 0 +++\n"}),
+            "all-process-traces.zip": archive({21: "104.000000 execve(\"/bin/sh\", [\"sh\"], 0) = 0\n"}),
+            "helper-traces.zip": archive({31: "105.000000 execve(\"/bin/sh\", [\"sh\"], 0) = 0\n"}),
+            "observer-traces.zip": archive({41: "106.000000 execve(\"/bin/sh\", [\"sh\"], 0) = 0\n"})}
+        roots = {phase: {"pid": pid, "start_ticks": tick}
+                 for phase, pid, tick in (("stage", 10, 10), ("target", 20, 410),
+                                          ("helper", 30, 510), ("observer", 40, 610))}
+        bound = {phase: {str(root["pid"]): {"start_ticks": root["start_ticks"],
+                                             "parent_pid": None},
+                         str(root["pid"] + 1): {"start_ticks": root["start_ticks"] + 1,
+                                                "parent_pid": root["pid"]}}
+                 for phase, root in roots.items()}
+        bound["stage"].update({"12": {"start_ticks": 21, "parent_pid": 11},
+                               "13": {"start_ticks": 31, "parent_pid": 11}})
+        metadata = {"ownership_binding": "trace-lineage/3", "launch_roots": roots,
+                    "owned_processes": bound,
+                    "birth_clock": {"boot_time_seconds": 100, "ticks_per_second": 100}}
+        samples = [{"phase": "stage", "wall_start_ns": at,
+                    "wall_end_ns": at + 100_000_000,
+                    "pids": [{"pid": 12, "start_ticks": 21,
+                              "parent_pid": 1, "group_pid": 12,
+                              "session_pid": 12}]}
+                   for at in (100_200_000_000, 101_100_000_000,
+                              102_000_000_000, 102_900_000_000)]
+        self.assertEqual(_bound_lineage(samples, metadata, files)[0][12], "stage")
+        omitted = copy.deepcopy(metadata)
+        del omitted["owned_processes"]["stage"]["13"]
+        with self.assertRaisesRegex(DiagnosticRejected, "UNAVAILABLE"):
+            _bound_lineage(samples, omitted, files)
+        parent = copy.deepcopy(metadata)
+        parent["owned_processes"]["stage"]["12"]["parent_pid"] = 13
+        with self.assertRaisesRegex(DiagnosticRejected, "lineage differs"):
+            _bound_lineage(samples, parent, files)
+        birth = copy.deepcopy(metadata)
+        birth["owned_processes"]["stage"]["12"]["start_ticks"] = 999999
+        with self.assertRaisesRegex(DiagnosticRejected, "birth differs"):
+            _bound_lineage(samples, birth, files)
+
+    def test_cleanup_exhaustion_and_late_child_are_incomplete(self):
+        owned = OwnedProcesses()
+        owned.roots["stage"] = (10, Path("/tmp/unused-trace"))
+        owned.bound[10] = {"phase": "stage", "identity": {"start_ticks": 1},
+                           "handle": 10}
+        child = {"phase": "stage", "identity": {"start_ticks": 2}, "handle": 11}
+        calls = 0
+        def refresh(_):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                owned.bound[11] = child
+            return {10, 11} if calls >= 2 else {10}
+        def identity(pid):
+            return {"start_ticks": 1 if pid == 10 else 2}
+        with (mock.patch.object(owned, "refresh", side_effect=refresh),
+              mock.patch.object(diagnostic, "_pidfd_exited", return_value=False),
+              mock.patch.object(diagnostic, "_proc_identity", side_effect=identity),
+              mock.patch.object(Path, "read_text", return_value="10 (fixture) S "),
+              mock.patch.object(diagnostic.time, "monotonic",
+                                side_effect=(i for i in range(100))),
+              mock.patch.object(diagnostic.time, "sleep"),
+              mock.patch.object(diagnostic.signal, "pidfd_send_signal") as sent):
+            with self.assertRaisesRegex(DiagnosticRejected, "UNAVAILABLE"):
+                owned.stop({"stage"})
+        self.assertGreater(calls, 1)
+        self.assertIn(11, [call.args[0] for call in sent.call_args_list])
+
+    def test_cleanup_distinguishes_exit_missing_proof_and_prior_timeout(self):
+        def owned():
+            result = OwnedProcesses()
+            result.roots["stage"] = (10, Path("/tmp/unused-trace"))
+            result.bound[10] = {"phase": "stage",
+                                "identity": {"start_ticks": 1}, "handle": 10}
+            return result
+        finished = owned()
+        with (mock.patch.object(finished, "refresh", return_value=set()),
+              mock.patch.object(diagnostic, "_pidfd_exited", return_value=True)):
+            self.assertIsNone(finished.stop({"stage"}))
+        unknown = owned()
+        with (mock.patch.object(unknown, "refresh", return_value=set()),
+              mock.patch.object(diagnostic, "_pidfd_exited",
+                                side_effect=OSError("missing proof")),
+              mock.patch.object(diagnostic.time, "monotonic",
+                                side_effect=(i for i in range(100))),
+              mock.patch.object(diagnostic.time, "sleep")):
+            with self.assertRaises(SampleUnavailable) as missing:
+                unknown.stop({"stage"})
+        self.assertEqual(missing.exception.detail["reason"], "EXIT_UNPROVED")
+        timed_out = owned()
+        with (mock.patch.object(timed_out, "refresh", return_value=set()),
+              mock.patch.object(diagnostic, "_pidfd_exited", return_value=True)):
+            with self.assertRaisesRegex(DiagnosticRejected, "TIME_BOUND"):
+                timed_out.stop({"stage"}, sample=lambda: (_ for _ in ()).throw(
+                    DiagnosticRejected("TIME_BOUND")))
 
     def test_exited_child_is_absent_and_zombie_is_not_sampled_as_live(self):
         exited = subprocess.Popen(["true"], start_new_session=True)
@@ -1147,6 +1262,35 @@ class DiagnosticContractTest(unittest.TestCase):
                 "reason": "EXECUTABLE_READ_FAILED", "errno": 13})
             self.assertNotIn(b"private command text",
                              (output / "diagnostic.json").read_bytes())
+
+    def test_capture_keeps_original_failure_when_cleanup_is_incomplete(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            allocation = Path(directory) / "allocation.json"
+            allocation.write_text(json.dumps({
+                "schema": "ordinary-arithmetic-resource-allocation/1",
+                "diagnostic_runtime_allocation": "SCHEDULED",
+                "available_memory_kib": 1024,
+                "other_tasks_preserved": True,
+                "cpu_set": [min(os.sched_getaffinity(0))]}))
+            cleanup = SampleUnavailable("stage", 456, "CLEANUP_SURVIVOR")
+            for original, expected in ((DiagnosticRejected("TIME_BOUND"),
+                                        "TIME_BOUND"),
+                                       (SampleUnavailable("stage", 123,
+                                                          "RSS_MISSING"),
+                                        "UNAVAILABLE")):
+                output = Path(directory) / expected
+                with (mock.patch.object(diagnostic, "clean_source",
+                                        side_effect=original),
+                      mock.patch.object(OwnedProcesses, "stop",
+                                        side_effect=cleanup)):
+                    report = diagnostic.capture(output, allocation)
+                self.assertEqual(report["status"], expected)
+                self.assertEqual(report["cleanup_status"], "UNAVAILABLE")
+                self.assertEqual(report["cleanup_failure_detail"]["reason"],
+                                 "CLEANUP_SURVIVOR")
+                if isinstance(original, SampleUnavailable):
+                    self.assertEqual(report["failure_detail"]["reason"],
+                                     "RSS_MISSING")
 
     def test_live_unknown_command_rss_and_stat_fail_closed(self):
         child = subprocess.Popen(["sleep", "5"], start_new_session=True)

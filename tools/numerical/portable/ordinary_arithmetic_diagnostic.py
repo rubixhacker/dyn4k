@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import shlex
 import signal
 import struct
@@ -45,6 +46,7 @@ SCHEMA = "ordinary-arithmetic-diagnostic/1"
 METHOD = "captureLongMotion"
 CASE = "long-free-60"
 CAP = 64
+OWNERSHIP_BINDING = "trace-lineage/3"
 RSS_CEILING_KIB = 10 * 1024 * 1024
 REQUIRED_ROLES = frozenset({"gradle", "worker", "helper", "tracer", "observer"})
 ALLOWED_ROLES = REQUIRED_ROLES | {"other"}
@@ -775,6 +777,23 @@ def _proc_identity(pid):
             "affinity": sorted(os.sched_getaffinity(pid))}
 
 
+def _birth_clock():
+    boot = next(int(line.split()[1]) for line in
+                Path("/proc/stat").read_text().splitlines()
+                if line.startswith("btime "))
+    return {"boot_time_seconds": boot,
+            "ticks_per_second": os.sysconf("SC_CLK_TCK")}
+
+
+def _pidfd_exited(handle):
+    watcher = select.poll()
+    watcher.register(handle, select.POLLIN)
+    ready = watcher.poll(0)
+    if ready and ready[0][1] & (select.POLLERR | select.POLLNVAL):
+        raise OSError("process handle exit state is unavailable")
+    return bool(ready and ready[0][1] & select.POLLIN)
+
+
 class OwnedProcesses:
     def __init__(self):
         self.roots = {}
@@ -947,9 +966,16 @@ class OwnedProcesses:
     def stop(self, phases=None, sample=None):
         phases = set(self.roots) if phases is None else set(phases)
         failure = None
+        unresolved = None
+        live = []
         for signum in (signal.SIGTERM, signal.SIGKILL):
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline:
+                try:
+                    self.refresh(phases)
+                except DiagnosticRejected as error:
+                    if unresolved is None:
+                        unresolved = error
                 if sample is not None and failure is None:
                     try:
                         sample()
@@ -960,19 +986,36 @@ class OwnedProcesses:
                     if row["phase"] not in phases:
                         continue
                     try:
+                        if _pidfd_exited(row["handle"]):
+                            continue
+                    except OSError as error:
+                        if unresolved is None:
+                            unresolved = SampleUnavailable(row["phase"], pid,
+                                                            "EXIT_UNPROVED", error)
+                        continue
+                    try:
                         current = _proc_identity(pid)
-                    except (OSError, ValueError, IndexError):
+                    except (OSError, ValueError, IndexError) as error:
+                        if unresolved is None:
+                            unresolved = SampleUnavailable(row["phase"], pid,
+                                                            "EXIT_UNPROVED", error)
                         continue
                     if current["start_ticks"] != row["identity"]["start_ticks"]:
+                        if unresolved is None:
+                            unresolved = SampleUnavailable(row["phase"], pid,
+                                                            "PID_IDENTITY_CHANGED")
                         continue
                     try:
                         raw = (Path("/proc") / str(pid) / "stat").read_text()
-                    except OSError:
+                    except OSError as error:
+                        if unresolved is None:
+                            unresolved = SampleUnavailable(row["phase"], pid,
+                                                            "EXIT_UNPROVED", error)
                         continue
                     if raw[raw.rfind(")") + 2:].startswith("Z "):
                         continue
                     live.append(row)
-                if not live:
+                if not live and unresolved is None:
                     if failure is not None:
                         raise failure
                     return
@@ -981,7 +1024,21 @@ class OwnedProcesses:
                         signal.pidfd_send_signal(row["handle"], signum)
                     except ProcessLookupError:
                         pass
+                    except OSError as error:
+                        pid = next(pid for pid, bound in self.bound.items()
+                                   if bound is row)
+                        if unresolved is None:
+                            unresolved = SampleUnavailable(row["phase"], pid,
+                                                            "SIGNAL_UNAVAILABLE", error)
                 time.sleep(0.05)
+        if live:
+            pid = next(pid for pid, bound in self.bound.items()
+                       if bound is live[0])
+            row = live[0]
+            raise SampleUnavailable(row["phase"], pid,
+                                    "CLEANUP_SURVIVOR") from failure
+        if unresolved is not None:
+            raise unresolved from failure
         if failure is not None:
             raise failure
 
@@ -1634,7 +1691,8 @@ def capture(output, allocation):
             "helper_root_pid": helper.pid, "observer_root_pid": observer.pid,
             "launch_roots": {"stage": stage_root, "target": target_root,
                              "helper": helper_root, "observer": observer_root},
-            "ownership_binding": "trace-lineage/2",
+            "ownership_binding": OWNERSHIP_BINDING,
+            "birth_clock": _birth_clock(),
             "owned_processes": owned.evidence(),
             "resource_commands": resource_commands,
             "command": command, "helper_command": helper_command,
@@ -1676,11 +1734,15 @@ def capture(output, allocation):
         return report
     except Exception as error:
         signal.setitimer(signal.ITIMER_REAL, 0)
+        cleanup_failure = None
         try:
             owned.refresh(set(owned.roots))
         except DiagnosticRejected:
             pass
-        owned.stop()
+        try:
+            owned.stop()
+        except DiagnosticRejected as cleanup_error:
+            cleanup_failure = cleanup_error
         for process in active:
             try:
                 if process.poll() is None:
@@ -1696,6 +1758,10 @@ def capture(output, allocation):
                                                                            output)}
         if isinstance(error, SampleUnavailable):
             report["failure_detail"] = error.detail
+        if cleanup_failure is not None:
+            report["cleanup_status"] = _typed_status(cleanup_failure)
+            if isinstance(cleanup_failure, SampleUnavailable):
+                report["cleanup_failure_detail"] = cleanup_failure.detail
         if not (output / "diagnostic.json").exists():
             _write_checked(output / "diagnostic.json", _report_bytes(report), "report")
         return report
@@ -2058,8 +2124,19 @@ def _resource_execs(files, metadata=None):
 
 
 def _bound_lineage(samples, metadata, files):
-    _require(metadata.get("ownership_binding") == "trace-lineage/2",
+    binding = metadata.get("ownership_binding")
+    _require(binding in ("trace-lineage/2", OWNERSHIP_BINDING),
              "diagnostic ownership binding differs")
+    strict = binding == OWNERSHIP_BINDING
+    clock = metadata.get("birth_clock") if strict else None
+    if strict:
+        _require(type(clock) is dict and set(clock) ==
+                 {"boot_time_seconds", "ticks_per_second"} and
+                 type(clock["boot_time_seconds"]) is int and
+                 clock["boot_time_seconds"] > 0 and
+                 type(clock["ticks_per_second"]) is int and
+                 clock["ticks_per_second"] > 0,
+                 "diagnostic birth clock differs")
     inventory = metadata.get("owned_processes")
     _require(type(inventory) is dict and set(inventory) ==
              {"stage", "target", "helper", "observer"},
@@ -2078,6 +2155,7 @@ def _bound_lineage(samples, metadata, files):
         traces, events = _raw_events(files[name])
         traced = {int(pid) for pid in traces}
         forks = {}
+        fork_times = {}
         thread_ids = set()
         for stamp, tid, _, call in events:
             match = re.search(r"(?:clone|clone3|fork|vfork)\(.*\) = ([1-9][0-9]*)$", call)
@@ -2088,6 +2166,7 @@ def _bound_lineage(samples, metadata, files):
             _require(child in traced and child not in forks,
                      "diagnostic traced process lineage differs")
             forks[child] = parent
+            fork_times[child] = int(stamp * 1_000_000_000)
             if "CLONE_THREAD" in call:
                 thread_ids.add(child)
         origin = traced - set(forks)
@@ -2097,6 +2176,8 @@ def _bound_lineage(samples, metadata, files):
         processes = traced - thread_ids
         _require({int(pid) for pid in bound} <= processes | {root["pid"]},
                  "UNAVAILABLE")
+        if strict:
+            _require(processes <= {int(pid) for pid in bound}, "UNAVAILABLE")
         for pid_text, identity in bound.items():
             pid = int(pid_text)
             _require(type(identity) is dict and set(identity) ==
@@ -2110,12 +2191,18 @@ def _bound_lineage(samples, metadata, files):
                 _require(identity["start_ticks"] == root["start_ticks"],
                          "diagnostic owned root identity differs")
             else:
-                _require(pid in processes and
-                         (pid == origin_pid and identity["parent_pid"] == root["pid"] or
-                          pid != origin_pid and
-                          identity["parent_pid"] in traced and
-                          identity["parent_pid"] != pid),
+                _require(pid in processes,
                          "diagnostic owned process lineage differs")
+                if pid == origin_pid:
+                    _require(identity["parent_pid"] == root["pid"],
+                             "diagnostic owned process lineage differs")
+                elif strict:
+                    _require(identity["parent_pid"] == forks.get(pid),
+                             "diagnostic owned process lineage differs")
+                else:
+                    _require(identity["parent_pid"] in traced and
+                             identity["parent_pid"] != pid,
+                             "diagnostic owned process lineage differs")
                 cursor = pid
                 visited = set()
                 while cursor != origin_pid:
@@ -2125,6 +2212,18 @@ def _bound_lineage(samples, metadata, files):
                     cursor = forks[cursor]
                 _require(root["start_ticks"] <= identity["start_ticks"],
                          "diagnostic owned process birth differs")
+                if strict:
+                    birth_ns = (clock["boot_time_seconds"] * 1_000_000_000 +
+                                identity["start_ticks"] * 1_000_000_000 //
+                                clock["ticks_per_second"])
+                    if pid == origin_pid:
+                        raw_time = min(int(stamp * 1_000_000_000)
+                                       for stamp, tid, _, _ in events
+                                       if int(tid) == pid)
+                    else:
+                        raw_time = fork_times[pid]
+                    _require(abs(birth_ns - raw_time) <= 2_000_000_000,
+                             "diagnostic owned process birth differs")
             _require(pid not in owners,
                      "diagnostic owned PID occurs in multiple launches")
             owners[pid] = phase
@@ -2136,6 +2235,13 @@ def _bound_lineage(samples, metadata, files):
     observed = {row["pid"] for sample in samples for row in sample["pids"]}
     _require(observed <= set(owners),
              "diagnostic sampled PID is not owned")
+    if strict:
+        for sample in samples:
+            for row in sample["pids"]:
+                phase = owners[row["pid"]]
+                _require(row["start_ticks"] ==
+                         inventory[phase][str(row["pid"])]["start_ticks"],
+                         "diagnostic owned process birth differs")
     for pid, (phase, first, last) in windows.items():
         if last - first < 1_000_000_000:
             continue
@@ -2180,7 +2286,7 @@ def _resource_ownership(samples, metadata, files, allocation):
                  "diagnostic resource launch identity differs")
     trace_sets, executions = _resource_execs(files, metadata)
     binding = metadata.get("ownership_binding")
-    _require(binding in (None, "trace-lineage/2"),
+    _require(binding in (None, "trace-lineage/2", OWNERSHIP_BINDING),
              "diagnostic ownership binding differs")
     owners, inventory = (_bound_lineage(samples, metadata, files)
                          if binding is not None else ({}, None))
