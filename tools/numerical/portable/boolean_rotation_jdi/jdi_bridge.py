@@ -751,16 +751,23 @@ def verify_gradle_fork_parent_v6(events, worker_pid, root_pid):
 
 def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
                             helper_pid, expected_argv, *, focused=True,
-                            launcher_sha256=None, protected_paths=None):
+                            launcher_sha256=None, protected_paths=None,
+                            ordinary_diagnostic=False):
     from actual_trace import normalize_rich_traces
     from numeric_producer_trace import _events, successful_execve
 
-    if (type(port) is not int or not 1 <= port <= 65535 or
+    if (type(ordinary_diagnostic) is not bool or
+            type(port) is not int or not 1 <= port <= 65535 or
             type(worker_pid) is not int or worker_pid <= 0 or
             type(helper_pid) is not int or helper_pid <= 0 or
             type(expected_argv) is not list or len(expected_argv) < 9 or
             any(type(value) is not str for value in expected_argv) or
-            (focused and (len(expected_argv) != 14 or
+            (ordinary_diagnostic and (not focused or len(expected_argv) != 12 or
+             expected_argv != [str(JDK21 / "bin/java"), "--add-modules", "jdk.jdi",
+                               expected_argv[3], "-cp", expected_argv[5],
+                               "OrdinaryArithmeticProbe", "attach", expected_argv[8],
+                               "127.0.0.1", str(port), "600"])) or
+            (focused and not ordinary_diagnostic and (len(expected_argv) != 14 or
             expected_argv != [str(JDK21 / "bin/java"), "--add-modules", "jdk.jdi",
                               expected_argv[3], "-cp", expected_argv[5],
                               "RotationJdiProbe", "attach", expected_argv[8],
@@ -1059,12 +1066,35 @@ def verify_jdi_transport_v6(worker_archive, helper_archive, port, worker_pid,
     continuous(worker_events, worker_owners, accepted_fd, accepted_at,
                worker_last, created_by="accept(?:4)?")
     continuous(helper_events, helper_owners, helper_fd, connected_at, helper_last)
-    return {"status": "PROVED_JDI_RAW_EXCHANGE", "qualification": "UNPASSED",
+    if ordinary_diagnostic:
+        def selected_close(events, owners, fd, token, last):
+            descriptor = fd + "<" + token + ">"
+            closes = [stamp for stamp, tid, _, call in events
+                      if int(tid) in owners and
+                      call == "close(" + descriptor + ") = 0"]
+            if len(closes) != 1 or closes[0] <= last or any(
+                    stamp > closes[0] and descriptor in call
+                    for stamp, _, _, call in events):
+                raise EvidenceRejected("diagnostic selected transport did not close")
+            return closes[0]
+        worker_closed = selected_close(worker_events, worker_owners,
+                                       accepted_fd, accepted_token, worker_last)
+        helper_closed = selected_close(helper_events, helper_owners,
+                                       helper_fd, helper_token, helper_last)
+        if not any(call == "+++ exited with 0 +++"
+                   for _, tid, _, call in helper_events
+                   if tid == str(helper_pid)):
+            raise EvidenceRejected("diagnostic helper did not exit after detach")
+    result = {"status": "PROVED_JDI_RAW_EXCHANGE", "qualification": "UNPASSED",
             "worker_tgid": worker_pid, "worker_thread": worker_thread,
             "listener_fd": int(listener_fd), "accepted_fd": int(accepted_fd),
             "helper_tgid": helper_pid, "helper_thread": helper_thread,
             "helper_fd": int(helper_fd), "peer_port": int(peer_port), "port": port,
             "worker_packets": worker_packets, "helper_packets": helper_packets}
+    if ordinary_diagnostic:
+        result["helper_closed_at"] = str(helper_closed)
+        result["worker_closed_at"] = str(worker_closed)
+    return result
 
 
 def verify_jdi_file_writes(helper_archive, evidence_archive, output_path):
