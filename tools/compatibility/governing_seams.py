@@ -16,6 +16,24 @@ import method_coverage
 FIXTURE = Path(__file__).parent / "fixtures/governing/GoverningSeams.java"
 MAIN = "org.dyn4j.dynamics.contact.GoverningSeams"
 EXPECTED_OUTPUT = "governing seams passed\n"
+JAVA_TOOL_OPTIONS_BANNER = "Picked up JAVA_TOOL_OPTIONS: "
+
+
+def lane_environment(additional_options: str | None = None) -> tuple[dict[str, str], str | None]:
+    env = os.environ.copy()
+    inherited_options = env.get("JAVA_TOOL_OPTIONS", "")
+    options = " ".join(value for value in (inherited_options, additional_options) if value)
+    if options:
+        env["JAVA_TOOL_OPTIONS"] = options
+    else:
+        env.pop("JAVA_TOOL_OPTIONS", None)
+    return env, options or None
+
+
+def strip_java_tool_options_banner(stderr: str, options: str | None) -> str:
+    if options is None:
+        return stderr
+    return stderr.removeprefix(JAVA_TOOL_OPTIONS_BANNER + options + "\n")
 
 
 def original_corpus(ledger: dict, root: Path) -> dict:
@@ -63,6 +81,11 @@ def capture(ledger: dict, root: Path) -> tuple[dict, bytes]:
         execution = location / "methods.exec"
         lanes = {}
         for provider, archive in (("baseline", baseline), ("candidate", jar)):
+            agent_options = None
+            if provider == "candidate":
+                agent_options = "-javaagent:" + str(agent_path) + "=destfile=" + str(execution)
+                agent_options += ",append=true,dumponexit=true,output=file"
+            env, java_options = lane_environment(agent_options)
             for compiler in (8, 21):
                 classes = location / f"{provider}-javac{compiler}"
                 classes.mkdir()
@@ -76,11 +99,6 @@ def capture(ledger: dict, root: Path) -> tuple[dict, bytes]:
                                      + compiled.stderr[-500:])
                 for runtime in (8, 21):
                     lane = f"{provider}-javac{compiler}-java{runtime}"
-                    env = None
-                    if provider == "candidate":
-                        env = {**os.environ, "JAVA_TOOL_OPTIONS": "-javaagent:" + str(agent_path)
-                               + "=destfile=" + str(execution)
-                               + ",append=true,dumponexit=true,output=file"}
                     run = subprocess.run([str(jdks[runtime] / "bin/java"), "-cp",
                                           os.pathsep.join((str(classes), cp)), MAIN],
                                          capture_output=True, text=True, timeout=90, env=env)
@@ -88,8 +106,7 @@ def capture(ledger: dict, root: Path) -> tuple[dict, bytes]:
                         raise ValueError(f"governing fixture failed: {lane}: {run.stderr[-500:]}")
                     lanes[lane] = {"status": "passed", "exit_code": run.returncode,
                                    "stdout": run.stdout,
-                                   "stderr": run.stderr.replace("Picked up JAVA_TOOL_OPTIONS: "
-                                        + env["JAVA_TOOL_OPTIONS"] + "\n", "") if env else run.stderr}
+                                   "stderr": strip_java_tool_options_banner(run.stderr, java_options)}
         if not execution.is_file():
             raise ValueError("candidate method execution archive is missing")
         raw = execution.read_bytes()
