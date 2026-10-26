@@ -344,6 +344,24 @@ class NativeSnapshotControlTest(unittest.TestCase):
                     sentinel.kill()
                 sentinel.wait(timeout=3)
 
+    def test_timed_out_build_command_reaps_term_responsive_parent(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            sentinel = subprocess.Popen(["/bin/sleep", "5"])
+            try:
+                result = run_build_command([sys.executable, "-c",
+                                            "import time; time.sleep(5)"],
+                                           directory, os.environ, 0.2)
+                self.assertEqual(result["exit_code"], 124)
+                self.assertEqual(result["process_exit_code"], -signal.SIGTERM)
+                self.assertTrue(result["timed_out"])
+                self.assertEqual(result["cleanup_status"], "COMPLETE")
+                self.assertTrue(result["streams_complete"])
+                self.assertIsNone(sentinel.poll())
+            finally:
+                if sentinel.poll() is None:
+                    sentinel.kill()
+                sentinel.wait(timeout=3)
+
     def test_completed_build_command_keeps_unrelated_process(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
             sentinel = subprocess.Popen(["/bin/sleep", "5"])
@@ -353,11 +371,156 @@ class NativeSnapshotControlTest(unittest.TestCase):
                                            directory, os.environ, 3)
                 self.assertEqual((result["exit_code"], result["timed_out"],
                                   result["stdout"]), (0, False, b"complete\n"))
+                self.assertEqual(result["process_exit_code"], 0)
+                self.assertEqual(result["cleanup_status"], "COMPLETE")
+                self.assertTrue(result["streams_complete"])
+                self.assertIsNone(result["failure_type"])
                 self.assertIsNone(sentinel.poll())
             finally:
                 if sentinel.poll() is None:
                     sentinel.kill()
                 sentinel.wait(timeout=3)
+
+    def test_normal_parent_exit_cleans_closed_pipe_child(self):
+        for behavior in ("respond", "ignore"):
+            with self.subTest(behavior=behavior), tempfile.TemporaryDirectory(
+                    dir=os.environ["TMPDIR"]) as directory:
+                pidfile = Path(directory) / "child.pid"
+                sentinel = subprocess.Popen(["/bin/sleep", "5"])
+                child = None
+                observed = []
+                def open_child():
+                    until = time.monotonic() + 2
+                    while time.monotonic() < until:
+                        try:
+                            observed.append(os.pidfd_open(int(pidfile.read_text())))
+                            return
+                        except (FileNotFoundError, ValueError, ProcessLookupError):
+                            time.sleep(0.001)
+                watcher = threading.Thread(target=open_child)
+                watcher.start()
+                try:
+                    result = run_build_command([
+                        sys.executable, str(Path(__file__).with_name(
+                            "adverse_normal_exit_child.py")), str(pidfile), behavior],
+                        directory, os.environ, 0.5)
+                    watcher.join(timeout=2)
+                    child = observed[0]
+                    self.assertEqual(result["process_exit_code"], 0)
+                    self.assertNotEqual(result["exit_code"], 0)
+                    self.assertEqual(result["failure_type"], "OWNED_GROUP_SURVIVED")
+                    self.assertTrue(select.select([child], [], [], 0)[0])
+                    self.assertIsNone(sentinel.poll())
+                finally:
+                    watcher.join(timeout=2)
+                    if child is None and observed:
+                        child = observed[0]
+                    if child is not None:
+                        if not select.select([child], [], [], 0)[0]:
+                            signal.pidfd_send_signal(child, signal.SIGKILL)
+                            self.assertTrue(select.select([child], [], [], 3)[0])
+                        os.close(child)
+                    if sentinel.poll() is None:
+                        sentinel.kill()
+                    sentinel.wait(timeout=3)
+
+    def test_normal_parent_exit_with_uncertain_group_is_not_accepted(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            with mock.patch.object(builder, "_scan_group_for_cleanup",
+                                   return_value=([], "identity uncertain")):
+                result = run_build_command([sys.executable, "-c", "print('ready')"],
+                                           directory, os.environ, 1)
+            self.assertEqual(result["process_exit_code"], 0)
+            self.assertEqual(result["exit_code"], 125)
+            self.assertEqual(result["cleanup_status"], "INCOMPLETE")
+            self.assertEqual(result["failure_type"], "OWNED_GROUP_EXIT_UNPROVED")
+            self.assertEqual(result["stdout"], b"ready\n")
+
+    def test_disappearing_scan_entry_needs_a_clean_retry(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            original = builder._live_group_members
+            calls = 0
+            def transient(group, handles):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise RuntimeError("owned build group identity is uncertain")
+                return original(group, handles)
+            with mock.patch.object(builder, "_live_group_members", side_effect=transient):
+                result = run_build_command([sys.executable, "-c", "print('ready')"],
+                                           directory, os.environ, 1)
+            self.assertGreaterEqual(calls, 2)
+            self.assertEqual(result["exit_code"], 0)
+            self.assertEqual(result["cleanup_status"], "COMPLETE")
+
+    def test_persistent_scan_uncertainty_cannot_accept_parent_zero(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            deadline = builder._BUILD_DEADLINE.set(time.monotonic() + 0.2)
+            try:
+                with mock.patch.object(builder, "_live_group_members",
+                                       side_effect=RuntimeError("identity uncertain")):
+                    result = run_build_command([sys.executable, "-c", "print('ready')"],
+                                               directory, os.environ, 1)
+            finally:
+                builder._BUILD_DEADLINE.reset(deadline)
+            self.assertEqual(result["process_exit_code"], 0)
+            self.assertEqual(result["exit_code"], 125)
+            self.assertEqual(result["cleanup_status"], "INCOMPLETE")
+
+    def test_bound_identity_change_cannot_accept_parent_zero(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            with mock.patch.object(builder, "_live_group_members",
+                                   side_effect=builder.OwnedGroupIdentityError(
+                                       "owned build group identity is uncertain")):
+                result = run_build_command([sys.executable, "-c", "print('ready')"],
+                                           directory, os.environ, 1)
+            self.assertEqual(result["process_exit_code"], 0)
+            self.assertEqual(result["exit_code"], 125)
+            self.assertEqual(result["cleanup_status"], "INCOMPLETE")
+
+    def test_private_build_rejects_incomplete_command_with_parent_exit_zero(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory)
+            archive = root / "source.tar.xz"
+            archive.write_bytes(b"fixture")
+            output = root / "build"
+            output.mkdir()
+            class Source:
+                def __enter__(self):
+                    return self
+                def __exit__(self, *_):
+                    return False
+                def getnames(self):
+                    return ["strace-7.2", "strace-7.2/src/strace.c"]
+                def extractall(self, target, *, filter):
+                    (target / "strace-7.2/src").mkdir(parents=True)
+                    (target / "strace-7.2/src/strace.c").write_bytes(b"source")
+            command = {"argv": ["git", "apply"], "cwd": str(output),
+                       "utc_start_ns": time.time_ns(), "utc_end_ns": time.time_ns(),
+                       "exit_code": 0, "process_exit_code": 0,
+                       "timed_out": False, "cleanup_status": "INCOMPLETE",
+                       "cleanup_error": "identity uncertain",
+                       "failure_type": "OWNED_GROUP_EXIT_UNPROVED",
+                       "streams_complete": True, "stdout": b"raw output",
+                       "stderr": b"raw error"}
+            def fake_digest(path):
+                if Path(path) == archive:
+                    return builder.ARCHIVE_SHA256
+                if Path(path).name == "strace.c":
+                    return builder.SOURCE_SHA256
+                return "0" * 64
+            with mock.patch.object(builder, "digest", side_effect=fake_digest), \
+                 mock.patch.object(builder.tarfile, "open", return_value=Source()), \
+                 mock.patch.object(builder.shutil, "which", return_value="/bin/true"), \
+                 mock.patch.object(builder, "run", return_value=command):
+                with self.assertRaisesRegex(RuntimeError, "private strace build failed"):
+                    builder._build(archive, output, timeout=1)
+            record = json.loads((output / "build-record.json").read_text())
+            self.assertEqual(record["status"], "FAILED")
+            self.assertEqual(record["error_type"], "OWNED_GROUP_EXIT_UNPROVED")
+            self.assertEqual(record["commands"][0]["process_exit_code"], 0)
+            self.assertEqual((output / "build-0-stdout.raw").read_bytes(), b"raw output")
+            self.assertEqual((output / "build-0-stderr.raw").read_bytes(), b"raw error")
 
     def test_native_attempt_retains_injected_failure_after_return(self):
         parent = Path(os.environ.get("DYN4K_NATIVE_FAILURES", os.environ["TMPDIR"]))
@@ -519,16 +682,26 @@ class NativeSnapshotControlTest(unittest.TestCase):
         files = {"strace-source.tar.xz": archive.read_bytes(),
                  "strace-binary": Path(binary).read_bytes(),
                  "strace-build.json": json.dumps(record).encode()}
-        self.assertEqual(diagnostic._tracer_identity(
-            files, {"tracer_build": record})["binary_sha256"],
-            record["binary_sha256"])
+        def use_retained_binary(_source, output, *, timeout):
+            self.assertEqual(timeout, 600)
+            (output / "src").mkdir(parents=True)
+            (output / "src/strace").write_bytes(files["strace-binary"])
+            return {"binary_sha256": record["binary_sha256"]}
+        with mock.patch.object(diagnostic, "build_owned_tracer",
+                               side_effect=use_retained_binary) as rebuild:
+            self.assertEqual(diagnostic._tracer_identity(
+                files, {"tracer_build": record})["binary_sha256"],
+                record["binary_sha256"])
+            rebuild.assert_called_once()
         for name in ("strace-source.tar.xz", "strace-binary"):
             with self.subTest(name=name):
                 altered = dict(files)
                 altered[name] = files[name][:-1] + bytes([files[name][-1] ^ 1])
-                with self.assertRaises(diagnostic.DiagnosticRejected):
-                    diagnostic._tracer_identity(altered,
-                                                {"tracer_build": record})
+                with mock.patch.object(diagnostic, "build_owned_tracer",
+                                       side_effect=AssertionError("unexpected rebuild")):
+                    with self.assertRaises(diagnostic.DiagnosticRejected):
+                        diagnostic._tracer_identity(altered,
+                                                    {"tracer_build": record})
 
     def test_journal_control_and_ack_fail_typed(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
