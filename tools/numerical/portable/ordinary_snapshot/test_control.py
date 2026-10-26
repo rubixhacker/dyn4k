@@ -201,15 +201,20 @@ class NativeSnapshotControlTest(unittest.TestCase):
             self._run_modes(binary, fixture)
 
     def _run_modes(self, binary, fixture):
-        for mode in ("fast", "nested", "group_escape", "parent_exit",
-                     "nonleader", "nonleader_hold", "vfork", "clone3",
-                     "held_child", "drain_child", "untraced"):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory(
+        modes = [(mode, False) for mode in
+                 ("fast", "nested", "group_escape", "parent_exit",
+                  "nonleader", "nonleader_hold", "vfork", "clone3",
+                  "held_child", "drain_child", "untraced")]
+        modes.append(("fast", True))
+        for mode, child_first in modes:
+            with self.subTest(mode=mode, child_first=child_first), tempfile.TemporaryDirectory(
                     dir=os.environ["TMPDIR"]) as directory:
                 scratch = Path(directory)
                 owned = SnapshotOwnedProcesses(scratch, scratch, _proc_identity,
                                                _pidfd_exited, check_retained)
                 environment = owned.prepare("stage", os.environ)
+                if child_first:
+                    environment["DYN4K_TEST_CHILD_FIRST"] = "1"
                 trace = scratch / "trace"
                 process = subprocess.Popen([binary, "-f", "-ff", "-ttt", "-e",
                                             "trace=process", "-o", str(trace),
@@ -270,6 +275,9 @@ class NativeSnapshotControlTest(unittest.TestCase):
         if not binary:
             self.skipTest("private tracer path is not provided")
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            sentinel = subprocess.Popen(["/bin/sleep", "1"],
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE)
             scratch = Path(directory)
             owned = SnapshotOwnedProcesses(scratch, scratch, _proc_identity,
                                            _pidfd_exited, check_retained)
@@ -288,6 +296,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
                     self.fail(f"freeze: {getattr(error, 'detail', error)}")
                 self.assertEqual(set(held["live_tgids"]), set(owned.refresh({"stage"})))
                 self.assertIn(process.pid, held["live_tgids"])
+                self.assertNotIn(sentinel.pid, held["live_tgids"])
                 self.assertGreaterEqual(len(held["live_tgids"]), 2)
                 owned.resume()
                 deadline = time.monotonic() + 3
@@ -297,6 +306,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
                 stdout, stderr = process.communicate(timeout=3)
                 self.assertEqual((process.returncode, stdout, stderr), (0, b"", b""))
                 owned.stop({"stage"})
+                self.assertIsNone(sentinel.poll())
                 self.assertTrue((scratch / "ptrace-events.jsonl").is_file())
                 self.assertTrue((scratch / "snapshot-controls.jsonl").is_file())
             finally:
@@ -304,6 +314,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
                     process.kill()
                     process.wait(timeout=3)
                 owned.close()
+                sentinel.communicate(timeout=3)
 
 
 if __name__ == "__main__":

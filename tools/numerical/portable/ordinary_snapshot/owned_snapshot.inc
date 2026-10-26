@@ -35,6 +35,7 @@ static bool owned_started;
 static unsigned long owned_sequence;
 static unsigned long owned_snapshot_id;
 static bool owned_need_interrupt;
+static bool owned_inject_child_first;
 static volatile sig_atomic_t owned_wake;
 
 static void
@@ -162,6 +163,7 @@ owned_pidfd(int pid)
 
 static void owned_command(const char *packet);
 static void owned_release_birth_holds(void);
+static void owned_child_stop(int child_tid);
 
 static void
 owned_send(const char *packet, int handle)
@@ -239,6 +241,8 @@ owned_birth_event(int creator_tid, unsigned int event, unsigned long child)
 	struct owned_birth *birth = owned_birth_row((int) child, true);
 	if (birth->event_seen || birth->acknowledged)
 		owned_fail("DUPLICATE_BIRTH");
+	if (owned_inject_child_first && !birth->stop_seen)
+		owned_child_stop((int) child);
 	unsigned long long start = 0;
 	long long rss = -1;
 	int creator_tgid = 0, ppid = 0;
@@ -258,6 +262,8 @@ static void
 owned_child_stop(int child_tid)
 {
 	struct owned_birth *birth = owned_birth_row(child_tid, true);
+	if (owned_inject_child_first && birth->stop_seen && birth->acknowledged)
+		return;
 	if (birth->stop_seen || birth->acknowledged)
 		owned_fail("DUPLICATE_CHILD_STOP");
 	long long rss = -1;
@@ -473,6 +479,7 @@ owned_init(void)
 	const char *path = getenv("DYN4K_OWNED_SOCKET");
 	if (!path)
 		return;
+	owned_inject_child_first = getenv("DYN4K_TEST_CHILD_FIRST") != NULL;
 	if (!use_seize || !followfork || nprocs != 1 || strace_child <= 0 ||
 	    strlen(path) >= sizeof(((struct sockaddr_un *) 0)->sun_path))
 		owned_fail("UNSUPPORTED_TRACER_MODE");
