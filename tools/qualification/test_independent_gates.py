@@ -776,7 +776,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             checked.update({name: hashlib.sha256((Path(path) / name).read_bytes()).hexdigest()
                             for name in independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED})
             checked.update({name: hashlib.sha256((Path(path) / name).read_bytes()).hexdigest()
-                            for name in independent_gates.ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_CAPTURE_DEPENDENCIES})
+                            for name in independent_gates.ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_CAPTURE_DEPENDENCIES})
             exported.append(checked)
 
         with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {
@@ -788,7 +788,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     Path(temporary), receipt, ROOT, candidate, {"dyn4k-core": "a" * 64},
                     independent_gates.verified_numerical_source_sha256(ROOT, candidate))
         self.assertEqual([closure | independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
-                          independent_gates.ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_CAPTURE_DEPENDENCIES],
+                          independent_gates.ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_CAPTURE_DEPENDENCIES],
                          exported)
 
     def test_prospective_export_rejects_altered_approved_bytes(self):
@@ -903,7 +903,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                 self.assertEqual(expected, hashlib.sha256(committed).hexdigest())
                 bound = independent_gates._prospective_checker_binding(ROOT, candidate)
                 self.assertEqual(expected, bound[relative])
-                dependencies = (independent_gates.ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_CAPTURE_DEPENDENCIES
+                dependencies = (independent_gates.ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_CAPTURE_DEPENDENCIES
                                 if candidate == current else
                                 independent_gates.PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES)
                 closure = (independent_gates.APPROVED_PROSPECTIVE_OBSERVER_ENV_REPLAY_CHECKERS
@@ -1570,7 +1570,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                          independent_gates.PINNED_PROSPECTIVE_LOCAL_CHECKERS[
                              "numeric_producer_trace.py"])
         self.assertEqual(independent_gates._prospective_checker_binding(ROOT, "HEAD"),
-                         checker | independent_gates.ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_CAPTURE_DEPENDENCIES)
+                         checker | independent_gates.ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_CAPTURE_DEPENDENCIES)
         self.assertEqual(independent_gates._p2_producer_binding(ROOT, "HEAD"),
                          independent_gates.APPROVED_P2_OBSERVER_ENV_REPLAY_PRODUCERS)
 
@@ -1985,6 +1985,46 @@ class IndependentGateSeamTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
                 independent_gates._p2_producer_binding(ROOT, revision)
 
+    def test_build_leader_identity_has_distinct_source_window(self):
+        old = independent_gates.ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_SOURCE_REVISION
+        revision = independent_gates.ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_SOURCE_REVISION
+        previous = independent_gates.ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_SOURCE_DEPENDENCIES
+        source = independent_gates.ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_SOURCE_DEPENDENCIES
+        path = "tools/numerical/portable/ordinary_snapshot/build_tracer.py"
+        self.assertEqual(revision, "b964cccf3064ef67a2aeb07acd25aeca39a09ce8")
+        self.assertEqual(set(source), set(previous))
+        self.assertNotEqual(source[path], previous[path])
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor",
+                                         old, revision], cwd=ROOT).returncode, 0)
+        old_bound = independent_gates._prospective_checker_binding(ROOT, old)
+        self.assertEqual({name: old_bound[name] for name in previous}, previous)
+        bound = independent_gates._prospective_checker_binding(ROOT, revision)
+        self.assertEqual({name: bound[name] for name in source}, source)
+        self.assertEqual(independent_gates._p2_producer_binding(ROOT, revision),
+                         independent_gates.APPROVED_P2_OBSERVER_ENV_REPLAY_PRODUCERS)
+        for relative, expected in source.items():
+            committed = subprocess.check_output(
+                ["git", "--no-replace-objects", "show", f"{revision}:{relative}"],
+                cwd=ROOT)
+            self.assertEqual(hashlib.sha256(committed).hexdigest(), expected)
+        original_read = Path.read_bytes
+        with mock.patch.object(Path, "read_bytes", lambda local: b"changed"
+                               if local == ROOT / path else original_read(local)):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, revision)
+            with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, revision)
+        original_show = subprocess.check_output
+        def changed_show(command, *args, **kwargs):
+            if command[-1] == f"{revision}:{path}":
+                return b"changed"
+            return original_show(command, *args, **kwargs)
+        with mock.patch.object(subprocess, "check_output", changed_show):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, revision)
+            with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, revision)
+
     def test_ordinary_diagnostic_jar_window_binds_new_and_historical_bytes(self):
         source = "tools/numerical/portable/ordinary_arithmetic_diagnostic.py"
         revised = independent_gates.ORDINARY_DIAGNOSTIC_JAR_SOURCE_REVISION
@@ -2021,7 +2061,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         detail_revision = independent_gates.ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_SOURCE_REVISION
         snapshot_hash = independent_gates.ORDINARY_DIAGNOSTIC_SNAPSHOT_CAPTURE_DEPENDENCIES[source]
         snapshot_revision = independent_gates.ORDINARY_DIAGNOSTIC_SNAPSHOT_SOURCE_REVISION
-        current_hash = independent_gates.ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_CAPTURE_DEPENDENCIES[source]
+        current_hash = independent_gates.ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_CAPTURE_DEPENDENCIES[source]
         self.assertNotEqual(fixed_revision, "bf4bfa36840b6513525fa0e3d303a9c487c6e57b")
         self.assertNotEqual(sample_hash, fixed_hash)
         self.assertNotEqual(fixed_hash, stage_hash)
@@ -2053,7 +2093,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                                if revision == revised else
                                independent_gates.P2_ORDINARY_DIAGNOSTIC_SAMPLE_DEPENDENCIES
                                if revision == sample_revision else
-                               independent_gates.P2_ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_DEPENDENCIES
+                               independent_gates.P2_ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_DEPENDENCIES
                                if revision == "HEAD" else
                                independent_gates.P2_ORDINARY_DIAGNOSTIC_SNAPSHOT_DEPENDENCIES
                                if revision == snapshot_revision else
