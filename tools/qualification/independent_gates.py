@@ -162,6 +162,7 @@ ARCHIVE_PRIVACY_SOURCE_REVISION = "b67ff73970811bfb44895e8d3354ed63863818d9"
 REPLAY_COST_SOURCE_REVISION = "82f8088171537ae6be09a20649f21daa71f460e1"
 JDI_REPLAY_COST_SOURCE_REVISION = "4897dee3dfd945dfda4e48d88222573896b45073"
 OBSERVER_ENV_REPLAY_SOURCE_REVISION = "e35f1b46572d6cc60d12649664fc949b18426f7b"
+ORDINARY_DIAGNOSTIC_SOURCE_REVISION = "d75e291d3b668a5ee55b989b86dbe89832fa65cc"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -524,6 +525,39 @@ OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES = {
     "tools/numerical/portable/actual_capture_receipt.py":
         "8a54f559337266f3f8fadb5486da45c70c8617f504f9d58d0bc882ec70f8403a",
 }
+ORDINARY_DIAGNOSTIC_SOURCE_DEPENDENCIES = {
+    "gradlew": "ab5c0cad16305af2e619c159c1f58dd68d07fab9c11e36701e109c0277407f7a",
+    "dyn4k-core/src/commonMain/kotlin/org/dyn4j/geometry/Transform.kt":
+        "ec22ca59049bbe090f381f133a43d7e1e72b3b220960ec751c3f278b7b280747",
+    "dyn4k-core/src/commonMain/kotlin/org/dyn4j/geometry/RotationOperationTap.kt":
+        "9833fdecc356581fbe549b5388f342458c66727bbc5244f03a6dd9285cf2e517",
+    "dyn4k-core/src/commonMain/kotlin/org/dyn4j/dynamics/AbstractPhysicsBody.kt":
+        "569979aee3583bf61d11dcffed236901257e606b207011c52f417e2ce1513719",
+    "dyn4k-core/src/commonMain/kotlin/org/dyn4j/collision/CollisionBody.kt":
+        "71690455e111fbc3076885ef5a968a66e32616b334afdf428d8f9e56e74b0174",
+    "tools/numerical/portable/build.gradle.kts":
+        "5dd484bf3b08837320973733637f79719235b85f0470d014224ed754a74cd5bb",
+    "tools/numerical/portable/cases.py":
+        "273c8246850d6995f0b3db1dac2d6f52d1c3154af1deaa48fbde25dc41f184c1",
+    "tools/numerical/portable/src/commonMain/kotlin/portable/ProspectiveOperationMarker.kt":
+        "f0676e17662b35001539d7e2db10be80b1a51d3ecdd8bdd3f7ddd509a4c5a18c",
+    "tools/numerical/portable/src/commonMain/kotlin/portable/NumericalRecorder.kt":
+        "89858b251a8cc156d904c5006ba8fafcb6e00449a8116555072c43ddbdbc2442",
+    "tools/numerical/portable/src/commonTest/kotlin/portable/PortableMatrixTest.kt":
+        "9354ab929281c8e9750476c632673d455214e3dac702a2bab9718dffe1287457",
+    "tools/numerical/portable/src/commonTest/kotlin/portable/ProspectiveArithmeticTest.kt":
+        "b95cf31b47b1b7f1c8a05d3b6b91fa17d059e7f7d4380ff6a81cb69f4839ca8d",
+    "tools/numerical/portable/ordinary_arithmetic_jdi/OrdinaryArithmeticProbe.java":
+        "cd5fdad4420f8df92abd99f9db8697e64c960e17b0aa3b8dbe980464ccf0b763",
+    "tools/numerical/portable/ordinary_arithmetic_diagnostic.py":
+        "a765b68b76999b38fb79815a9e7faaa467786c0192e62dcce1bed613a5ef8c36",
+    "tools/numerical/portable/boolean_rotation_jdi/jdi_bridge.py":
+        "86aeb59ea67ca6bf1a0cf8d7fd8dbd714a8e766a4dc2127c8680a41c9df5b41c",
+}
+ORDINARY_DIAGNOSTIC_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_SOURCE_DEPENDENCIES,
+}
 P2_V6_DEPENDENCIES = {
     **P2_EXECUTABLE_LOCAL_DEPENDENCIES,
     "tools/numerical/portable/build.gradle.kts":
@@ -635,6 +669,10 @@ P2_OBSERVER_ENV_REPLAY_DEPENDENCIES = {
     "tools/numerical/portable/actual_capture_receipt.py":
         OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES[
             "tools/numerical/portable/actual_capture_receipt.py"],
+}
+P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES = {
+    **P2_OBSERVER_ENV_REPLAY_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_SOURCE_DEPENDENCIES,
 }
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_JVM8_PRODUCERS = {
@@ -1162,6 +1200,7 @@ def _prospective_checker_binding(repository, candidate_sha):
         return checked.returncode == 0
 
     executable_window = descends_from(PROSPECTIVE_EXECUTABLE_CHECKER_REVISION)
+    ordinary_diagnostic_window = descends_from(ORDINARY_DIAGNOSTIC_SOURCE_REVISION)
     observer_env_replay_window = descends_from(OBSERVER_ENV_REPLAY_SOURCE_REVISION)
     jdi_replay_cost_window = descends_from(JDI_REPLAY_COST_SOURCE_REVISION)
     replay_cost_window = descends_from(REPLAY_COST_SOURCE_REVISION)
@@ -1251,7 +1290,9 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
         if hashlib.sha256(committed).hexdigest() != expected:
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
-    executable_dependencies = (OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES
+    executable_dependencies = (ORDINARY_DIAGNOSTIC_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_window else
+                               OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES
                                if observer_env_replay_window else
                                JDI_REPLAY_COST_CAPTURE_DEPENDENCIES
                                if jdi_replay_cost_window else
@@ -1273,7 +1314,7 @@ def _prospective_checker_binding(repository, candidate_sha):
                                PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES
                                if executable_window else {})
     local_dependencies = (APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
-                          OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES)
+                          ORDINARY_DIAGNOSTIC_CAPTURE_DEPENDENCIES)
     for relative, expected in local_dependencies.items():
         local = Path(__file__).resolve().parents[2] / relative
         try:
@@ -1388,6 +1429,7 @@ def _p2_producer_binding(repository, candidate_sha):
     baseline_compat_window = descends_from(BASELINE_COMPAT_SOURCE_REVISION)
     private_launch_window = descends_from(PRIVATE_LAUNCH_SOURCE_REVISION)
     v6_window = descends_from(PROSPECTIVE_V6_SOURCE_REVISION)
+    ordinary_diagnostic_window = descends_from(ORDINARY_DIAGNOSTIC_SOURCE_REVISION)
     jdk21_jdi = descends_from(P2_JDK21_JDI_SOURCE_REVISION)
     corrected_jdi = descends_from(P2_CORRECTED_JDI_SOURCE_REVISION)
     bounded_jdi = descends_from(P2_BOUNDED_JDI_SOURCE_REVISION)
@@ -1483,7 +1525,9 @@ def _p2_producer_binding(repository, candidate_sha):
         if hashlib.sha256(committed).hexdigest() != digest:
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     if jdk21_jdi:
-        dependencies = (P2_OBSERVER_ENV_REPLAY_DEPENDENCIES
+        dependencies = (P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES
+                        if ordinary_diagnostic_window else
+                        P2_OBSERVER_ENV_REPLAY_DEPENDENCIES
                         if observer_env_replay_window else
                         P2_JDI_REPLAY_COST_DEPENDENCIES
                         if jdi_replay_cost_window else
@@ -1507,27 +1551,27 @@ def _p2_producer_binding(repository, candidate_sha):
                         else P2_JDK21_JDI_DEPENDENCIES)
         _source_binding(repository, candidate_sha, dependencies,
                         "JDK 21 JDI producer",
-                        local_approved=P2_OBSERVER_ENV_REPLAY_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES)
     elif corrected_jdi:
         _source_binding(repository, candidate_sha, P2_CORRECTED_JDI_DEPENDENCIES,
                         "corrected JDI producer",
-                        local_approved=P2_OBSERVER_ENV_REPLAY_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES)
     elif bounded_jdi:
         _source_binding(repository, candidate_sha, P2_BOUNDED_JDI_DEPENDENCIES,
                         "bounded JDI producer",
-                        local_approved=P2_OBSERVER_ENV_REPLAY_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES)
     elif rotation_premise:
         _source_binding(repository, candidate_sha, P2_ROTATION_PREMISE_DEPENDENCIES,
                         "rotation premise producer",
-                        local_approved=P2_OBSERVER_ENV_REPLAY_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES)
     elif boolean_jdi_final:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_FINAL_DEPENDENCIES,
                         "Boolean JDI final producer",
-                        local_approved=P2_OBSERVER_ENV_REPLAY_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES)
     elif boolean_jdi:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_DEPENDENCIES,
                         "Boolean JDI producer",
-                        local_approved=P2_OBSERVER_ENV_REPLAY_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES)
     if not v6_window:
         for relative in (P2_BASELINE_COMPAT_DEPENDENCIES.keys() -
                          P2_EXECUTABLE_LOCAL_DEPENDENCIES.keys()):
@@ -1536,7 +1580,7 @@ def _p2_producer_binding(repository, candidate_sha):
                 actual = hashlib.sha256(local.read_bytes()).hexdigest()
             except OSError as error:
                 raise ValueError(f"reviewed P2 raw producer blob differs: {relative}") from error
-            if actual != P2_OBSERVER_ENV_REPLAY_DEPENDENCIES[relative]:
+            if actual != P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES[relative]:
                 raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     return dict(approved)
 
@@ -2117,11 +2161,15 @@ def verify_prospective_case_subgates(root, receipt, repository, candidate_sha,
              f"{candidate_sha}:{relative}"], stderr=subprocess.PIPE)
         approved_export[relative] = hashlib.sha256(committed).hexdigest()
     portable = "tools/numerical/portable"
+    archived_roots = ("tools/numerical/compare.py", "tools/numerical/physical.py",
+                      "tools/numerical/fixtures.json")
+    additional_paths = sorted(path for path in approved_export
+                              if not path.startswith(portable + "/")
+                              and path not in archived_roots)
     archive = subprocess.check_output(
         ["git", "-c", "core.autocrlf=false", "--no-replace-objects",
          "-C", str(repository), "archive", candidate_sha,
-         portable, "tools/numerical/compare.py", "tools/numerical/physical.py",
-         "tools/numerical/fixtures.json"],
+         portable, *archived_roots, *additional_paths],
         stderr=subprocess.PIPE)
     with tempfile.TemporaryDirectory(prefix="dyn4k-prospective-checker-") as temporary:
         with tarfile.open(fileobj=io.BytesIO(archive)) as package:
