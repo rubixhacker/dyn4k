@@ -240,6 +240,118 @@ class NativeAttempt:
 
 
 class NativeSnapshotControlTest(unittest.TestCase):
+    def test_launch_identity_failure_cleans_owned_child_and_preserves_sentinel(self):
+        for failed_read in (1, 2):
+            with self.subTest(failed_read=failed_read), tempfile.TemporaryDirectory(
+                    dir=os.environ["TMPDIR"]) as directory:
+                sentinel = subprocess.Popen(["/bin/sleep", "30"])
+                process = subprocess.Popen(["/bin/sleep", "30"],
+                                           start_new_session=True)
+                calls = 0
+                def read_identity(pid):
+                    nonlocal calls
+                    calls += 1
+                    if calls == failed_read:
+                        raise OSError("injected launch identity read failure")
+                    return _proc_identity(pid)
+                owned = SnapshotOwnedProcesses(directory, directory, read_identity,
+                                               _pidfd_exited, check_retained)
+                owned.prepare("stage", os.environ.copy())
+                handle = None
+                try:
+                    with self.assertRaises(SnapshotIncomplete) as failure:
+                        owned.launch("stage", process, Path(directory) / "trace")
+                    self.assertEqual(failure.exception.detail["reason"],
+                                     "IDENTITY_READ_FAILED")
+                    self.assertIn(process.pid, owned.bound)
+                    handle = owned.bound[process.pid]["handle"]
+                    owned.stop()
+                    process.wait(timeout=3)
+                    self.assertTrue(_pidfd_exited(handle))
+                    self.assertIsNone(sentinel.poll())
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=3)
+                    if sentinel.poll() is None:
+                        sentinel.kill()
+                    sentinel.wait(timeout=3)
+                    owned.close()
+                    if handle is not None:
+                        with self.assertRaises(OSError):
+                            os.fstat(handle)
+
+    def test_launch_pidfd_open_failure_remains_incomplete_without_numeric_signal(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            process = subprocess.Popen(["/bin/sleep", "30"],
+                                       start_new_session=True)
+            rescue_handle = os.pidfd_open(process.pid)
+            owned = SnapshotOwnedProcesses(directory, directory, _proc_identity,
+                                           _pidfd_exited, check_retained)
+            owned.prepare("stage", os.environ.copy())
+            try:
+                with mock.patch.object(os, "pidfd_open",
+                                       side_effect=OSError("injected pidfd failure")), \
+                     mock.patch.object(signal, "pidfd_send_signal") as sent:
+                    with self.assertRaises(SnapshotIncomplete) as failure:
+                        owned.launch("stage", process, Path(directory) / "trace")
+                    self.assertEqual(failure.exception.detail["reason"], "PIDFD_OPEN")
+                    owned.stop()
+                    sent.assert_not_called()
+                self.assertIsNone(process.poll())
+            finally:
+                if process.poll() is None:
+                    signal.pidfd_send_signal(rescue_handle, signal.SIGKILL)
+                process.wait(timeout=3)
+                os.close(rescue_handle)
+                owned.close()
+
+    def test_launch_fdinfo_retry_and_handshake_failure_clean_owned_child(self):
+        for failed_boundary in ("fdinfo", "handshake"):
+            with self.subTest(failed_boundary=failed_boundary), \
+                 tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+                process = subprocess.Popen(["/bin/sleep", "30"],
+                                           start_new_session=True)
+                sentinel = subprocess.Popen(["/bin/sleep", "30"])
+                owned = SnapshotOwnedProcesses(directory, directory,
+                                               _proc_identity, _pidfd_exited,
+                                               check_retained)
+                owned.prepare("stage", os.environ.copy())
+                original_check = owned._check_pidfd
+                calls = 0
+                def failed_check(*args):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 1:
+                        raise OSError("injected fdinfo failure")
+                    return original_check(*args)
+                try:
+                    if failed_boundary == "fdinfo":
+                        with mock.patch.object(owned, "_check_pidfd",
+                                               side_effect=failed_check):
+                            with self.assertRaises(SnapshotIncomplete) as failure:
+                                owned.launch("stage", process,
+                                             Path(directory) / "trace")
+                            self.assertEqual(failure.exception.detail["reason"],
+                                             "IDENTITY_READ_FAILED")
+                            owned.stop()
+                    else:
+                        with self.assertRaises(SnapshotIncomplete) as failure:
+                            owned.launch("stage", process, Path(directory) / "trace")
+                        self.assertEqual(failure.exception.detail["reason"],
+                                         "SOCKET_ACCEPT")
+                        owned.stop()
+                    process.wait(timeout=3)
+                    self.assertIsNone(sentinel.poll())
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=3)
+                    if sentinel.poll() is None:
+                        sentinel.kill()
+                    sentinel.wait(timeout=3)
+                    owned.close()
+
     def test_live_replacement_cannot_use_exited_cached_pidfd(self):
         class Stat:
             def read_text(self):

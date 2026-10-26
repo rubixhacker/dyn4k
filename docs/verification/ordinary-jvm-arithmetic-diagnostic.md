@@ -70,6 +70,11 @@ An unknown executable stays in the `other` role. Missing RSS, an unproved
 exit, a failed hold or resume, and a cleanup survivor give a typed incomplete
 result. Cleanup signals every bound pidfd even if a later `/proc` identity
 read fails. It retains that uncertainty and proves exits where possible.
+Launch cleanup retains the tracer pidfd before the two start-tick reads and
+socket handshake finish. A failed read or handshake remains incomplete, and
+cleanup uses the retained pidfd to stop the launched process. If pidfd opening
+fails, the capture reports incomplete ownership and does not signal its
+numeric PID.
 Cleanup never signals an unbound PID.
 
 Replay checks every birth against the raw fork or clone result, every exit

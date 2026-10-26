@@ -60,11 +60,7 @@ class SnapshotOwnedProcesses:
         if pid in self.bound or handle is None:
             raise SnapshotIncomplete(phase, pid, "DUPLICATE_PID_OR_HANDLE")
         try:
-            fdinfo = (Path("/proc/self/fdinfo") / str(handle)).read_text()
-            field = [line.split(":", 1)[1].strip() for line in fdinfo.splitlines()
-                     if line.startswith("Pid:")]
-            if field != [str(pid)] or self.pidfd_exited(handle):
-                raise SnapshotIncomplete(phase, pid, "PIDFD_IDENTITY")
+            self._check_pidfd(phase, pid, handle)
             identity = self.read_identity(pid)
             if identity["start_ticks"] != ticks:
                 raise SnapshotIncomplete(phase, pid, "PID_IDENTITY_CHANGED")
@@ -77,14 +73,42 @@ class SnapshotOwnedProcesses:
                            "birth_start_ticks": ticks,
                            "creator_tgid": creator_tgid, "executed": False}
 
+    def _check_pidfd(self, phase, pid, handle):
+        fdinfo = (Path("/proc/self/fdinfo") / str(handle)).read_text()
+        field = [line.split(":", 1)[1].strip() for line in fdinfo.splitlines()
+                 if line.startswith("Pid:")]
+        if field != [str(pid)] or self.pidfd_exited(handle):
+            raise SnapshotIncomplete(phase, pid, "PIDFD_IDENTITY")
+
     def launch(self, phase, process, trace_prefix):
-        if phase not in self.servers or phase in self.channels:
+        if phase not in self.servers or phase in self.roots:
             raise SnapshotIncomplete(phase, process.pid, "LAUNCH_STATE")
-        identity = self.read_identity(process.pid)
-        handle = os.pidfd_open(process.pid)
-        self._bind(phase, process.pid, identity["start_ticks"], None, handle)
-        self.bound[process.pid]["executed"] = True
+        try:
+            handle = os.pidfd_open(process.pid)
+        except OSError as error:
+            raise SnapshotIncomplete(phase, process.pid, "PIDFD_OPEN", error) from error
         self.roots[phase] = (process.pid, Path(trace_prefix))
+        row = {"phase": phase, "parent": None, "identity": None,
+               "handle": handle, "birth_start_ticks": None,
+               "creator_tgid": None, "executed": False,
+               "pidfd_verified": False}
+        self.bound[process.pid] = row
+        try:
+            self._check_pidfd(phase, process.pid, handle)
+            row["pidfd_verified"] = True
+            identity = self.read_identity(process.pid)
+            row["identity"] = identity
+            row["birth_start_ticks"] = identity["start_ticks"]
+            current = self.read_identity(process.pid)
+            if current["start_ticks"] != identity["start_ticks"]:
+                raise SnapshotIncomplete(phase, process.pid, "PID_IDENTITY_CHANGED")
+        except (OSError, ValueError, IndexError, KeyError) as error:
+            if isinstance(error, SnapshotIncomplete):
+                raise
+            raise SnapshotIncomplete(phase, process.pid,
+                                     "IDENTITY_READ_FAILED", error) from error
+        row["identity"] = current
+        row["executed"] = True
         server, _ = self.servers[phase]
         try:
             channel, _ = server.accept()
@@ -323,7 +347,8 @@ class SnapshotOwnedProcesses:
         return result
 
     def pump(self, phases=None):
-        phases = (set(self.channels) if phases is None else set(phases)) - self.closed
+        phases = (set(self.channels) if phases is None else
+                  set(phases) & set(self.channels)) - self.closed
         if not phases:
             return
         for _ in range(MAX_TIDS):
@@ -473,9 +498,18 @@ class SnapshotOwnedProcesses:
                         raise failure
                     return
                 for pid, row in reversed(live):
+                    if not row.get("pidfd_verified", True):
+                        try:
+                            self._check_pidfd(row["phase"], pid, row["handle"])
+                            row["pidfd_verified"] = True
+                        except (OSError, SnapshotIncomplete) as error:
+                            failure = failure or SnapshotIncomplete(
+                                row["phase"], pid, "CLEANUP_PIDFD", error)
+                            continue
                     try:
                         current = self.read_identity(pid)
-                        changed = (current["start_ticks"] !=
+                        changed = (row["identity"] is not None and
+                                   current["start_ticks"] !=
                                    row["identity"]["start_ticks"])
                     except (OSError, ValueError, IndexError, KeyError) as error:
                         failure = failure or SnapshotIncomplete(
