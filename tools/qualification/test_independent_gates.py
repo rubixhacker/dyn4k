@@ -776,7 +776,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             checked.update({name: hashlib.sha256((Path(path) / name).read_bytes()).hexdigest()
                             for name in independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED})
             checked.update({name: hashlib.sha256((Path(path) / name).read_bytes()).hexdigest()
-                            for name in independent_gates.ORDINARY_DIAGNOSTIC_LAUNCH_OWNERSHIP_CAPTURE_DEPENDENCIES})
+                            for name in independent_gates.ORDINARY_DIAGNOSTIC_DUPLICATE_LAUNCH_CAPTURE_DEPENDENCIES})
             exported.append(checked)
 
         with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {
@@ -788,7 +788,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     Path(temporary), receipt, ROOT, candidate, {"dyn4k-core": "a" * 64},
                     independent_gates.verified_numerical_source_sha256(ROOT, candidate))
         self.assertEqual([closure | independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
-                          independent_gates.ORDINARY_DIAGNOSTIC_LAUNCH_OWNERSHIP_CAPTURE_DEPENDENCIES],
+                          independent_gates.ORDINARY_DIAGNOSTIC_DUPLICATE_LAUNCH_CAPTURE_DEPENDENCIES],
                          exported)
 
     def test_prospective_export_rejects_altered_approved_bytes(self):
@@ -903,7 +903,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                 self.assertEqual(expected, hashlib.sha256(committed).hexdigest())
                 bound = independent_gates._prospective_checker_binding(ROOT, candidate)
                 self.assertEqual(expected, bound[relative])
-                dependencies = (independent_gates.ORDINARY_DIAGNOSTIC_LAUNCH_OWNERSHIP_CAPTURE_DEPENDENCIES
+                dependencies = (independent_gates.ORDINARY_DIAGNOSTIC_DUPLICATE_LAUNCH_CAPTURE_DEPENDENCIES
                                 if candidate == current else
                                 independent_gates.PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES)
                 closure = (independent_gates.APPROVED_PROSPECTIVE_OBSERVER_ENV_REPLAY_CHECKERS
@@ -1570,7 +1570,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                          independent_gates.PINNED_PROSPECTIVE_LOCAL_CHECKERS[
                              "numeric_producer_trace.py"])
         self.assertEqual(independent_gates._prospective_checker_binding(ROOT, "HEAD"),
-                         checker | independent_gates.ORDINARY_DIAGNOSTIC_LAUNCH_OWNERSHIP_CAPTURE_DEPENDENCIES)
+                         checker | independent_gates.ORDINARY_DIAGNOSTIC_DUPLICATE_LAUNCH_CAPTURE_DEPENDENCIES)
         self.assertEqual(independent_gates._p2_producer_binding(ROOT, "HEAD"),
                          independent_gates.APPROVED_P2_OBSERVER_ENV_REPLAY_PRODUCERS)
 
@@ -1700,7 +1700,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                 committed = subprocess.check_output(
                     ["git", "--no-replace-objects", "show", f"{current}:{path}"], cwd=ROOT)
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-                self.assertEqual(independent_gates.P2_ORDINARY_DIAGNOSTIC_LAUNCH_OWNERSHIP_DEPENDENCIES[path],
+                self.assertEqual(independent_gates.P2_ORDINARY_DIAGNOSTIC_DUPLICATE_LAUNCH_DEPENDENCIES[path],
                                  hashlib.sha256((ROOT / path).read_bytes()).hexdigest())
         old_checker = independent_gates._prospective_checker_binding(ROOT, prior)
         self.assertEqual(independent_gates.OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES[bridge],
@@ -2136,6 +2136,29 @@ class IndependentGateSeamTests(unittest.TestCase):
                          f"{revision}:{relative}"], cwd=ROOT)
                     self.assertEqual(hashlib.sha256(committed).hexdigest(),
                                      expected[relative])
+    def test_duplicate_launch_binds_current_source_and_keeps_history(self):
+        old = independent_gates.ORDINARY_DIAGNOSTIC_LAUNCH_OWNERSHIP_SOURCE_REVISION
+        new = independent_gates.ORDINARY_DIAGNOSTIC_DUPLICATE_LAUNCH_SOURCE_REVISION
+        previous = independent_gates.ORDINARY_DIAGNOSTIC_LAUNCH_OWNERSHIP_SOURCE_DEPENDENCIES
+        source = independent_gates.ORDINARY_DIAGNOSTIC_DUPLICATE_LAUNCH_SOURCE_DEPENDENCIES
+        changed = {name for name in source if source[name] != previous[name]}
+        self.assertEqual(changed, {
+            "tools/numerical/portable/ordinary_snapshot/control.py",
+            "tools/numerical/portable/ordinary_snapshot/test_control.py"})
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", old,
+                                         new], cwd=ROOT).returncode, 0)
+        for revision, expected in ((old, previous), (new, source)):
+            with self.subTest(revision=revision):
+                bound = independent_gates._prospective_checker_binding(ROOT, revision)
+                self.assertEqual({name: bound[name] for name in expected}, expected)
+                self.assertEqual(independent_gates._p2_producer_binding(ROOT, revision),
+                                 independent_gates.APPROVED_P2_OBSERVER_ENV_REPLAY_PRODUCERS)
+                for relative in changed:
+                    committed = subprocess.check_output(
+                        ["git", "--no-replace-objects", "show", f"{revision}:{relative}"],
+                        cwd=ROOT)
+                    self.assertEqual(hashlib.sha256(committed).hexdigest(),
+                                     expected[relative])
         self.assertEqual({name: source[name] for name in changed},
                          {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
                           for name in changed})
@@ -2187,7 +2210,7 @@ class IndependentGateSeamTests(unittest.TestCase):
         detail_revision = independent_gates.ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_SOURCE_REVISION
         snapshot_hash = independent_gates.ORDINARY_DIAGNOSTIC_SNAPSHOT_CAPTURE_DEPENDENCIES[source]
         snapshot_revision = independent_gates.ORDINARY_DIAGNOSTIC_SNAPSHOT_SOURCE_REVISION
-        current_hash = independent_gates.ORDINARY_DIAGNOSTIC_LAUNCH_OWNERSHIP_CAPTURE_DEPENDENCIES[source]
+        current_hash = independent_gates.ORDINARY_DIAGNOSTIC_DUPLICATE_LAUNCH_CAPTURE_DEPENDENCIES[source]
         self.assertNotEqual(fixed_revision, "bf4bfa36840b6513525fa0e3d303a9c487c6e57b")
         self.assertNotEqual(sample_hash, fixed_hash)
         self.assertNotEqual(fixed_hash, stage_hash)
@@ -2219,7 +2242,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                                if revision == revised else
                                independent_gates.P2_ORDINARY_DIAGNOSTIC_SAMPLE_DEPENDENCIES
                                if revision == sample_revision else
-                               independent_gates.P2_ORDINARY_DIAGNOSTIC_LAUNCH_OWNERSHIP_DEPENDENCIES
+                               independent_gates.P2_ORDINARY_DIAGNOSTIC_DUPLICATE_LAUNCH_DEPENDENCIES
                                if revision == "HEAD" else
                                independent_gates.P2_ORDINARY_DIAGNOSTIC_SNAPSHOT_DEPENDENCIES
                                if revision == snapshot_revision else
