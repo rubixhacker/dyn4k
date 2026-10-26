@@ -776,7 +776,7 @@ class IndependentGateSeamTests(unittest.TestCase):
             checked.update({name: hashlib.sha256((Path(path) / name).read_bytes()).hexdigest()
                             for name in independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED})
             checked.update({name: hashlib.sha256((Path(path) / name).read_bytes()).hexdigest()
-                            for name in independent_gates.ORDINARY_DIAGNOSTIC_CAPTURE_DEPENDENCIES})
+                            for name in independent_gates.ORDINARY_DIAGNOSTIC_JAR_CAPTURE_DEPENDENCIES})
             exported.append(checked)
 
         with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(os.environ, {
@@ -788,7 +788,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                     Path(temporary), receipt, ROOT, candidate, {"dyn4k-core": "a" * 64},
                     independent_gates.verified_numerical_source_sha256(ROOT, candidate))
         self.assertEqual([closure | independent_gates.APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
-                          independent_gates.ORDINARY_DIAGNOSTIC_CAPTURE_DEPENDENCIES],
+                          independent_gates.ORDINARY_DIAGNOSTIC_JAR_CAPTURE_DEPENDENCIES],
                          exported)
 
     def test_prospective_export_rejects_altered_approved_bytes(self):
@@ -1570,7 +1570,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                          independent_gates.PINNED_PROSPECTIVE_LOCAL_CHECKERS[
                              "numeric_producer_trace.py"])
         self.assertEqual(independent_gates._prospective_checker_binding(ROOT, "HEAD"),
-                         checker | independent_gates.ORDINARY_DIAGNOSTIC_CAPTURE_DEPENDENCIES)
+                         checker | independent_gates.ORDINARY_DIAGNOSTIC_JAR_CAPTURE_DEPENDENCIES)
         self.assertEqual(independent_gates._p2_producer_binding(ROOT, "HEAD"),
                          independent_gates.APPROVED_P2_OBSERVER_ENV_REPLAY_PRODUCERS)
 
@@ -1700,7 +1700,8 @@ class IndependentGateSeamTests(unittest.TestCase):
                 committed = subprocess.check_output(
                     ["git", "--no-replace-objects", "show", f"{current}:{path}"], cwd=ROOT)
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-                self.assertEqual(digest, hashlib.sha256((ROOT / path).read_bytes()).hexdigest())
+                self.assertEqual(independent_gates.P2_ORDINARY_DIAGNOSTIC_JAR_DEPENDENCIES[path],
+                                 hashlib.sha256((ROOT / path).read_bytes()).hexdigest())
         old_checker = independent_gates._prospective_checker_binding(ROOT, prior)
         self.assertEqual(independent_gates.OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES[bridge],
                          old_checker[bridge])
@@ -1773,6 +1774,47 @@ class IndependentGateSeamTests(unittest.TestCase):
                 independent_gates._prospective_checker_binding(ROOT, current)
             with self.assertRaises(subprocess.CalledProcessError):
                 independent_gates._p2_producer_binding(ROOT, current)
+
+    def test_ordinary_diagnostic_jar_window_binds_new_and_historical_bytes(self):
+        source = "tools/numerical/portable/ordinary_arithmetic_diagnostic.py"
+        revised = independent_gates.ORDINARY_DIAGNOSTIC_JAR_SOURCE_REVISION
+        historical = "bdf3846819c0fcae44c344452a38da8805dca5b8"
+        old_hash = independent_gates.ORDINARY_DIAGNOSTIC_CAPTURE_DEPENDENCIES[source]
+        new_hash = independent_gates.ORDINARY_DIAGNOSTIC_JAR_CAPTURE_DEPENDENCIES[source]
+        self.assertNotEqual(old_hash, new_hash)
+        for revision, expected in ((historical, old_hash), (revised, new_hash),
+                                   ("HEAD", new_hash)):
+            with self.subTest(revision=revision):
+                committed = subprocess.check_output(
+                    ["git", "--no-replace-objects", "show", f"{revision}:{source}"], cwd=ROOT)
+                self.assertEqual(expected, hashlib.sha256(committed).hexdigest())
+                self.assertEqual(expected,
+                                 independent_gates._prospective_checker_binding(ROOT, revision)[source])
+                self.assertEqual(expected,
+                                 independent_gates.P2_ORDINARY_DIAGNOSTIC_JAR_DEPENDENCIES[source]
+                                 if revision != historical else
+                                 independent_gates.P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES[source])
+                self.assertEqual(independent_gates.APPROVED_P2_OBSERVER_ENV_REPLAY_PRODUCERS,
+                                 independent_gates._p2_producer_binding(ROOT, revision))
+        original_read = Path.read_bytes
+        with mock.patch.object(Path, "read_bytes", lambda path: b"changed"
+                               if path == ROOT / source else original_read(path)):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, revised)
+            with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, revised)
+        original_show = subprocess.check_output
+
+        def changed_candidate(command, *args, **kwargs):
+            if command[-1] == f"{revised}:{source}":
+                return b"changed"
+            return original_show(command, *args, **kwargs)
+
+        with mock.patch.object(subprocess, "check_output", changed_candidate):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, revised)
+            with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, revised)
 
     def test_replay_cost_window_excludes_incomplete_private_revisions(self):
         for revision in (
