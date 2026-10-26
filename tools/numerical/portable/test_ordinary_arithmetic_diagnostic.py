@@ -970,9 +970,11 @@ class DiagnosticContractTest(unittest.TestCase):
     def test_traced_descendant_survives_group_change_and_is_cleaned_by_identity(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
             prefix = Path(directory) / "trace"
+            ready = Path(directory) / "child-ready"
+            child_script = (f"import os,time; os.setsid(); "
+                            f"open({str(ready)!r},'w').close(); time.sleep(15)")
             script = ("import subprocess,sys; "
-                      "subprocess.Popen([sys.executable,'-c',"
-                      "'import os,time; os.setsid(); time.sleep(15)']); "
+                      f"subprocess.Popen([sys.executable,'-c',{child_script!r}]); "
                       "sys.exit(0)")
             sentinel = subprocess.Popen(["sleep", "20"], start_new_session=True)
             launch = subprocess.Popen(["strace", "-ff", "-ttt", "-e",
@@ -986,6 +988,10 @@ class DiagnosticContractTest(unittest.TestCase):
                 owned.launch("stage", launch, prefix)
                 child = None
                 deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and not ready.exists():
+                    self.assertIsNone(launch.poll())
+                    time.sleep(0.005)
+                self.assertTrue(ready.exists())
                 while time.monotonic() < deadline and child is None:
                     sample = _owned_sample({"gradle": launch.pid}, "stage",
                                            owned=owned)
