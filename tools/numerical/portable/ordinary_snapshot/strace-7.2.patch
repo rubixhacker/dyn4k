@@ -1,0 +1,132 @@
+--- a/src/strace.c
++++ b/src/strace.c
+@@ -3141,5 +3141,8 @@
+ 				     PTRACE_O_TRACEFORK |
+ 				     PTRACE_O_TRACEVFORK;
+ 
++	if (getenv("DYN4K_OWNED_SOCKET"))
++		ptrace_setoptions |= PTRACE_O_EXITKILL;
++
+ 	if (seccomp_filtering)
+ 		check_seccomp_filter();
+@@ -3161,4 +3164,8 @@
+ 	debug_msg("ptrace_setoptions = %#x", ptrace_setoptions);
+ 	test_ptrace_seize();
++	if (getenv("DYN4K_OWNED_SOCKET") &&
++	    (!use_seize || !followfork || nprocs || !argc))
++		error_msg_and_die("owned snapshot requires seize and launch mode");
++
+ 	if (inject_set)
+ 		test_ptrace_set_syscall_info();
+@@ -3443,5 +3450,7 @@
+ 	interrupted = sig;
+ }
+ 
++#include "owned_snapshot.inc"
++
+ static struct tcb *
+ maybe_allocate_tcb(const int pid, int status)
+@@ -3464,5 +3473,7 @@
+ 	}
+ 	if (followfork) {
+ 		/* We assume it's a fork/vfork/clone child */
++		if (owned_socket >= 0)
++			owned_child_stop(pid);
+ 		struct tcb *tcp = alloctcb(pid);
+ 		after_successful_attach(tcp, post_attach_sigstop);
+@@ -3918,7 +3929,30 @@
+ 	 * then the system call will be interrupted and
+ 	 * the expiration will be handled by the signal handler.
+ 	 */
+ 	int status;
+ 	struct rusage ru;
+-	int pid = wait4(-1, &status, __WALL, (cflag ? &ru : NULL));
++	int pid;
++	if (owned_socket >= 0 && owned_started)
++		owned_poll(0);
++	if (owned_socket >= 0 && owned_started && owned_freezing) {
++		for (;;) {
++			owned_poll(0);
++			if (owned_need_interrupt) {
++				owned_need_interrupt = false;
++				owned_interrupt_running();
++			}
++			pid = wait4(-1, &status, __WALL | WNOHANG,
++				    (cflag ? &ru : NULL));
++			if (pid != 0)
++				break;
++			owned_try_held();
++			owned_poll(10);
++			if (owned_need_interrupt) {
++				owned_need_interrupt = false;
++				owned_interrupt_running();
++			}
++		}
++	} else {
++		pid = wait4(-1, &status, __WALL, (cflag ? &ru : NULL));
++	}
+ 	int wait_errno = errno;
+@@ -3980,4 +4013,9 @@
+ 				if (ptrace(PTRACE_GETEVENTMSG, pid, NULL,
+ 				    &wd->msg) < 0)
+ 					wd->msg = 0;
++				if (owned_socket >= 0) {
++					if (!wd->msg)
++						owned_fail("EXEC_MESSAGE");
++					owned_exec(pid, wd->msg);
++				}
+ 
+@@ -3981,5 +4018,17 @@
+ 			case PTRACE_EVENT_EXIT:
+ 				wd->te = TE_STOP_BEFORE_EXIT;
+ 				break;
++			case PTRACE_EVENT_FORK:
++			case PTRACE_EVENT_VFORK:
++			case PTRACE_EVENT_CLONE:
++				if (owned_socket >= 0) {
++					unsigned long child = 0;
++					if (ptrace(PTRACE_GETEVENTMSG, pid, NULL,
++						   &child) < 0)
++						owned_fail("SPAWN_MESSAGE");
++					owned_birth_event(pid, event, child);
++				}
++				wd->te = TE_RESTART;
++				break;
+ 			case PTRACE_EVENT_SECCOMP:
+ 				wd->te = TE_SECCOMP;
+@@ -4285,3 +4335,5 @@
+ 	case TE_SIGNALLED:
++		if (owned_socket >= 0)
++			owned_exit(current_tcp->pid, status);
+ 		print_signalled(current_tcp, current_tcp->pid, status);
+ 		droptcb(current_tcp);
+@@ -4306,3 +4358,5 @@
+ 	case TE_EXITED:
++		if (owned_socket >= 0)
++			owned_exit(current_tcp->pid, status);
+ 		print_exited(current_tcp, current_tcp->pid, status);
+ 		droptcb(current_tcp);
+@@ -4367,10 +4421,16 @@
+ 		return true;
+ 	}
+ 
++	if (owned_socket >= 0 &&
++	    owned_hold_restart(current_tcp, restart_op, restart_sig))
++		return true;
++
+ 	if (ptrace_restart(restart_op, current_tcp, restart_sig) < 0) {
+ 		/* Note: ptrace_restart emitted error message */
+ 		exit_code = 1;
+ 		return false;
+ 	}
++	if (owned_socket >= 0)
++		owned_after_restart(current_tcp);
+ 	return true;
+ }
+@@ -4510,5 +4570,6 @@
+ {
+ 	setlocale(LC_ALL, "");
+ 	init(argc, argv);
++	owned_init();
+ 
+ 	exit_code = !nprocs;
