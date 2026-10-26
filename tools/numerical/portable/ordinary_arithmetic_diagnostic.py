@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -162,6 +163,50 @@ def _xml_privacy(raw):
     _decoded_privacy(decoded)
 
 
+def _check_jar_directory_stream(raw, archive, item):
+    offset = item.header_offset
+    _require(0 <= offset <= len(raw) - 30,
+             "diagnostic JAR directory header differs")
+    (signature, _, flags, method, _, _, crc, compressed_size, file_size,
+     name_size, extra_size) = struct.unpack_from("<IHHHHHIIIHH", raw, offset)
+    _require(signature == 0x04034B50 and flags == item.flag_bits and
+             flags & ~0x808 == 0 and method == item.compress_type and
+             method in {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED},
+             "diagnostic JAR directory header differs")
+    start = offset + 30 + name_size + extra_size
+    end = start + item.compress_size
+    next_header = min((other.header_offset for other in archive.infolist()
+                       if other.header_offset > offset), default=archive.start_dir)
+    _require(end <= next_header and
+             raw[offset + 30:offset + 30 + name_size] ==
+             item.filename.encode("utf-8" if flags & 0x800 else "cp437"),
+             "diagnostic JAR directory data differs")
+    if flags & 0x8:
+        _require(crc in {0, item.CRC} and
+                 compressed_size in {0, item.compress_size} and
+                 file_size in {0, item.file_size},
+                 "diagnostic JAR directory header differs")
+        descriptor = end + (4 if raw[end:end + 4] == b"PK\x07\x08" else 0)
+        _require(descriptor + 12 == next_header and
+                 struct.unpack_from("<III", raw, descriptor) ==
+                 (item.CRC, item.compress_size, item.file_size),
+                 "diagnostic JAR directory descriptor differs")
+    else:
+        _require((crc, compressed_size, file_size) ==
+                 (item.CRC, item.compress_size, item.file_size) and
+                 end == next_header,
+                 "diagnostic JAR directory header differs")
+    if method == zipfile.ZIP_STORED:
+        _require(item.compress_size == 0,
+                 "diagnostic JAR directory payload differs")
+    else:
+        decoder = zlib.decompressobj(-15)
+        decoded = decoder.decompress(raw[start:end], 1)
+        _require(not decoded and decoder.eof and not decoder.unused_data and
+                 not decoder.unconsumed_tail and not decoder.flush(),
+                 "diagnostic JAR directory payload differs")
+
+
 def check_retained(raw, kind):
     _require(type(raw) is bytes and kind in {
         "raw", "binary", "trace", "zip", "trace_zip", "jar", "report", "jsonl"},
@@ -208,6 +253,8 @@ def check_retained(raw, kind):
                 if kind == "trace_zip":
                     validate_version6_raw_archive(raw, archive)
                 for item in archive.infolist():
+                    if kind == "jar" and item.is_dir():
+                        _check_jar_directory_stream(raw, archive, item)
                     with archive.open(item) as stream:
                         member = stream.read(item.file_size + 1)
                     _require(len(member) == item.file_size,
@@ -220,8 +267,9 @@ def check_retained(raw, kind):
                             _json_privacy(line)
                     elif item.filename.endswith(".xml"):
                         _xml_privacy(member)
-        except (OSError, EOFError, OverflowError, zipfile.BadZipFile,
-                zlib.error, RuntimeError, ValueError, TraceRejected) as error:
+        except (OSError, EOFError, OverflowError, UnicodeError, struct.error,
+                zipfile.BadZipFile, zlib.error, RuntimeError, ValueError,
+                TraceRejected) as error:
             if isinstance(error, DiagnosticRejected):
                 raise
             raise DiagnosticRejected("diagnostic ZIP is malformed") from error

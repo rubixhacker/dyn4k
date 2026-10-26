@@ -10,6 +10,7 @@ from contextlib import redirect_stdout
 import tempfile
 import unittest
 import zipfile
+import zlib
 from pathlib import Path
 
 from ordinary_arithmetic_diagnostic import (
@@ -494,6 +495,70 @@ class DiagnosticContractTest(unittest.TestCase):
                             b'SENTINEL=portable-capture-check"}')
         with self.assertRaises(DiagnosticRejected):
             check_retained(archive.getvalue(), "jar")
+
+    def test_staged_jar_directory_stream_matches_zero_size_and_crc(self):
+        for compression, payload in (
+                (zipfile.ZIP_STORED, b"hidden bytes"),
+                (zipfile.ZIP_DEFLATED, b"hidden bytes"),
+                (zipfile.ZIP_DEFLATED,
+                 b"DYN4K_CAPTURE_ENV_SENTINEL=portable-capture-check")):
+            with self.subTest(compression=compression, payload=payload):
+                archive = io.BytesIO()
+                with zipfile.ZipFile(archive, "w", compression=compression) as writer:
+                    writer.writestr("org/", payload)
+                    writer.writestr("org/Example.class", b"class bytes")
+                raw = bytearray(archive.getvalue())
+                local = raw.find(b"PK\x03\x04")
+                central = raw.find(b"PK\x01\x02")
+                raw[local + 14:local + 18] = bytes(4)
+                raw[local + 22:local + 26] = bytes(4)
+                raw[central + 16:central + 20] = bytes(4)
+                raw[central + 24:central + 28] = bytes(4)
+                forged = bytes(raw)
+                with zipfile.ZipFile(io.BytesIO(forged)) as reader:
+                    item = reader.infolist()[0]
+                    self.assertEqual((item.file_size, item.CRC), (0, 0))
+                    self.assertEqual(reader.read(item), b"")
+                    start = local + 30 + int.from_bytes(raw[local + 26:local + 28], "little")
+                    start += int.from_bytes(raw[local + 28:local + 30], "little")
+                    if compression == zipfile.ZIP_DEFLATED:
+                        self.assertEqual(zlib.decompress(
+                            forged[start:start + item.compress_size], -15), payload)
+                with self.assertRaises(DiagnosticRejected):
+                    check_retained(forged, "jar")
+
+    def test_staged_jar_rejects_directory_stream_and_header_faults(self):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as writer:
+            writer.writestr("org/", b"")
+        valid = archive.getvalue()
+        self.assertEqual(check_retained(valid, "jar"), valid)
+        local = valid.find(b"PK\x03\x04")
+        central = valid.find(b"PK\x01\x02")
+        data = local + 30 + len("org/")
+        trailing = bytearray(valid[:data + 2] + b"junk" + valid[data + 2:])
+        new_central = central + 4
+        trailing[local + 18:local + 22] = (6).to_bytes(4, "little")
+        trailing[new_central + 20:new_central + 24] = (6).to_bytes(4, "little")
+        eocd = trailing.find(b"PK\x05\x06")
+        trailing[eocd + 16:eocd + 20] = new_central.to_bytes(4, "little")
+        hidden_gap = bytearray(valid[:data + 2] + b"junk" + valid[data + 2:])
+        gap_eocd = hidden_gap.find(b"PK\x05\x06")
+        hidden_gap[gap_eocd + 16:gap_eocd + 20] = new_central.to_bytes(4, "little")
+        truncated = bytearray(valid)
+        truncated[data + 1] = 1
+        bad_method = bytearray(valid)
+        bad_method[local + 8:local + 10] = zipfile.ZIP_STORED.to_bytes(2, "little")
+        unsupported_method = bytearray(valid)
+        unsupported_method[local + 8:local + 10] = (99).to_bytes(2, "little")
+        unsupported_method[central + 10:central + 12] = (99).to_bytes(2, "little")
+        bad_name = bytearray(valid)
+        bad_name[local + 30] = ord("x")
+        for raw in (trailing, hidden_gap, truncated, bad_method,
+                    unsupported_method, bad_name):
+            with self.subTest(raw=bytes(raw)):
+                with self.assertRaises(DiagnosticRejected):
+                    check_retained(bytes(raw), "jar")
 
     def test_equal_poll_observations_and_causal_order(self):
         names = ("stage_start", "stage_end", "gradle_start", "worker_observed",
