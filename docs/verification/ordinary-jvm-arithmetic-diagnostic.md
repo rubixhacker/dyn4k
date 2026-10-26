@@ -48,6 +48,12 @@ raw trace subset with the full process trace. Each sampled PID records its
 parent, process group, session, start tick, command hash, and observed CPU
 affinity. Replay checks those records against launch groups, trace members,
 the allocated CPU set, and the process phase.
+The capture retains each distinct sampled command once. Replay rebuilds its
+hash, checks the role against that command and PID, and binds changes to
+successful executions in the retained process trace. Each sample also records
+the wall clock interval used to compare it with trace timestamps. A command
+change without that evidence fails replay. A process-only trace also records
+the source staging phase, where the Gradle wrapper can exec Java.
 
 It recomputes `diagnostic.json` exactly. A changed report or an extra
 `receipt.json` fails archive admission.

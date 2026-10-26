@@ -83,6 +83,13 @@ def validate_request(method, call_cap):
 def _privacy(raw, binary=False):
     if ENVIRONMENT_SENTINEL in raw or FORBIDDEN_ENVIRONMENT_KEY in raw:
         raise DiagnosticRejected("diagnostic evidence exposed the environment")
+    inspected = (b"\n".join(re.findall(rb"[\x20-\x7e]{4,}", raw))
+                 if binary else raw)
+    try:
+        if trace_exposes_environment(inspected):
+            raise DiagnosticRejected("diagnostic evidence exposed the environment")
+    except TraceRejected as error:
+        raise DiagnosticRejected("diagnostic privacy decoding failed") from error
     stripped = raw.lstrip()
     if not binary and (stripped.startswith(b"{") or
                        re.match(rb'\[\s*(?:\[|\{|")', stripped)):
@@ -93,32 +100,32 @@ def _privacy(raw, binary=False):
     if not binary and stripped.startswith(b"<"):
         _xml_privacy(raw)
         return
-    inspected = (b"\n".join(re.findall(rb"[\x20-\x7e]{4,}", raw))
-                 if binary else raw)
     if not binary and b"\\u" in raw:
         for token in actual_trace.QUOTED_BYTES.finditer(raw):
             if b"\\u" in token.group():
                 _json_privacy(token.group())
-    try:
-        if trace_exposes_environment(inspected):
-            raise DiagnosticRejected("diagnostic evidence exposed the environment")
-    except TraceRejected as error:
-        raise DiagnosticRejected("diagnostic privacy decoding failed") from error
 
 
 def _decoded_privacy(value):
-    pending = [value]
+    pending = [(value, False)]
+    fragments = {False: [], True: []}
     while pending:
-        item = pending.pop()
+        item, key = pending.pop()
         if isinstance(item, dict):
-            pending.extend(item.keys())
-            pending.extend(item.values())
+            for name, entry in reversed(list(item.items())):
+                pending.append((entry, False))
+                pending.append((name, True))
         elif isinstance(item, list):
-            pending.extend(item)
+            pending.extend((entry, key) for entry in reversed(item))
         elif isinstance(item, str):
             raw = item.encode("utf-8")
             if ENVIRONMENT_SENTINEL in raw or FORBIDDEN_ENVIRONMENT_KEY in raw:
                 raise DiagnosticRejected("diagnostic evidence exposed the environment")
+            fragments[key].append(raw)
+    if any(ENVIRONMENT_SENTINEL in b"".join(parts) or
+           FORBIDDEN_ENVIRONMENT_KEY in b"".join(parts)
+           for parts in fragments.values()):
+        raise DiagnosticRejected("diagnostic evidence exposed the environment")
 
 
 def _json_privacy(raw):
@@ -139,16 +146,18 @@ def _xml_privacy(raw):
         root = ET.fromstring(raw)
     except (ET.ParseError, RecursionError) as error:
         raise DiagnosticRejected("diagnostic XML is malformed") from error
+    decoded = []
     for element in root.iter():
         for value in (element.text, element.tail, *element.attrib.keys(),
                       *element.attrib.values()):
             if value is not None:
-                _decoded_privacy(value)
+                decoded.append(value)
         if element.tag == "system-out" and element.text:
             for line in element.text.splitlines():
                 for prefix in ("NUMERICAL_JSON ", "PROSPECTIVE_ROTATION_JSON "):
                     if line.startswith(prefix):
                         _json_privacy(line[len(prefix):].encode("utf-8"))
+    _decoded_privacy(decoded)
 
 
 def check_retained(raw, kind):
@@ -157,14 +166,8 @@ def check_retained(raw, kind):
              "diagnostic retained input differs")
     _require(len(raw) <= (V6_RAW_MAX_BYTES if kind in {"trace", "trace_zip"}
                           else MAX_READER_BYTES), "diagnostic raw reader bound")
-    if kind in {"report", "jsonl"}:
-        if ENVIRONMENT_SENTINEL in raw or FORBIDDEN_ENVIRONMENT_KEY in raw:
-            raise DiagnosticRejected("diagnostic evidence exposed the environment")
-    elif kind in {"zip", "trace_zip"}:
-        if ENVIRONMENT_SENTINEL in raw or FORBIDDEN_ENVIRONMENT_KEY in raw:
-            raise DiagnosticRejected("diagnostic evidence exposed the environment")
-    else:
-        _privacy(raw, binary=kind in {"binary", "zip", "trace_zip"})
+    _privacy(raw, binary=kind in {"binary", "zip", "trace_zip"} or
+             kind in {"report", "jsonl"})
     if kind == "report":
         _json_privacy(raw)
     if kind == "jsonl":
@@ -193,15 +196,14 @@ def check_retained(raw, kind):
                         member = stream.read(item.file_size + 1)
                     _require(len(member) == item.file_size,
                              "diagnostic ZIP member decoded size differs")
+                    _privacy(member, binary=item.filename.endswith(
+                        (".class", ".bin", ".jar")))
                     if item.filename.endswith((".json", ".jsonl")):
                         for line in member.splitlines() if item.filename.endswith(
                                 ".jsonl") else (member,):
                             _json_privacy(line)
                     elif item.filename.endswith(".xml"):
                         _xml_privacy(member)
-                    else:
-                        _privacy(member, binary=item.filename.endswith(
-                            (".class", ".bin", ".jar")))
         except (OSError, EOFError, OverflowError, zipfile.BadZipFile,
                 zlib.error, RuntimeError, ValueError, TraceRejected) as error:
             if isinstance(error, DiagnosticRejected):
@@ -301,14 +303,28 @@ def verify_resource_samples(samples, required_roles=REQUIRED_ROLES):
     missing = False
     peak = 0
     previous = -1
+    previous_sample = None
     retained = []
     for sample in samples:
-        _require(type(sample) is dict and set(sample) == {"time_ns", "phase", "pids"} and
+        _require(type(sample) is dict and set(sample) == {
+                    "time_ns", "wall_start_ns", "wall_end_ns", "phase", "pids"} and
                  sample["phase"] in {"stage", "target", "observer"} and
                  type(sample["time_ns"]) is int and sample["time_ns"] > previous and
+                 type(sample["wall_start_ns"]) is int and
+                 type(sample["wall_end_ns"]) is int and
+                 0 < sample["wall_start_ns"] <= sample["wall_end_ns"] and
+                 sample["wall_end_ns"] - sample["wall_start_ns"] <= 5_000_000_000 and
                  type(sample["pids"]) is list and sample["pids"],
                  "diagnostic resource sample time differs")
+        if previous_sample is not None:
+            _require(sample["wall_start_ns"] >= previous_sample["wall_end_ns"] and
+                     (sample["phase"] != previous_sample["phase"] or
+                      abs((sample["wall_end_ns"] - previous_sample["wall_end_ns"]) -
+                          (sample["time_ns"] - previous_sample["time_ns"])) <=
+                      25_000_000),
+                     "diagnostic resource sample clocks differ")
         previous = sample["time_ns"]
+        previous_sample = sample
         pids = {}
         for row in sample["pids"]:
             _require(type(row) is dict and set(row) == {"pid", "roles", "rss_kib",
@@ -336,7 +352,10 @@ def verify_resource_samples(samples, required_roles=REQUIRED_ROLES):
             missing = True
         total = sum(row["rss_kib"] or 0 for row in pids.values())
         peak = max(peak, total)
-        retained.append({"time_ns": previous, "phase": sample["phase"], "aggregate_kib":
+        retained.append({"time_ns": previous,
+                         "wall_start_ns": sample["wall_start_ns"],
+                         "wall_end_ns": sample["wall_end_ns"],
+                         "phase": sample["phase"], "aggregate_kib":
                          None if missing else total,
                          "pids": sorted(pids.values(), key=lambda row: row["pid"])})
     status = ("RSS_BOUND" if peak > RSS_CEILING_KIB else
@@ -693,7 +712,33 @@ def _proc_identity(pid):
             "affinity": sorted(os.sched_getaffinity(pid))}
 
 
-def _owned_sample(groups, phase, worker_pid=None):
+def _command_argv(command):
+    if not command:
+        return []
+    _require(command.endswith(b"\0"), "UNAVAILABLE")
+    try:
+        return [part.decode("utf-8") for part in command[:-1].split(b"\0")]
+    except UnicodeError as error:
+        raise DiagnosticRejected("UNAVAILABLE") from error
+
+
+def _sample_role(pid, group, groups, worker_pid, command):
+    if pid == group:
+        return "tracer"
+    if group == groups.get("helper"):
+        return "helper" if b"OrdinaryArithmeticProbe" in command else "tracer"
+    if group == groups.get("observer"):
+        return "observer" if b"ordinary-diagnostic-observer" in command else "tracer"
+    if pid == worker_pid:
+        return "worker"
+    if any(token in command for token in
+           (b"GradleDaemon", b"gradlew", b"GradleWorkerMain")):
+        return "gradle"
+    return "tracer"
+
+
+def _owned_sample(groups, phase, worker_pid=None, commands=None):
+    wall_start = time.time_ns()
     pids = []
     for path in Path("/proc").iterdir():
         if not path.name.isdecimal():
@@ -714,23 +759,20 @@ def _owned_sample(groups, phase, worker_pid=None):
         except (OSError, ValueError, IndexError) as error:
             raise DiagnosticRejected("UNAVAILABLE") from error
         match = re.search(r"^VmRSS:\s+([0-9]+) kB$", status, re.M)
-        if pid == group:
-            role = "tracer"
-        elif group == groups.get("helper"):
-            role = "helper" if b"OrdinaryArithmeticProbe" in command else "tracer"
-        elif group == groups.get("observer"):
-            role = "observer" if b"ordinary-diagnostic-observer" in command else "tracer"
-        elif pid == worker_pid:
-            role = "worker"
-        elif any(token in command for token in
-                 (b"GradleDaemon", b"gradlew", b"GradleWorkerMain")):
-            role = "gradle"
-        else:
-            role = "tracer"
+        role = _sample_role(pid, group, groups, worker_pid, command)
+        digest = hashlib.sha256(command).hexdigest()
+        if commands is not None:
+            argv = _command_argv(command)
+            _require(digest not in commands or commands[digest] == argv,
+                     "diagnostic sampled command differs")
+            commands[digest] = argv
         pids.append({**identity, "roles": [role],
-                     "command_sha256": hashlib.sha256(command).hexdigest(),
+                     "command_sha256": digest,
                      "rss_kib": int(match[1]) if match else None})
-    return {"time_ns": time.monotonic_ns(), "phase": phase,
+    wall_end = time.time_ns()
+    return {"time_ns": time.monotonic_ns(),
+            "wall_start_ns": wall_start, "wall_end_ns": wall_end,
+            "phase": phase,
             "pids": sorted(pids, key=lambda row: row["pid"])}
 
 
@@ -756,7 +798,7 @@ def _pin_child(cpus):
 
 
 def _run_capture_process(command, cwd, environment, log, budget,
-                         samples, active, cpus, *, deadline=None):
+                         samples, active, cpus, commands, *, deadline=None):
     with Path(log).open("xb") as stream:
         process = subprocess.Popen(command, cwd=cwd, env=environment, stdout=stream,
                                    stderr=subprocess.STDOUT, start_new_session=True,
@@ -773,7 +815,7 @@ def _run_capture_process(command, cwd, environment, log, budget,
                 next_budget = now + 250000000
             if deadline is not None and time.monotonic_ns() - began > deadline:
                 raise DiagnosticRejected("TIME_BOUND")
-            sample = _owned_sample({"gradle": group}, "stage")
+            sample = _owned_sample({"gradle": group}, "stage", commands=commands)
             if sample["pids"]:
                 _sample_bound(sample)
                 samples.append(sample)
@@ -962,6 +1004,7 @@ def capture(output, allocation):
              "diagnostic allocated CPUs are unavailable")
     active = []
     samples = []
+    resource_commands = {}
     private = Path(tempfile.mkdtemp(prefix="ordinary-diagnostic-",
                                     dir=os.environ["TMPDIR"]))
     private.chmod(0o700)
@@ -993,10 +1036,17 @@ def capture(output, allocation):
             ":dyn4k-core:publishJvmPublicationToStagingRepository", "--rerun-tasks",
             "--no-daemon", "--console=plain", "--offline", "--max-workers=1",
             "-Pkotlin.compiler.execution.strategy=in-process"]
+        stage_trace_prefix = private / "stage-process-trace"
+        stage_trace_command = ["strace", "-ff", "-ttt", "-s", "131072",
+                               "-e", "trace=process", "-o",
+                               str(stage_trace_prefix), *stage_command]
         stage_start, stage_end, stage_root = _run_capture_process(
-            stage_command, ROOT, environment, private / "stage.log", budget,
-            samples, active, cpus, deadline=900 * 1000000000)
+            stage_trace_command, ROOT, environment, private / "stage.log", budget,
+            samples, active, cpus, resource_commands,
+            deadline=900 * 1000000000)
         _seal_existing(private / "stage.log", output / "stage.log")
+        _write_checked(output / "stage-process-traces.zip",
+                       _trace_archive(stage_trace_prefix), "trace_zip")
         _require(STAGED_JAR.is_file(), "diagnostic staged artifact is unavailable")
         _seal_existing(STAGED_JAR, output / "artifact.jar", "zip")
         artifact_identity = captured_file_identity(STAGED_JAR)
@@ -1057,7 +1107,8 @@ def capture(output, allocation):
                     groups = {"gradle": target_group}
                     if helper is not None and helper.poll() is None:
                         groups["helper"] = helper.pid
-                    sample = _owned_sample(groups, "target", worker_pid)
+                    sample = _owned_sample(groups, "target", worker_pid,
+                                           resource_commands)
                     if sample["pids"]:
                         _sample_bound(sample)
                         samples.append(sample)
@@ -1143,7 +1194,8 @@ def capture(output, allocation):
             observer_root = _proc_identity(observer.pid)
             while observer.poll() is None:
                 budget.check()
-                sample = _owned_sample({"observer": observer_group}, "observer")
+                sample = _owned_sample({"observer": observer_group}, "observer",
+                                       commands=resource_commands)
                 if sample["pids"]:
                     _sample_bound(sample)
                     samples.append(sample)
@@ -1168,12 +1220,14 @@ def capture(output, allocation):
             "candidate_commit": commit, "method": METHOD, "case_id": CASE,
             "call_cap": CAP, "port": port, "worker_pid": worker_pid,
             "stage_command": stage_command,
+            "stage_trace_command": stage_trace_command,
             "artifact_identity": artifact_identity,
             "runtime_identity": runtime_identity,
             "helper_pid": helper_pid, "gradle_root_pid": target.pid,
             "helper_root_pid": helper.pid, "observer_root_pid": observer.pid,
             "launch_roots": {"stage": stage_root, "target": target_root,
                              "helper": helper_root, "observer": observer_root},
+            "resource_commands": resource_commands,
             "command": command, "helper_command": helper_command,
             "observer_command": observer_command,
             "helper_output_path": str(helper_output),
@@ -1270,7 +1324,7 @@ def _read_samples(raw):
 def _read_archive(output, compare_report):
     output = Path(output)
     required = {"artifact.jar", "runtime-java", "portable-classes.zip",
-        "source.zip", "worker-classpath.json",
+        "source.zip", "worker-classpath.json", "stage-process-traces.zip",
         "jdi-helper-classes.zip", "stage.log", "gradle.log", "helper.log",
         "observer.log", "capture.xml", CASE + ".jsonl", "worker-classpath.txt",
         "worker-class-load.log", "worker-arguments.log", "execve.log",
@@ -1284,6 +1338,7 @@ def _read_archive(output, compare_report):
     kinds = {"artifact.jar": "zip", "portable-classes.zip": "zip",
              "source.zip": "zip", "worker-classpath.json": "report",
              "runtime-java": "binary",
+             "stage-process-traces.zip": "trace_zip",
              "jdi-helper-classes.zip": "zip", "jdi-evidence.zip": "zip",
              "all-process-traces.zip": "trace_zip",
              "worker-traces.zip": "trace_zip", "helper-traces.zip": "trace_zip",
@@ -1522,13 +1577,49 @@ def _worker_progress_after_close(worker_traces, closed_at):
     raise DiagnosticRejected("diagnostic worker continuation after detach is unproved")
 
 
+def _command_bytes(argv):
+    _require(type(argv) is list and all(type(item) is str and "\0" not in item
+                                         for item in argv),
+             "diagnostic sampled command inventory differs")
+    return b"\0".join(item.encode("utf-8") for item in argv) + (b"\0" if argv else b"")
+
+
+def _resource_execs(files):
+    executions = {}
+    trace_sets = {}
+    for phase, name in (("stage", "stage-process-traces.zip"),
+                        ("target", "all-process-traces.zip"),
+                        ("helper", "helper-traces.zip"),
+                        ("observer", "observer-traces.zip")):
+        traces, events = _raw_events(files[name])
+        trace_sets[phase] = {int(pid) for pid in traces}
+        phase_execs = {}
+        for stamp, tid, _, call in events:
+            if not call.startswith(("execve(", "execveat(")) or not call.endswith(" = 0"):
+                continue
+            parsed = successful_execve(call)
+            _require(parsed is not None,
+                     "diagnostic sampled command execution is unproved")
+            phase_execs.setdefault(int(tid), []).append(
+                (int(stamp * 1_000_000_000),
+                 hashlib.sha256(_command_bytes(list(parsed[1]))).hexdigest()))
+        executions[phase] = phase_execs
+    return trace_sets, executions
+
+
 def _resource_ownership(samples, metadata, files, allocation):
     roots = metadata.get("launch_roots")
     cpus = allocation.get("cpu_set")
+    commands = metadata.get("resource_commands")
     _require(type(roots) is dict and set(roots) ==
              {"stage", "target", "helper", "observer"} and
-             type(cpus) is list and bool(cpus),
+             type(cpus) is list and bool(cpus) and
+             type(commands) is dict and bool(commands),
              "diagnostic resource launch inventory differs")
+    for digest, argv in commands.items():
+        _require(type(digest) is str and
+                 digest == hashlib.sha256(_command_bytes(argv)).hexdigest(),
+                 "diagnostic sampled command inventory differs")
     for phase, root in roots.items():
         _require(type(root) is dict and set(root) ==
                  {"pid", "parent_pid", "group_pid", "session_pid",
@@ -1543,12 +1634,7 @@ def _resource_ownership(samples, metadata, files, allocation):
                  type(root["start_ticks"]) is int and root["start_ticks"] > 0 and
                  root["affinity"] == sorted(cpus),
                  "diagnostic resource launch identity differs")
-    trace_sets = {}
-    for phase, name in (("target", "all-process-traces.zip"),
-                        ("helper", "helper-traces.zip"),
-                        ("observer", "observer-traces.zip")):
-        with zipfile.ZipFile(io.BytesIO(files[name])) as archive:
-            trace_sets[phase] = {int(item.filename[6:]) for item in archive.infolist()}
+    trace_sets, executions = _resource_execs(files)
     _require(metadata["worker_pid"] in trace_sets["target"] and
              metadata["helper_pid"] in trace_sets["helper"],
              "diagnostic selected resource trace differs")
@@ -1563,6 +1649,7 @@ def _resource_ownership(samples, metadata, files, allocation):
     intervals = {"stage": (moments["stage_start"], moments["stage_end"]),
                  "target": (moments["gradle_start"], moments["target_exit"]),
                  "observer": (moments["observer_start"], moments["observer_exit"])}
+    used_commands = set()
     for sample in samples:
         phase = sample["phase"]
         _require(intervals[phase][0] <= sample["time_ns"] <= intervals[phase][1],
@@ -1585,25 +1672,64 @@ def _resource_ownership(samples, metadata, files, allocation):
                      set(row["affinity"]) <= set(cpus) and
                      (pid == root["pid"] and
                       row["start_ticks"] == root["start_ticks"] or
-                      pid != root["pid"] and
-                      (owner == "stage" or pid in trace_sets[owner])),
+                      pid != root["pid"] and pid in trace_sets[owner]),
                      "diagnostic sampled PID ownership differs")
+            digest = row["command_sha256"]
+            _require(digest in commands, "diagnostic sampled command is missing")
+            used_commands.add(digest)
             identity = (row["start_ticks"], row["parent_pid"], group,
-                        row["session_pid"], row["command_sha256"])
-            _require(pid not in seen or seen[pid] == identity,
+                        row["session_pid"], owner, tuple(row["affinity"]))
+            prior = seen.get(pid)
+            _require(prior is None or prior[0] == identity,
                      "diagnostic sampled PID identity changed")
-            seen[pid] = identity
+            _require(prior is None or
+                     sample["wall_start_ns"] >= prior[2],
+                     "diagnostic sampled command clock moved backwards")
+            if pid == root["pid"]:
+                expected = metadata[{"stage": "stage_trace_command",
+                                     "target": "command",
+                                     "helper": "helper_command",
+                                     "observer": "observer_command"}[owner]]
+                _require(digest == hashlib.sha256(
+                    _command_bytes(expected)).hexdigest(),
+                    "diagnostic sampled tracer command differs")
+            else:
+                images = executions[owner].get(pid, [])
+                inherited = parent["command_sha256"] if parent else None
+                candidates = []
+                if not images or images[0][0] >= sample["wall_start_ns"]:
+                    candidates.append(inherited)
+                for index, (at, image_digest) in enumerate(images):
+                    until = (images[index + 1][0] if index + 1 < len(images)
+                             else None)
+                    if at <= sample["wall_end_ns"] and (
+                            until is None or until >= sample["wall_start_ns"]):
+                        candidates.append(image_digest)
+                _require(digest in candidates,
+                         "diagnostic sampled command lacks raw execution proof")
+            if prior is not None and digest != prior[1]:
+                _require(any(
+                    prior[2] <= at <= sample["wall_end_ns"] and
+                    image_digest == digest
+                    for at, image_digest in executions[owner].get(pid, [])),
+                    "diagnostic sampled command transition is unproved")
+            seen[pid] = (identity, digest, sample["wall_start_ns"])
             roles = set(row["roles"])
-            allowed = ({"gradle", "tracer"} if owner in {"stage", "target"}
-                       else {"helper", "tracer"} if owner == "helper"
-                       else {"observer", "tracer"})
+            groups = {"helper": roots["helper"]["pid"],
+                      "observer": roots["observer"]["pid"]}
+            expected_role = _sample_role(pid, group, groups,
+                                         metadata["worker_pid"],
+                                         _command_bytes(commands[digest]))
             _require(len(roles) == 1 and
-                     roles <= allowed | ({"worker"} if owner == "target" else set()) and
+                     roles == {expected_role} and
+                     (owner == "target" or "worker" not in roles) and
                      ("worker" not in roles or pid == metadata["worker_pid"]) and
                      ("helper" not in roles or pid == metadata["helper_pid"]) and
                      ("observer" not in roles or owner == "observer" and
                       pid == observer_processes[0]),
                      "diagnostic sampled PID role differs")
+    _require(used_commands == set(commands),
+             "diagnostic sampled command inventory differs")
 
 
 def _resource_evidence(samples, metadata, files, allocation):

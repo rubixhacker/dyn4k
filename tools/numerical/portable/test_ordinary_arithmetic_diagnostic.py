@@ -42,6 +42,103 @@ def sample_events():
     return "".join(rows).encode(), markers
 
 
+def resource_replay_fixture():
+    def command_hash(argv):
+        return hashlib.sha256(("\0".join(argv) + "\0").encode()).hexdigest()
+
+    def archive(traces):
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as writer:
+            for pid, lines in traces.items():
+                writer.writestr(f"trace.{pid}", lines.encode())
+        return stream.getvalue()
+
+    clock = 1700000000
+    shell = ["sh", "gradlew"]
+    java = ["java", "-cp", "x", "GradleDaemon"]
+    tracer_child = ["sleep", "1"]
+    worker = ["java", "GradleWorkerMain"]
+    helper = ["java", "OrdinaryArithmeticProbe"]
+    observer = ["python", "ordinary-diagnostic-observer"]
+    target_root = ["strace", "-ff"]
+    helper_root = ["strace", "helper"]
+    observer_root = ["strace", "observer"]
+    commands = (shell, java, tracer_child, worker, helper, observer, target_root,
+                helper_root, observer_root)
+    files = {
+        "stage-process-traces.zip": archive({
+            11: (f'{clock - 2}.100000 execve("/bin/sh", ["sh", "gradlew"], 0) = 0\n'
+                 f'{clock - 2}.300000 execve("/usr/bin/java", '
+                 '["java", "-cp", "x", "GradleDaemon"], 0) = 0\n'
+                 f'{clock - 2}.800000 +++ exited with 0 +++\n')}),
+        "all-process-traces.zip": archive({
+            101: (f'{clock}.100000 execve("/bin/sh", ["sh", "gradlew"], 0) = 0\n'
+                  f'{clock}.300000 execve("/usr/bin/java", '
+                  '["java", "-cp", "x", "GradleDaemon"], 0) = 0\n'
+                  f'{clock}.500000 execve("/usr/bin/sleep", ["sleep", "1"], 0) = 0\n'
+                  f'{clock}.800000 +++ exited with 0 +++\n'),
+            102: (f'{clock}.120000 execve("/usr/bin/java", '
+                  '["java", "GradleWorkerMain"], 0) = 0\n'
+                  f'{clock}.800000 +++ exited with 0 +++\n')}),
+        "helper-traces.zip": archive({
+            201: (f'{clock}.150000 execve("/usr/bin/java", '
+                  '["java", "OrdinaryArithmeticProbe"], 0) = 0\n'
+                  f'{clock}.800000 +++ exited with 0 +++\n')}),
+        "observer-traces.zip": archive({
+            301: (f'{clock}.900000 execve("/usr/bin/python", '
+                  '["python", "ordinary-diagnostic-observer"], 0) = 0\n'
+                  f'{clock + 1}.200000 +++ exited with 0 +++\n')})}
+
+    def root(pid):
+        return {"pid": pid, "parent_pid": 1, "group_pid": pid,
+                "session_pid": pid, "start_ticks": pid,
+                "affinity": [12, 13]}
+
+    def row(pid, parent, group, role, argv):
+        return {"pid": pid, "parent_pid": parent, "group_pid": group,
+                "session_pid": group, "start_ticks": pid,
+                "affinity": [12, 13], "roles": [role], "rss_kib": 100,
+                "command_sha256": command_hash(argv)}
+
+    metadata = {"launch_roots": {"stage": root(10), "target": root(100),
+                                    "helper": root(200), "observer": root(300)},
+                "gradle_root_pid": 100, "helper_root_pid": 200,
+                "observer_root_pid": 300, "worker_pid": 102, "helper_pid": 201,
+                "command": target_root, "helper_command": helper_root,
+                "observer_command": observer_root,
+                "resource_commands": {command_hash(argv): argv for argv in commands},
+                "supervisor_milestones_ns": {"stage_start": 1_000_000_000,
+                    "stage_end": 2_000_000_000, "gradle_start": 3_000_000_000,
+                    "target_exit": 6_000_000_000,
+                    "observer_start": 6_500_000_000,
+                    "observer_exit": 7_500_000_000}}
+    leader = row(100, 1, 100, "tracer", target_root)
+    child = row(101, 100, 100, "gradle", shell)
+    worker_row = row(102, 100, 100, "worker", worker)
+    helper_leader = row(200, 1, 200, "tracer", helper_root)
+    helper_row = row(201, 200, 200, "helper", helper)
+    observer_leader = row(300, 1, 300, "tracer", observer_root)
+    observer_row = row(301, 300, 300, "observer", observer)
+    base = clock * 1_000_000_000
+    samples = [
+        {"time_ns": 4_000_000_000, "wall_start_ns": base + 190_000_000,
+         "wall_end_ns": base + 210_000_000, "phase": "target",
+         "pids": [leader, child, worker_row, helper_leader, helper_row]},
+        {"time_ns": 4_200_000_000, "wall_start_ns": base + 390_000_000,
+         "wall_end_ns": base + 410_000_000, "phase": "target",
+         "pids": [leader, {**child, "command_sha256": command_hash(java)},
+                  worker_row, helper_leader, helper_row]},
+        {"time_ns": 4_400_000_000, "wall_start_ns": base + 590_000_000,
+         "wall_end_ns": base + 610_000_000, "phase": "target",
+         "pids": [leader, {**child, "roles": ["tracer"],
+                  "command_sha256": command_hash(tracer_child)}, worker_row,
+                  helper_leader, helper_row]},
+        {"time_ns": 7_000_000_000, "wall_start_ns": base + 990_000_000,
+         "wall_end_ns": base + 1_010_000_000, "phase": "observer",
+         "pids": [observer_leader, observer_row]}]
+    return samples, metadata, files, {"cpu_set": [12, 13]}
+
+
 class DiagnosticContractTest(unittest.TestCase):
     def test_root_allocation_is_separate_from_sampled_rss_limit(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
@@ -135,7 +232,8 @@ class DiagnosticContractTest(unittest.TestCase):
                     "parent_pid": 1, "group_pid": pid, "session_pid": pid,
                     "start_ticks": pid,
                     "affinity": [12, 13], "command_sha256": "0" * 64}
-        samples = [{"time_ns": 1, "phase": "target", "pids": [
+        samples = [{"time_ns": 1, "wall_start_ns": 1,
+                    "wall_end_ns": 2, "phase": "target", "pids": [
             row(11, ["gradle"], 100),
             row(12, ["worker"], 200),
             row(13, ["helper"], 300),
@@ -165,6 +263,49 @@ class DiagnosticContractTest(unittest.TestCase):
         with zipfile.ZipFile(safe, "w") as writer:
             writer.writestr("trace.1", b"safe raw record\n")
         self.assertEqual(check_retained(safe.getvalue(), "zip"), safe.getvalue())
+
+    def test_split_json_and_xml_sentinel_rejected_at_all_writers_and_readers(self):
+        from ordinary_arithmetic_diagnostic import _read_checked, _report_bytes, _write_checked
+        fragments = ["DYN4K_CAPTURE_ENV_", "SENTINEL=portable-capture-check"]
+        raw = (json.dumps({"probe": fragments}) + "\n").encode()
+        xml = (b'<root a="DYN4K_CAPTURE_ENV_" '
+               b'b="SENTINEL=portable-capture-check"/>')
+        for kind, payload in (("raw", raw), ("report", raw), ("jsonl", raw),
+                              ("raw", xml)):
+            with self.subTest(kind=kind, payload=payload[:5]), self.assertRaises(
+                    DiagnosticRejected):
+                check_retained(payload, kind)
+        with self.assertRaises(DiagnosticRejected):
+            _report_bytes({"probe": fragments})
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            for name, payload in (("sample.json", raw), ("sample.jsonl", raw),
+                                  ("capture.xml", xml)):
+                path = Path(directory) / name
+                with self.subTest(name=name), self.assertRaises(DiagnosticRejected):
+                    _write_checked(path, payload)
+                self.assertFalse(path.exists())
+                path.write_bytes(payload)
+                with self.subTest(read=name), self.assertRaises(DiagnosticRejected):
+                    _read_checked(path)
+        for name, payload in (("nested.json", raw), ("nested.jsonl", raw),
+                              ("nested.xml", xml), ("trace.1", raw)):
+            archive = io.BytesIO()
+            with zipfile.ZipFile(archive, "w") as writer:
+                writer.writestr(name, payload)
+            with self.subTest(member=name), self.assertRaises(DiagnosticRejected):
+                check_retained(archive.getvalue(), "zip")
+            with self.subTest(writer=name), self.assertRaises(DiagnosticRejected):
+                _zip_checked({name: payload})
+        escaped = (b'{"outer":["\\u0044YN4K_CAPTURE_ENV_",'
+                   b'"SENTINEL=portable-capture-check"]}')
+        separated_fields = (b'{"first":"\\u0044YN4K_CAPTURE_ENV_",'
+                            b'"second":"SENTINEL=portable-capture-check"}')
+        entity_xml = (b'<root a="&#68;YN4K_CAPTURE_ENV_" '
+                      b'b="SENTINEL=portable-capture-check"/>')
+        for payload in (escaped, separated_fields, entity_xml):
+            with self.subTest(decoded_fragment=payload[:20]), self.assertRaises(
+                    DiagnosticRejected):
+                check_retained(payload, "raw")
 
     def test_nested_json_privacy_rejects_escaped_sentinel_at_seams(self):
         leaked = (b'{"outer":{"nested":["\\u0044YN4K_CAPTURE_ENV_'
@@ -256,51 +397,87 @@ class DiagnosticContractTest(unittest.TestCase):
                              raw.splitlines(keepends=True)[0])
 
     def test_resource_replay_binds_process_identity_role_phase_and_affinity(self):
-        def archive(*pids):
-            stream = io.BytesIO()
-            with zipfile.ZipFile(stream, "w") as writer:
-                for pid in pids:
-                    raw = (b'1.0 execve("/usr/bin/python", '
-                           b'["python", "ordinary-diagnostic-observer"], 0) = 0\n'
-                           b'1.1 +++ exited with 0 +++\n') if pid == 301 else (
-                           b"1.0 +++ exited with 0 +++\n")
-                    writer.writestr(f"trace.{pid}", raw)
-            return stream.getvalue()
-        files = {"all-process-traces.zip": archive(101, 102),
-                 "helper-traces.zip": archive(201),
-                 "observer-traces.zip": archive(301)}
-        def root(pid):
-            return {"pid": pid, "parent_pid": 1, "group_pid": pid,
-                    "session_pid": pid, "start_ticks": pid,
-                    "affinity": [12, 13]}
-        metadata = {"launch_roots": {"stage": root(10), "target": root(100),
-                    "helper": root(200), "observer": root(300)},
-                    "gradle_root_pid": 100, "helper_root_pid": 200,
-                    "observer_root_pid": 300, "worker_pid": 102, "helper_pid": 201,
-                    "supervisor_milestones_ns": {"stage_start": 1,
-                    "stage_end": 2, "gradle_start": 3, "target_exit": 8,
-                    "observer_start": 9, "observer_exit": 10}}
-        allocation = {"cpu_set": [12, 13]}
-        row = {**root(102), "parent_pid": 100, "group_pid": 100,
-               "session_pid": 100, "roles": ["worker"],
-               "rss_kib": 1, "command_sha256": "0" * 64}
-        leader = {**root(100), "roles": ["tracer"], "rss_kib": 1,
-                  "command_sha256": "1" * 64}
-        samples = [{"time_ns": 5, "phase": "target", "pids": [leader, row]}]
+        samples, metadata, files, allocation = resource_replay_fixture()
         _resource_ownership(samples, metadata, files, allocation)
-        with self.assertRaisesRegex(DiagnosticRejected, "^UNAVAILABLE$"):
-            _resource_evidence(samples, metadata, files, allocation)
-        for changed in ({**row, "pid": 999999999},
-                        {**row, "group_pid": 200},
-                        {**row, "affinity": [11]},
-                        {**row, "roles": ["observer"]}):
-            with self.subTest(changed=changed), self.assertRaises(DiagnosticRejected):
-                _resource_ownership([{"time_ns": 5, "phase": "target",
-                                      "pids": [leader, changed]}], metadata, files,
-                                    allocation)
+        observed = _resource_evidence(samples, metadata, files, allocation)
+        self.assertEqual(observed["observed_role_peak_kib"]["gradle"], 100)
+        self.assertEqual(observed["sampled_aggregate_peak_kib"], 500)
+        self.assertEqual(samples[2]["pids"][1]["roles"], ["tracer"])
+        for change in ({"pid": 999999999}, {"start_ticks": 999},
+                       {"parent_pid": 200}, {"group_pid": 200},
+                       {"session_pid": 200}, {"affinity": [11]},
+                       {"roles": ["tracer"]}):
+            changed = json.loads(json.dumps(samples))
+            changed[1]["pids"][1].update(change)
+            with self.subTest(change=change), self.assertRaises(DiagnosticRejected):
+                _resource_ownership(changed, metadata, files, allocation)
+        for role in ("tracer", "worker", "helper", "observer"):
+            changed = json.loads(json.dumps(samples))
+            changed[1]["pids"][1]["roles"] = [role]
+            with self.subTest(spoof=role), self.assertRaises(DiagnosticRejected):
+                _resource_ownership(changed, metadata, files, allocation)
+        for sample_index, row_index in ((0, 2), (0, 4), (3, 1)):
+            changed = json.loads(json.dumps(samples))
+            changed[sample_index]["pids"][row_index]["roles"] = ["tracer"]
+            with self.subTest(role_pid=changed[sample_index]["pids"][row_index]["pid"]), \
+                    self.assertRaises(DiagnosticRejected):
+                _resource_ownership(changed, metadata, files, allocation)
+        changed = json.loads(json.dumps(samples))
+        changed[1]["pids"][1]["command_sha256"] = "f" * 64
         with self.assertRaises(DiagnosticRejected):
-            _resource_ownership([{"time_ns": 11, "phase": "target",
-                                  "pids": [leader, row]}], metadata, files, allocation)
+            _resource_ownership(changed, metadata, files, allocation)
+        unproved = json.loads(json.dumps(samples))
+        argv = ["java", "UntracedProgram"]
+        digest = hashlib.sha256(("\0".join(argv) + "\0").encode()).hexdigest()
+        unproved[1]["pids"][1]["command_sha256"] = digest
+        metadata_with_command = {**metadata,
+            "resource_commands": {**metadata["resource_commands"], digest: argv}}
+        with self.assertRaisesRegex(DiagnosticRejected, "raw execution proof"):
+            _resource_ownership(unproved, metadata_with_command, files, allocation)
+        untraced = json.loads(json.dumps(samples))
+        untraced[1]["wall_start_ns"] -= 140_000_000
+        untraced[1]["wall_end_ns"] -= 140_000_000
+        with self.assertRaises(DiagnosticRejected):
+            _resource_ownership(untraced, metadata, files, allocation)
+        with self.assertRaises(DiagnosticRejected):
+            changed = json.loads(json.dumps(samples))
+            changed[1]["time_ns"] = 7_600_000_000
+            _resource_ownership(changed, metadata, files, allocation)
+
+    def test_stage_exec_requires_its_retained_process_trace(self):
+        samples, metadata, files, allocation = resource_replay_fixture()
+        command_hashes = metadata["resource_commands"]
+        shell = next(digest for digest, argv in command_hashes.items()
+                     if argv == ["sh", "gradlew"])
+        java = next(digest for digest, argv in command_hashes.items()
+                    if argv == ["java", "-cp", "x", "GradleDaemon"])
+        stage_command = ["strace", "stage"]
+        stage_hash = hashlib.sha256(("\0".join(stage_command) + "\0").encode()).hexdigest()
+        metadata = {**metadata, "stage_trace_command": stage_command,
+                    "resource_commands": {digest: command_hashes[digest]
+                        for digest in (shell, java)} | {stage_hash: stage_command}}
+        root = {"pid": 10, "parent_pid": 1, "group_pid": 10,
+                "session_pid": 10, "start_ticks": 10,
+                "affinity": [12, 13], "roles": ["tracer"], "rss_kib": 10,
+                "command_sha256": stage_hash}
+        child = {**root, "pid": 11, "parent_pid": 10, "start_ticks": 11,
+                 "roles": ["gradle"], "command_sha256": shell}
+        base = 1699999998 * 1_000_000_000
+        stage_samples = [
+            {"time_ns": 1_200_000_000, "wall_start_ns": base + 190_000_000,
+             "wall_end_ns": base + 210_000_000, "phase": "stage",
+             "pids": [root, child]},
+            {"time_ns": 1_400_000_000, "wall_start_ns": base + 390_000_000,
+             "wall_end_ns": base + 410_000_000, "phase": "stage",
+             "pids": [root, {**child, "command_sha256": java}]}]
+        _resource_ownership(stage_samples, metadata, files, allocation)
+        changed = dict(files)
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("trace.11", b"1699999998.800000 +++ exited with 0 +++\n")
+        changed["stage-process-traces.zip"] = archive.getvalue()
+        with self.assertRaises(DiagnosticRejected):
+            _resource_ownership(stage_samples, metadata, changed, allocation)
 
     def test_live_proc_sample_records_own_group_start_and_cpu_affinity(self):
         child = subprocess.Popen(["sleep", "5"], start_new_session=True)
