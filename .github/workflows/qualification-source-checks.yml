@@ -79,6 +79,7 @@ jobs:
               test_actual_capture_v6 \
               test_actual_trace \
               test_ordinary_arithmetic_diagnostic \
+              ordinary_snapshot.test_control \
               test_capture_actual \
               test_rotation_oracle \
               test_rotation_marker \

@@ -449,7 +449,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "python3 -B -m unittest -v "
                  "test_actual_arithmetic test_actual_capture_receipt "
                  "test_actual_capture_v6 test_actual_trace "
-                 "test_ordinary_arithmetic_diagnostic "
+                 "test_ordinary_arithmetic_diagnostic ordinary_snapshot.test_control "
                  "test_capture_actual test_rotation_oracle test_rotation_marker "
                  "test_prospective_compare test_witness test_source_guard "
                  "test_jdi_bridge test_pulley_jdi_v1 test_pulley_jdi_v2 "
@@ -606,6 +606,38 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             with self.subTest(mutation=name):
                 mutated = source.replace(old, new, 1)
                 self.assertNotEqual(source, mutated, name)
+                with self.assertRaises(AssertionError):
+                    self.assert_source_checks_job_contract(mutated)
+
+    def test_source_checks_run_bounded_snapshot_controls(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assert_source_checks_job_contract(source)
+        step = re.search(
+            r"(?ms)^      - name: Test source-only numerical regressions including bounded live-process tests\n"
+            r".*?(?=^      - (?:name|uses): |\Z)",
+            source,
+        )
+        self.assertIsNotNone(step)
+        block = step.group(0)
+        self.assertEqual(1, block.count("ordinary_snapshot.test_control"))
+        self.assertIn("test_ordinary_arithmetic_diagnostic", block)
+        self.assertLess(
+            block.index("test_ordinary_arithmetic_diagnostic"),
+            block.index("ordinary_snapshot.test_control"),
+        )
+        self.assertIn('export TMPDIR="$source_checks_tmp"', block)
+        self.assertIn('python3 -B -m unittest -v', block)
+        self.assertNotIn("DYN4K_PRIVATE_STRACE", block)
+        self.assertNotIn("DYN4K_STRACE_SOURCE", block)
+
+        mutations = (
+            ("snapshot controls omitted", " ordinary_snapshot.test_control", ""),
+            ("snapshot module altered", "ordinary_snapshot.test_control", "ordinary_snapshot.other_module"),
+        )
+        for name, old, new in mutations:
+            with self.subTest(mutation=name):
+                self.assertEqual(1, block.count(old), name)
+                mutated = source.replace(block, block.replace(old, new, 1), 1)
                 with self.assertRaises(AssertionError):
                     self.assert_source_checks_job_contract(mutated)
 
@@ -1031,6 +1063,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "test_actual_arithmetic test_actual_capture_receipt "
             "test_actual_capture_v6 test_actual_trace "
             "test_ordinary_arithmetic_diagnostic "
+            "ordinary_snapshot.test_control "
             "test_capture_actual test_rotation_oracle test_rotation_marker "
             "test_prospective_compare test_witness test_source_guard "
             "test_jdi_bridge test_pulley_jdi_v1 test_pulley_jdi_v2 "
