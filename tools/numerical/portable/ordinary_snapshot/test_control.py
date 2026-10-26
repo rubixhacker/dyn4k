@@ -2,14 +2,18 @@ import io
 import json
 import os
 from pathlib import Path
+import select
 import re
+import shutil
 import subprocess
 import signal
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
+import uuid
 import zipfile
 
 from ordinary_snapshot.control import SnapshotIncomplete, SnapshotOwnedProcesses
@@ -18,7 +22,127 @@ from ordinary_arithmetic_diagnostic import _pidfd_exited, _proc_identity, check_
 import ordinary_arithmetic_diagnostic as diagnostic
 
 
+class NativeAttempt:
+    def __init__(self, label):
+        self.label = label
+        self.directory = None
+        self.scratch = None
+
+    def __enter__(self):
+        self.directory = tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"])
+        self.scratch = Path(self.directory.name)
+        return self
+
+    def capture(self, stdout, stderr):
+        (self.scratch / "stdout.raw").write_bytes(stdout)
+        (self.scratch / "stderr.raw").write_bytes(stderr)
+
+    def __exit__(self, error_type, error, traceback):
+        try:
+            if error_type is not None:
+                root = Path(os.environ.get("DYN4K_NATIVE_FAILURES",
+                                           Path.cwd() / "ordinary-snapshot-native-failures"))
+                target = root / f"{self.label}-{uuid.uuid4().hex}"
+                target.mkdir(parents=True, mode=0o700)
+                for path in self.scratch.iterdir():
+                    if (path.name.startswith("trace.") or path.name in
+                            {"ptrace-events.jsonl", "snapshot-controls.jsonl",
+                             "stdout.raw", "stderr.raw"}):
+                        shutil.copyfile(path, target / path.name)
+                (target / "outcome.json").write_text(json.dumps({
+                    "status": "FAILED", "error_type": error_type.__name__,
+                    "error": str(error), "files": sorted(item.name for item in
+                                                         target.iterdir())}) + "\n")
+                print(f"native attempt retained: {target}", file=sys.stderr)
+        finally:
+            self.directory.cleanup()
+        return False
+
+
 class NativeSnapshotControlTest(unittest.TestCase):
+    def test_timed_out_build_command_reaps_term_ignoring_descendant(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            pidfile = Path(directory) / "child.pid"
+            sentinel = subprocess.Popen(["/bin/sleep", "5"])
+            handle = None
+            observed = []
+            def open_child():
+                until = time.monotonic() + 3
+                while not pidfile.exists() and time.monotonic() < until:
+                    time.sleep(0.001)
+                if pidfile.exists():
+                    observed.append(os.pidfd_open(int(pidfile.read_text())))
+            watcher = threading.Thread(target=open_child)
+            watcher.start()
+            try:
+                result = run_build_command([
+                    sys.executable, str(Path(__file__).with_name(
+                        "adverse_build_child.py")), str(pidfile)],
+                    directory, os.environ, 0.3)
+                watcher.join(timeout=3)
+                handle = observed[0]
+                self.assertEqual((result["exit_code"], result["timed_out"]),
+                                 (124, True))
+                self.assertTrue(select.select([handle], [], [], 0)[0])
+                self.assertIsNone(sentinel.poll())
+            finally:
+                watcher.join(timeout=3)
+                if handle is None and observed:
+                    handle = observed[0]
+                if handle is not None:
+                    if not select.select([handle], [], [], 0)[0]:
+                        signal.pidfd_send_signal(handle, signal.SIGKILL)
+                        self.assertTrue(select.select([handle], [], [], 3)[0])
+                    os.close(handle)
+                if sentinel.poll() is None:
+                    sentinel.kill()
+                sentinel.wait(timeout=3)
+
+    def test_completed_build_command_keeps_unrelated_process(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            sentinel = subprocess.Popen(["/bin/sleep", "5"])
+            try:
+                result = run_build_command([sys.executable, "-c",
+                                            "print('complete')"],
+                                           directory, os.environ, 3)
+                self.assertEqual((result["exit_code"], result["timed_out"],
+                                  result["stdout"]), (0, False, b"complete\n"))
+                self.assertIsNone(sentinel.poll())
+            finally:
+                if sentinel.poll() is None:
+                    sentinel.kill()
+                sentinel.wait(timeout=3)
+
+    def test_native_attempt_retains_injected_failure_after_return(self):
+        parent = Path(os.environ.get("DYN4K_NATIVE_FAILURES", os.environ["TMPDIR"]))
+        root = parent / f"native-failure-test-{uuid.uuid4().hex}"
+        with mock.patch.dict(os.environ, {"DYN4K_NATIVE_FAILURES": str(root)}):
+            with self.assertRaisesRegex(RuntimeError, "injected failure"):
+                with NativeAttempt("injected") as attempt:
+                    (attempt.scratch / "trace.123").write_bytes(b"raw trace\n")
+                    (attempt.scratch / "ptrace-events.jsonl").write_bytes(b"birth\n")
+                    (attempt.scratch / "snapshot-controls.jsonl").write_bytes(b"freeze\n")
+                    attempt.capture(b"raw stdout\n", b"raw stderr\n")
+                    raise RuntimeError("injected failure")
+            paths = list(root.glob("injected-*/outcome.json"))
+            self.assertEqual(len(paths), 1)
+            retained = paths[0].parent
+            self.assertEqual(json.loads(paths[0].read_text())["status"], "FAILED")
+            self.assertEqual((retained / "trace.123").read_bytes(), b"raw trace\n")
+            self.assertEqual((retained / "ptrace-events.jsonl").read_bytes(), b"birth\n")
+            self.assertEqual((retained / "snapshot-controls.jsonl").read_bytes(), b"freeze\n")
+            self.assertEqual((retained / "stdout.raw").read_bytes(), b"raw stdout\n")
+            self.assertEqual((retained / "stderr.raw").read_bytes(), b"raw stderr\n")
+        if "DYN4K_NATIVE_FAILURES" not in os.environ:
+            shutil.rmtree(root)
+
+    def test_native_attempt_success_removes_scratch(self):
+        with NativeAttempt("successful") as attempt:
+            scratch = attempt.scratch
+            (scratch / "toy").write_bytes(b"build output")
+            attempt.capture(b"", b"")
+        self.assertFalse(scratch.exists())
+
     def test_timed_out_build_command_kills_compiler_descendant(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
             pidfile = Path(directory) / "child.pid"
@@ -379,9 +503,9 @@ class NativeSnapshotControlTest(unittest.TestCase):
                   "held_child", "drain_child", "untraced", "untraced_live")]
         modes.append(("fast", True))
         for mode, child_first in modes:
-            with self.subTest(mode=mode, child_first=child_first), tempfile.TemporaryDirectory(
-                    dir=os.environ["TMPDIR"]) as directory:
-                scratch = Path(directory)
+            with self.subTest(mode=mode, child_first=child_first), NativeAttempt(
+                    f"mode-{mode}-child-first-{int(child_first)}") as attempt:
+                scratch = attempt.scratch
                 owned = SnapshotOwnedProcesses(scratch, scratch, _proc_identity,
                                                _pidfd_exited, check_retained)
                 environment = owned.prepare("stage", os.environ)
@@ -422,6 +546,10 @@ class NativeSnapshotControlTest(unittest.TestCase):
                             break
                         time.sleep(0.005)
                     stdout, stderr = process.communicate(timeout=3)
+                    attempt.capture(stdout, stderr)
+                    if (os.environ.get("DYN4K_INJECT_NATIVE_FAILURE") == mode
+                            and not child_first):
+                        raise RuntimeError("injected native lifecycle failure")
                     traces, raw_events = diagnostic._raw_events(
                         diagnostic._trace_archive(trace))
                     if mode == "nonleader_hold":
@@ -479,18 +607,20 @@ class NativeSnapshotControlTest(unittest.TestCase):
                 finally:
                     if process.poll() is None:
                         process.kill()
-                        process.wait(timeout=3)
+                    final_stdout, final_stderr = process.communicate(timeout=3)
+                    if not (scratch / "stdout.raw").exists():
+                        attempt.capture(final_stdout, final_stderr)
                     owned.close()
 
     def test_held_process_has_exact_live_identity_and_resumes(self):
         binary = os.environ.get("DYN4K_PRIVATE_STRACE")
         if not binary:
             self.skipTest("private tracer path is not provided")
-        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+        with NativeAttempt("held-process") as attempt:
             sentinel = subprocess.Popen(["/bin/sleep", "1"],
                                         stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE)
-            scratch = Path(directory)
+            scratch = attempt.scratch
             owned = SnapshotOwnedProcesses(scratch, scratch, _proc_identity,
                                            _pidfd_exited, check_retained)
             environment = owned.prepare("stage", os.environ)
@@ -516,6 +646,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
                     owned.pump({"stage"})
                     time.sleep(0.005)
                 stdout, stderr = process.communicate(timeout=3)
+                attempt.capture(stdout, stderr)
                 self.assertEqual((process.returncode, stdout, stderr), (0, b"", b""))
                 owned.stop({"stage"})
                 self.assertIsNone(sentinel.poll())
@@ -524,7 +655,9 @@ class NativeSnapshotControlTest(unittest.TestCase):
             finally:
                 if process.poll() is None:
                     process.kill()
-                    process.wait(timeout=3)
+                final_stdout, final_stderr = process.communicate(timeout=3)
+                if not (scratch / "stdout.raw").exists():
+                    attempt.capture(final_stdout, final_stderr)
                 owned.close()
                 sentinel.communicate(timeout=3)
 
@@ -532,8 +665,8 @@ class NativeSnapshotControlTest(unittest.TestCase):
         binary = os.environ.get("DYN4K_PRIVATE_STRACE")
         if not binary:
             self.skipTest("private tracer path is not provided")
-        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
-            scratch = Path(directory)
+        with NativeAttempt("freeze-drain-birth") as attempt:
+            scratch = attempt.scratch
             fixture = scratch / "toy"
             subprocess.run(["gcc", "-O2", "-pthread",
                             str(Path(__file__).with_name("toy.c")), "-o",
@@ -575,7 +708,8 @@ class NativeSnapshotControlTest(unittest.TestCase):
                 while process.poll() is None and time.monotonic() < deadline:
                     owned.pump({"stage"})
                     time.sleep(0.002)
-                process.communicate(timeout=3)
+                stdout, stderr = process.communicate(timeout=3)
+                attempt.capture(stdout, stderr)
                 traces, raw = diagnostic._raw_events(
                     diagnostic._trace_archive(trace))
                 diagnostic._verify_spawn_births(traces, raw,
@@ -584,15 +718,17 @@ class NativeSnapshotControlTest(unittest.TestCase):
             finally:
                 if process.poll() is None:
                     process.kill()
-                    process.wait(timeout=3)
+                final_stdout, final_stderr = process.communicate(timeout=3)
+                if not (scratch / "stdout.raw").exists():
+                    attempt.capture(final_stdout, final_stderr)
                 owned.close()
 
     def test_cleanup_drains_new_bound_child_without_signaling_sentinel(self):
         binary = os.environ.get("DYN4K_PRIVATE_STRACE")
         if not binary:
             self.skipTest("private tracer path is not provided")
-        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
-            scratch = Path(directory)
+        with NativeAttempt("cleanup-drain-child") as attempt:
+            scratch = attempt.scratch
             fixture = scratch / "toy"
             subprocess.run(["gcc", "-O2", "-pthread",
                             str(Path(__file__).with_name("toy.c")), "-o",
@@ -625,7 +761,8 @@ class NativeSnapshotControlTest(unittest.TestCase):
             finally:
                 if process.poll() is None:
                     process.kill()
-                process.communicate(timeout=3)
+                stdout, stderr = process.communicate(timeout=3)
+                attempt.capture(stdout, stderr)
                 if sentinel.poll() is None:
                     sentinel.kill()
                 sentinel.wait(timeout=3)

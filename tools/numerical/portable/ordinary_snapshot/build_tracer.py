@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import select
 import shutil
 import signal
 import subprocess
@@ -27,6 +28,38 @@ def write_record(path, record):
     os.replace(pending, path)
 
 
+def _live_group_members(group, handles):
+    live = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+            if int(fields[2]) != group or fields[0] in {"Z", "X"}:
+                continue
+            pid = int(entry.name)
+            if pid not in handles:
+                handles[pid] = os.pidfd_open(pid)
+            if not select.select([handles[pid]], [], [], 0)[0]:
+                live.append(pid)
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+    return live
+
+
+def _wait_group_exit(process, handles, deadline):
+    while time.monotonic() < deadline:
+        live = _live_group_members(process.pid, handles)
+        if not live and all(select.select([handle], [], [], 0)[0]
+                            for handle in handles.values()):
+            process.poll()
+            return process.returncode is not None
+        time.sleep(0.02)
+    return (not _live_group_members(process.pid, handles) and
+            all(select.select([handle], [], [], 0)[0]
+                for handle in handles.values()) and process.poll() is not None)
+
+
 def run(argv, cwd, environment, timeout):
     started = time.time_ns()
     if timeout <= 0:
@@ -43,6 +76,7 @@ def run(argv, cwd, environment, timeout):
                 "timed_out": False, "stdout": b"",
                 "stderr": str(error).encode("utf-8", "replace")}
     timed_out = False
+    handles = {}
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except (subprocess.TimeoutExpired, TimeoutError):
@@ -52,13 +86,20 @@ def run(argv, cwd, environment, timeout):
         except ProcessLookupError:
             pass
         try:
-            stdout, stderr = process.communicate(timeout=2)
-        except subprocess.TimeoutExpired:
+            if not _wait_group_exit(process, handles, time.monotonic() + 2):
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                if not _wait_group_exit(process, handles, time.monotonic() + 2):
+                    raise RuntimeError("owned build group exit could not be established")
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            stdout, stderr = process.communicate()
+                stdout, stderr = process.communicate(timeout=0.5)
+            except subprocess.TimeoutExpired as error:
+                raise RuntimeError("owned build streams did not close after group exit") from error
+        finally:
+            for handle in handles.values():
+                os.close(handle)
     return {"argv": argv, "cwd": str(cwd), "utc_start_ns": started,
             "utc_end_ns": time.time_ns(), "exit_code": 124 if timed_out else process.returncode,
             "timed_out": timed_out, "stdout": stdout, "stderr": stderr}
