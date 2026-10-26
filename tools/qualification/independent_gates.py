@@ -171,6 +171,15 @@ ORDINARY_DIAGNOSTIC_OWNED_PROCESS_SOURCE_REVISION = "298ae2c9c2002da93a902c55433
 ORDINARY_DIAGNOSTIC_TRACE_ORIGIN_SOURCE_REVISION = "008019f106d777f8b40fc090d289739d0ea572cb"
 ORDINARY_DIAGNOSTIC_LINEAGE_REMEDY_SOURCE_REVISION = "dab9cdb1e875dd569531b86a9bc4eb6674abf942"
 ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_SOURCE_REVISION = "4d51856e1c8133fbef2074a61ccaedd8c8d8d677"
+ORDINARY_DIAGNOSTIC_SNAPSHOT_SOURCE_REVISION = "6904520187a6cfe7d293f8d6e27a8a2c6f3bd740"
+ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_REVISION = "e12a85ff5541d60ca0ceb673b0024f670a93b1be"
+ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_REVISION = "ff6515cc7249876349adf08d5bee7d84f333c15a"
+ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_SOURCE_REVISION = "0949a3de445395ac76f3c786cedd32729903cfc4"
+ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_REVISION = "f5007605c8058c389e2e025e10edb9d03178401c"
+ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_REVISION = "74f958fc7ea7bf5031275f6e2e41d3d268888dfb"
+ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_SOURCE_REVISION = "d205669e2a53246382917b148af6be5e7004b2c4"
+ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_SOURCE_REVISION = "b964cccf3064ef67a2aeb07acd25aeca39a09ce8"
+ORDINARY_DIAGNOSTIC_REAL_REBUILD_SOURCE_REVISION = "4a08b30002f6869a8b155f5d764c64772f5018d0"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -638,6 +647,119 @@ ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_CAPTURE_DEPENDENCIES = {
     **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
     **ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_SOURCE_DEPENDENCIES,
 }
+ORDINARY_DIAGNOSTIC_SNAPSHOT_SOURCE_DEPENDENCIES = {
+    **ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_SOURCE_DEPENDENCIES,
+    "tools/numerical/portable/ordinary_arithmetic_diagnostic.py":
+        "8e6466fc774b916bd35aa3523f343ef00c4d89ccb257489e038e122b198c9c5f",
+    "tools/numerical/portable/ordinary_snapshot/build_tracer.py":
+        "0bb5f2ea802bd0f7629ee6294889a2da4b0c7097f073f085a5c4c4f3d7a3a888",
+    "tools/numerical/portable/ordinary_snapshot/control.py":
+        "46e1b0634f16a9a2e98344c2abded40c30fe64766d1f31cea94ff3820c59a72f",
+    "tools/numerical/portable/ordinary_snapshot/owned_snapshot.inc":
+        "b20b97ecde0ea4fe77eeb1a54ad055e66ec4dbb4beea23942d4dfe4d8163c061",
+    "tools/numerical/portable/ordinary_snapshot/strace-7.2.patch":
+        "53281deb71b962557e932e9274842116d21b709f033564bee05e35365ab1c57c",
+}
+ORDINARY_DIAGNOSTIC_SNAPSHOT_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_SNAPSHOT_SOURCE_DEPENDENCIES,
+}
+ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_DEPENDENCIES = {
+    **ORDINARY_DIAGNOSTIC_SNAPSHOT_SOURCE_DEPENDENCIES,
+    "tools/numerical/portable/ordinary_snapshot/owned_snapshot.inc":
+        "f43e69ca6a8cc4dfef7f72e70dff3a9ddfca3f0254748df86edc743fd8ec5ed4",
+}
+ORDINARY_DIAGNOSTIC_CHILD_FIRST_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_DEPENDENCIES,
+}
+ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_DEPENDENCIES = {
+    **ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_DEPENDENCIES,
+    "tools/numerical/portable/ordinary_arithmetic_diagnostic.py":
+        "1086898a948eac00e21f12e0cd3e0cef65116ed6f9a413678dbaa83f7449cff4",
+    "tools/numerical/portable/ordinary_snapshot/build_tracer.py":
+        "1f79a34e2bf0fdd8725e2ee246232e5f73c2644c1bcd47264bdd9c434b5265e5",
+    "tools/numerical/portable/ordinary_snapshot/control.py":
+        "c7e7ad7d7ce7168ec593d12365cce9503f116219f718468495221db6a13005ce",
+    "tools/numerical/portable/ordinary_snapshot/owned_snapshot.inc":
+        "c1eeca6aaf9532e9786d9b30685150b170415822ae1283edab074830cd350566",
+    "tools/numerical/portable/ordinary_snapshot/strace-7.2.patch":
+        "e4106dfe9d1bf7a10142aa6344479a1dfac5abf84ec24d9dfd9805cb16615f59",
+    "tools/numerical/portable/ordinary_snapshot/toy.c":
+        "83a1f40706867a6091ab25364140b54b6c472055de7284a83e5676e747be6f97",
+    "tools/numerical/portable/ordinary_snapshot/test_control.py":
+        "d69f237826b9022b0a0bba63974cae70865babdd802979d2b5e1039eae46dbd1",
+}
+ORDINARY_DIAGNOSTIC_REMEDY_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_DEPENDENCIES,
+}
+ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_SOURCE_DEPENDENCIES = {
+    **ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_DEPENDENCIES,
+    "tools/numerical/portable/ordinary_snapshot/build_tracer.py":
+        "74824c33e893dd11728799d4575c489392e4b0854a5134a6a6fc8243c07bdada",
+    "tools/numerical/portable/ordinary_snapshot/test_control.py":
+        "76bed3dbff9e5ad3a8faf7f307c03c016658d1e5452b0f1c60f6e7f52e813556",
+    "tools/numerical/portable/ordinary_snapshot/adverse_build_child.py":
+        "81c32a32fc4a90fb1bd7000d6197bf87171b39e1c9bc67d0ef0611bbe594bd95",
+}
+ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_SOURCE_DEPENDENCIES,
+}
+ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_DEPENDENCIES = {
+    **ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_SOURCE_DEPENDENCIES,
+    "tools/numerical/portable/ordinary_snapshot/test_control.py":
+        "2abfc4ce332322e0417fd92178f5b89bcc959ac9c5dbf64547480cf27788bfd8",
+}
+ORDINARY_DIAGNOSTIC_BUILD_PID_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_DEPENDENCIES,
+}
+ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_DEPENDENCIES = {
+    **ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_DEPENDENCIES,
+    "tools/numerical/portable/ordinary_snapshot/build_tracer.py":
+        "504a847c75ed626a3d0525909a5c48c7370adf01ffe72d6c1b0ae15d23778bc8",
+    "tools/numerical/portable/ordinary_snapshot/test_control.py":
+        "22007bc6e8b885294b8a56d647d060160b5196760e8abdf96b8049f417dfc90f",
+}
+ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_DEPENDENCIES,
+}
+ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_SOURCE_DEPENDENCIES = {
+    **ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_DEPENDENCIES,
+    "tools/numerical/portable/ordinary_snapshot/build_tracer.py":
+        "7a20bf1ef0cfb75d72d4b5761cad5d8cf03de42651c1abe17c9c31466068fedd",
+    "tools/numerical/portable/ordinary_snapshot/test_control.py":
+        "93e5e7db402b637167c220fd4f4fd481e2b168d38976f965a0bdb7e2e630cf16",
+    "tools/numerical/portable/ordinary_snapshot/adverse_normal_exit_child.py":
+        "669445c7eae0e1eeeedf2e2cc1bb2edc9d2ebc3a86907390a65b1c2b141e1404",
+}
+ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_SOURCE_DEPENDENCIES,
+}
+ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_SOURCE_DEPENDENCIES = {
+    **ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_SOURCE_DEPENDENCIES,
+    "tools/numerical/portable/ordinary_snapshot/build_tracer.py":
+        "35033ebab9ff8e02c4dd42bd8aaf9a79e852b5d0dd773d8f2d8d2b4b5623b063",
+    "tools/numerical/portable/ordinary_snapshot/test_control.py":
+        "d3bf2d6e75549e74fad3f43ccd99b5fd75d547be1af8b8b57216bdf6d8954bf3",
+}
+ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_SOURCE_DEPENDENCIES,
+}
+ORDINARY_DIAGNOSTIC_REAL_REBUILD_SOURCE_DEPENDENCIES = {
+    **ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_SOURCE_DEPENDENCIES,
+    "tools/numerical/portable/ordinary_snapshot/test_control.py":
+        "ef636cb8f87b6ace2a0d80a2648b0fbd2ed0e913f8e25be6a967c7fee8617f67",
+}
+ORDINARY_DIAGNOSTIC_REAL_REBUILD_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_REAL_REBUILD_SOURCE_DEPENDENCIES,
+}
 P2_V6_DEPENDENCIES = {
     **P2_EXECUTABLE_LOCAL_DEPENDENCIES,
     "tools/numerical/portable/build.gradle.kts":
@@ -785,6 +907,42 @@ P2_ORDINARY_DIAGNOSTIC_LINEAGE_REMEDY_DEPENDENCIES = {
 P2_ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_DEPENDENCIES = {
     **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
     **ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_SOURCE_DEPENDENCIES,
+}
+P2_ORDINARY_DIAGNOSTIC_SNAPSHOT_DEPENDENCIES = {
+    **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_SNAPSHOT_SOURCE_DEPENDENCIES,
+}
+P2_ORDINARY_DIAGNOSTIC_CHILD_FIRST_DEPENDENCIES = {
+    **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_DEPENDENCIES,
+}
+P2_ORDINARY_DIAGNOSTIC_REMEDY_DEPENDENCIES = {
+    **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_DEPENDENCIES,
+}
+P2_ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_DEPENDENCIES = {
+    **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_SOURCE_DEPENDENCIES,
+}
+P2_ORDINARY_DIAGNOSTIC_BUILD_PID_DEPENDENCIES = {
+    **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_DEPENDENCIES,
+}
+P2_ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_DEPENDENCIES = {
+    **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_DEPENDENCIES,
+}
+P2_ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_DEPENDENCIES = {
+    **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_SOURCE_DEPENDENCIES,
+}
+P2_ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_DEPENDENCIES = {
+    **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_SOURCE_DEPENDENCIES,
+}
+P2_ORDINARY_DIAGNOSTIC_REAL_REBUILD_DEPENDENCIES = {
+    **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_REAL_REBUILD_SOURCE_DEPENDENCIES,
 }
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_JVM8_PRODUCERS = {
@@ -1327,6 +1485,24 @@ def _prospective_checker_binding(repository, candidate_sha):
         ORDINARY_DIAGNOSTIC_LINEAGE_REMEDY_SOURCE_REVISION)
     ordinary_diagnostic_cleanup_detail_window = descends_from(
         ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_SOURCE_REVISION)
+    ordinary_diagnostic_snapshot_window = descends_from(
+        ORDINARY_DIAGNOSTIC_SNAPSHOT_SOURCE_REVISION)
+    ordinary_diagnostic_child_first_window = descends_from(
+        ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_REVISION)
+    ordinary_diagnostic_remedy_window = descends_from(
+        ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_REVISION)
+    ordinary_diagnostic_build_cleanup_window = descends_from(
+        ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_SOURCE_REVISION)
+    ordinary_diagnostic_build_pid_window = descends_from(
+        ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_REVISION)
+    ordinary_diagnostic_build_lifecycle_window = descends_from(
+        ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_REVISION)
+    ordinary_diagnostic_build_normal_exit_window = descends_from(
+        ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_SOURCE_REVISION)
+    ordinary_diagnostic_build_leader_identity_window = descends_from(
+        ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_SOURCE_REVISION)
+    ordinary_diagnostic_real_rebuild_window = descends_from(
+        ORDINARY_DIAGNOSTIC_REAL_REBUILD_SOURCE_REVISION)
     observer_env_replay_window = descends_from(OBSERVER_ENV_REPLAY_SOURCE_REVISION)
     jdi_replay_cost_window = descends_from(JDI_REPLAY_COST_SOURCE_REVISION)
     replay_cost_window = descends_from(REPLAY_COST_SOURCE_REVISION)
@@ -1416,7 +1592,25 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
         if hashlib.sha256(committed).hexdigest() != expected:
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
-    executable_dependencies = (ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_CAPTURE_DEPENDENCIES
+    executable_dependencies = (ORDINARY_DIAGNOSTIC_REAL_REBUILD_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_real_rebuild_window else
+                               ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_build_leader_identity_window else
+                               ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_build_normal_exit_window else
+                               ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_build_lifecycle_window else
+                               ORDINARY_DIAGNOSTIC_BUILD_PID_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_build_pid_window else
+                               ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_build_cleanup_window else
+                               ORDINARY_DIAGNOSTIC_REMEDY_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_remedy_window else
+                               ORDINARY_DIAGNOSTIC_CHILD_FIRST_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_child_first_window else
+                               ORDINARY_DIAGNOSTIC_SNAPSHOT_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_snapshot_window else
+                               ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_CAPTURE_DEPENDENCIES
                                if ordinary_diagnostic_cleanup_detail_window else
                                ORDINARY_DIAGNOSTIC_LINEAGE_REMEDY_CAPTURE_DEPENDENCIES
                                if ordinary_diagnostic_lineage_remedy_window else
@@ -1456,7 +1650,7 @@ def _prospective_checker_binding(repository, candidate_sha):
                                PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES
                                if executable_window else {})
     local_dependencies = (APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
-                          ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_CAPTURE_DEPENDENCIES)
+                          ORDINARY_DIAGNOSTIC_REAL_REBUILD_CAPTURE_DEPENDENCIES)
     for relative, expected in local_dependencies.items():
         local = Path(__file__).resolve().parents[2] / relative
         try:
@@ -1586,6 +1780,24 @@ def _p2_producer_binding(repository, candidate_sha):
         ORDINARY_DIAGNOSTIC_LINEAGE_REMEDY_SOURCE_REVISION)
     ordinary_diagnostic_cleanup_detail_window = descends_from(
         ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_SOURCE_REVISION)
+    ordinary_diagnostic_snapshot_window = descends_from(
+        ORDINARY_DIAGNOSTIC_SNAPSHOT_SOURCE_REVISION)
+    ordinary_diagnostic_child_first_window = descends_from(
+        ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_REVISION)
+    ordinary_diagnostic_remedy_window = descends_from(
+        ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_REVISION)
+    ordinary_diagnostic_build_cleanup_window = descends_from(
+        ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_SOURCE_REVISION)
+    ordinary_diagnostic_build_pid_window = descends_from(
+        ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_REVISION)
+    ordinary_diagnostic_build_lifecycle_window = descends_from(
+        ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_REVISION)
+    ordinary_diagnostic_build_normal_exit_window = descends_from(
+        ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_SOURCE_REVISION)
+    ordinary_diagnostic_build_leader_identity_window = descends_from(
+        ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_SOURCE_REVISION)
+    ordinary_diagnostic_real_rebuild_window = descends_from(
+        ORDINARY_DIAGNOSTIC_REAL_REBUILD_SOURCE_REVISION)
     jdk21_jdi = descends_from(P2_JDK21_JDI_SOURCE_REVISION)
     corrected_jdi = descends_from(P2_CORRECTED_JDI_SOURCE_REVISION)
     bounded_jdi = descends_from(P2_BOUNDED_JDI_SOURCE_REVISION)
@@ -1681,7 +1893,25 @@ def _p2_producer_binding(repository, candidate_sha):
         if hashlib.sha256(committed).hexdigest() != digest:
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     if jdk21_jdi:
-        dependencies = (P2_ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_DEPENDENCIES
+        dependencies = (P2_ORDINARY_DIAGNOSTIC_REAL_REBUILD_DEPENDENCIES
+                        if ordinary_diagnostic_real_rebuild_window else
+                        P2_ORDINARY_DIAGNOSTIC_BUILD_LEADER_IDENTITY_DEPENDENCIES
+                        if ordinary_diagnostic_build_leader_identity_window else
+                        P2_ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_DEPENDENCIES
+                        if ordinary_diagnostic_build_normal_exit_window else
+                        P2_ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_DEPENDENCIES
+                        if ordinary_diagnostic_build_lifecycle_window else
+                        P2_ORDINARY_DIAGNOSTIC_BUILD_PID_DEPENDENCIES
+                        if ordinary_diagnostic_build_pid_window else
+                        P2_ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_DEPENDENCIES
+                        if ordinary_diagnostic_build_cleanup_window else
+                        P2_ORDINARY_DIAGNOSTIC_REMEDY_DEPENDENCIES
+                        if ordinary_diagnostic_remedy_window else
+                        P2_ORDINARY_DIAGNOSTIC_CHILD_FIRST_DEPENDENCIES
+                        if ordinary_diagnostic_child_first_window else
+                        P2_ORDINARY_DIAGNOSTIC_SNAPSHOT_DEPENDENCIES
+                        if ordinary_diagnostic_snapshot_window else
+                        P2_ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_DEPENDENCIES
                         if ordinary_diagnostic_cleanup_detail_window else
                         P2_ORDINARY_DIAGNOSTIC_LINEAGE_REMEDY_DEPENDENCIES
                         if ordinary_diagnostic_lineage_remedy_window else
@@ -1723,27 +1953,27 @@ def _p2_producer_binding(repository, candidate_sha):
                         else P2_JDK21_JDI_DEPENDENCIES)
         _source_binding(repository, candidate_sha, dependencies,
                         "JDK 21 JDI producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_REAL_REBUILD_DEPENDENCIES)
     elif corrected_jdi:
         _source_binding(repository, candidate_sha, P2_CORRECTED_JDI_DEPENDENCIES,
                         "corrected JDI producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_CHILD_FIRST_DEPENDENCIES)
     elif bounded_jdi:
         _source_binding(repository, candidate_sha, P2_BOUNDED_JDI_DEPENDENCIES,
                         "bounded JDI producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_CHILD_FIRST_DEPENDENCIES)
     elif rotation_premise:
         _source_binding(repository, candidate_sha, P2_ROTATION_PREMISE_DEPENDENCIES,
                         "rotation premise producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_CHILD_FIRST_DEPENDENCIES)
     elif boolean_jdi_final:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_FINAL_DEPENDENCIES,
                         "Boolean JDI final producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_CHILD_FIRST_DEPENDENCIES)
     elif boolean_jdi:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_DEPENDENCIES,
                         "Boolean JDI producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_CLEANUP_DETAIL_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_CHILD_FIRST_DEPENDENCIES)
     if not v6_window:
         for relative in (P2_BASELINE_COMPAT_DEPENDENCIES.keys() -
                          P2_EXECUTABLE_LOCAL_DEPENDENCIES.keys()):

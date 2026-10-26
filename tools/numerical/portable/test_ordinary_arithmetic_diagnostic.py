@@ -27,6 +27,7 @@ from ordinary_arithmetic_diagnostic import (
     _source_archive, _verify_source_archive, JDK21, ROOT, SampleUnavailable,
 )
 import ordinary_arithmetic_diagnostic as diagnostic
+from ordinary_snapshot.control import SnapshotIncomplete, SnapshotOwnedProcesses
 from actual_arithmetic import CaptureRejected, verify_capture_receipt
 import actual_arithmetic
 from boolean_rotation_jdi import jdi_bridge
@@ -226,6 +227,20 @@ def wrapper_shebang_fixture():
 
 
 class DiagnosticContractTest(unittest.TestCase):
+    def test_short_traced_child_without_birth_identity_is_incomplete(self):
+        traces = {"11": b"", "12": b""}
+        raw = [(0, "11", None, "clone(child_stack=NULL, flags=SIGCHLD) = 12")]
+        with self.assertRaisesRegex(DiagnosticRejected, "UNAVAILABLE"):
+            diagnostic._verify_spawn_births(traces, raw, {})
+
+    def test_scan_window_cannot_accept_child_that_vanishes_during_read(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            owned = SnapshotOwnedProcesses(scratch, scratch,
+                                           diagnostic._proc_identity,
+                                           diagnostic._pidfd_exited, check_retained)
+            with self.assertRaisesRegex(SnapshotIncomplete, "UNAVAILABLE"):
+                _owned_sample({"gradle": os.getpgrp()}, "stage", owned=owned)
+
     def test_stage_plan_builds_portable_main_and_test_classes(self):
         commands, launch = diagnostic._stage_commands()
         self.assertEqual(2, len(commands))
@@ -1302,7 +1317,7 @@ class DiagnosticContractTest(unittest.TestCase):
                 output = Path(directory) / expected
                 with (mock.patch.object(diagnostic, "clean_source",
                                         side_effect=original),
-                      mock.patch.object(OwnedProcesses, "stop",
+                      mock.patch.object(SnapshotOwnedProcesses, "stop",
                                         side_effect=cleanup)):
                     report = diagnostic.capture(output, allocation)
                 self.assertEqual(report["status"], expected)

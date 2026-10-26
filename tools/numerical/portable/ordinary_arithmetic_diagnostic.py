@@ -40,13 +40,16 @@ from numeric_producer_trace import (
     _events, java_entry_point, quoted, select_worker_exec, successful_execve,
     verify_stable_input,
 )
+from ordinary_snapshot.build_tracer import build as build_owned_tracer, digest as tracer_digest
+from ordinary_snapshot.control import PHASES, SnapshotIncomplete, SnapshotOwnedProcesses
 
 
 SCHEMA = "ordinary-arithmetic-diagnostic/1"
 METHOD = "captureLongMotion"
 CASE = "long-free-60"
 CAP = 64
-OWNERSHIP_BINDING = "trace-lineage/3"
+OWNERSHIP_BINDING = "owned-snapshot/1"
+OLD_OWNERSHIP_BINDING = "trace-lineage/3"
 RSS_CEILING_KIB = 10 * 1024 * 1024
 REQUIRED_ROLES = frozenset({"gradle", "worker", "helper", "tracer", "observer"})
 ALLOWED_ROLES = REQUIRED_ROLES | {"other"}
@@ -69,6 +72,10 @@ SOURCE_MEMBERS = (
     "tools/numerical/portable/src/commonTest/kotlin/portable/ProspectiveArithmeticTest.kt",
     "tools/numerical/portable/ordinary_arithmetic_jdi/OrdinaryArithmeticProbe.java",
     "tools/numerical/portable/ordinary_arithmetic_diagnostic.py",
+    "tools/numerical/portable/ordinary_snapshot/build_tracer.py",
+    "tools/numerical/portable/ordinary_snapshot/control.py",
+    "tools/numerical/portable/ordinary_snapshot/owned_snapshot.inc",
+    "tools/numerical/portable/ordinary_snapshot/strace-7.2.patch",
 )
 
 
@@ -380,8 +387,11 @@ def verify_resource_samples(samples, required_roles=REQUIRED_ROLES):
     previous_sample = None
     retained = []
     for sample in samples:
-        _require(type(sample) is dict and set(sample) == {
-                    "time_ns", "wall_start_ns", "wall_end_ns", "phase", "pids"} and
+        base_keys = {"time_ns", "wall_start_ns", "wall_end_ns", "phase", "pids"}
+        snapshot_keys = {"snapshot_id", "held_sequences", "live_tgids"}
+        snapshot = type(sample) is dict and set(sample) == base_keys | snapshot_keys
+        _require(type(sample) is dict and
+                 set(sample) in (base_keys, base_keys | snapshot_keys) and
                  sample["phase"] in {"stage", "target", "observer"} and
                  type(sample["time_ns"]) is int and sample["time_ns"] > previous and
                  type(sample["wall_start_ns"]) is int and
@@ -390,6 +400,22 @@ def verify_resource_samples(samples, required_roles=REQUIRED_ROLES):
                  sample["wall_end_ns"] - sample["wall_start_ns"] <= 5_000_000_000 and
                  type(sample["pids"]) is list and sample["pids"],
                  "diagnostic resource sample time differs")
+        if snapshot:
+            _require(type(sample["snapshot_id"]) is int and
+                     sample["snapshot_id"] > 0 and
+                     type(sample["held_sequences"]) is dict and
+                     set(sample["held_sequences"]) ==
+                     ({"stage"} if sample["phase"] == "stage" else
+                      {"observer"} if sample["phase"] == "observer" else
+                      {"target", "helper"} if "helper" in sample["held_sequences"]
+                      else {"target"}) and
+                     all(type(value) is int and value > 0
+                         for value in sample["held_sequences"].values()) and
+                     type(sample["live_tgids"]) is list and
+                     sample["live_tgids"] == sorted(set(sample["live_tgids"])) and
+                     all(type(pid) is int and pid > 0
+                         for pid in sample["live_tgids"]),
+                     "diagnostic snapshot sample differs")
         if previous_sample is not None:
             _require(sample["wall_start_ns"] >= previous_sample["wall_end_ns"] and
                      (sample["phase"] != previous_sample["phase"] or
@@ -431,7 +457,9 @@ def verify_resource_samples(samples, required_roles=REQUIRED_ROLES):
                          "wall_end_ns": sample["wall_end_ns"],
                          "phase": sample["phase"], "aggregate_kib":
                          None if missing else total,
-                         "pids": sorted(pids.values(), key=lambda row: row["pid"])})
+                         "pids": sorted(pids.values(), key=lambda row: row["pid"]),
+                         **({key: sample[key] for key in snapshot_keys}
+                            if snapshot else {})})
     status = ("RSS_BOUND" if peak > RSS_CEILING_KIB else
               "UNAVAILABLE" if missing or not required_roles <= observed_roles else
               "OBSERVED_UNDER_CEILING")
@@ -721,6 +749,46 @@ def _source_identity(files, commit, environment):
              files["runtime-java"] == (JDK21 / "bin/java").read_bytes() and
              files["portable-classes.zip"] == actual_arithmetic._portable_classes_archive(),
              "diagnostic staged artifact or runtime changed")
+
+
+def _tracer_identity(files, metadata):
+    from ordinary_snapshot import build_tracer
+    archived = _decode_json(files["strace-build.json"])
+    _require(archived == metadata.get("tracer_build") and
+             archived.get("schema") == "ordinary-snapshot-build/1" and
+             hashlib.sha256(files["strace-source.tar.xz"]).hexdigest() ==
+             build_tracer.ARCHIVE_SHA256 and
+             archived.get("archive_sha256") == build_tracer.ARCHIVE_SHA256 and
+             archived.get("upstream_source_sha256") == build_tracer.SOURCE_SHA256 and
+             archived.get("patch_sha256") == tracer_digest(build_tracer.PATCH) and
+             archived.get("include_sha256") == tracer_digest(build_tracer.INCLUDE) and
+             archived.get("compiler_sha256") ==
+             tracer_digest(archived.get("compiler_path")) and
+             archived.get("binary_sha256") ==
+             hashlib.sha256(files["strace-binary"]).hexdigest(),
+             "diagnostic private tracer source or binary differs")
+    with tempfile.TemporaryDirectory(prefix="ordinary-tracer-replay-",
+                                     dir=os.environ["TMPDIR"]) as scratch:
+        source = Path(scratch) / "strace-7.2.tar.xz"
+        source.write_bytes(files["strace-source.tar.xz"])
+        rebuilt = build_owned_tracer(source, Path(scratch) / "build", timeout=600)
+        _require(rebuilt["binary_sha256"] == archived["binary_sha256"] and
+                 (Path(scratch) / "build/src/strace").read_bytes() ==
+                 files["strace-binary"],
+                 "diagnostic private tracer binary rebuild differs")
+    return archived
+
+
+def _tracer_command_head(metadata):
+    if metadata.get("ownership_binding") != OWNERSHIP_BINDING:
+        return "strace"
+    path = metadata.get("stage_trace_command", [None])[0]
+    _require(type(path) is str and Path(path).is_absolute() and
+             all(type(metadata.get(name)) is list and
+                 metadata[name][:1] == [path] for name in
+                 ("command", "helper_command", "observer_command")),
+             "diagnostic private tracer command differs")
+    return path
 
 
 def _stage_identity(files, metadata):
@@ -1206,6 +1274,10 @@ def _owned_sample(groups, phase, worker_pid=None, commands=None, owned=None):
         role = (_bound_role(pid, owner, owned.roots[owner][0], worker_pid,
                             command, executable) if owned is not None else
                 _sample_role(pid, group, groups, worker_pid, command, executable))
+        if (isinstance(owned, SnapshotOwnedProcesses) and
+                pid != owned.roots[owner][0] and
+                not owned.bound[pid]["executed"]):
+            role = "other"
         digest = hashlib.sha256(command).hexdigest()
         if commands is not None:
             _require(digest not in commands or commands[digest] == argv,
@@ -1215,10 +1287,58 @@ def _owned_sample(groups, phase, worker_pid=None, commands=None, owned=None):
                      "command_sha256": digest,
                      "rss_kib": int(match[1])})
     wall_end = time.time_ns()
-    return {"time_ns": time.monotonic_ns(),
+    sample = {"time_ns": time.monotonic_ns(),
             "wall_start_ns": wall_start, "wall_end_ns": wall_end,
             "phase": phase,
             "pids": sorted(pids, key=lambda row: row["pid"])}
+    if isinstance(owned, SnapshotOwnedProcesses):
+        snapshot = owned.snapshot_info
+        _require(snapshot is not None and
+                 {row["pid"] for row in pids} == set(snapshot["live_tgids"]),
+                 "UNAVAILABLE")
+        owned.validate_sample(row["pid"] for row in pids)
+        sample.update({key: snapshot[key] for key in
+                       ("snapshot_id", "held_sequences", "live_tgids")})
+    return sample
+
+
+def _take_owned_sample(samples, groups, phase, worker_pid, commands, owned):
+    prior_handler = signal.getsignal(signal.SIGALRM)
+    prior_timer = signal.getitimer(signal.ITIMER_REAL)
+    started = time.monotonic()
+    def expire_window(_signum, _frame):
+        raise SnapshotIncomplete(phase, None, "FREEZE_TIMEOUT")
+    use_window_timer = prior_timer[0] == 0 or prior_timer[0] > 5
+    if use_window_timer:
+        signal.signal(signal.SIGALRM, expire_window)
+        signal.setitimer(signal.ITIMER_REAL, 5)
+    try:
+        owned.freeze(phase)
+        failure = None
+        try:
+            sample = _owned_sample(groups, phase, worker_pid, commands, owned)
+            _sample_bound(sample)
+        except Exception as error:
+            failure = error
+        try:
+            owned.resume()
+        except SnapshotIncomplete as error:
+            if failure is not None:
+                error.detail["prior_failure_status"] = _typed_status(failure)
+            raise
+        if failure is not None:
+            raise failure
+        if sample["pids"]:
+            samples.append(sample)
+    finally:
+        if use_window_timer:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, prior_handler)
+            if prior_timer[0]:
+                signal.setitimer(signal.ITIMER_REAL,
+                                 max(0.000001, prior_timer[0] -
+                                     (time.monotonic() - started)),
+                                 prior_timer[1])
 
 
 def _trace_archive(prefix):
@@ -1246,7 +1366,10 @@ def _run_capture_process(command, cwd, environment, log, budget,
                          samples, active, cpus, commands, *, deadline=None,
                          owned=None, trace_prefix=None):
     with Path(log).open("xb") as stream:
-        process = subprocess.Popen(command, cwd=cwd, env=environment, stdout=stream,
+        launch_environment = (owned.prepare("stage", environment)
+                              if isinstance(owned, SnapshotOwnedProcesses)
+                              else environment)
+        process = subprocess.Popen(command, cwd=cwd, env=launch_environment, stdout=stream,
                                    stderr=subprocess.STDOUT, start_new_session=True,
                                    preexec_fn=lambda: _pin_child(cpus))
         active.append(process)
@@ -1263,19 +1386,26 @@ def _run_capture_process(command, cwd, environment, log, budget,
                 next_budget = now + 250000000
             if deadline is not None and time.monotonic_ns() - began > deadline:
                 raise DiagnosticRejected("TIME_BOUND")
-            sample = _owned_sample({"gradle": group}, "stage", commands=commands,
-                                   owned=owned)
-            if sample["pids"]:
-                _sample_bound(sample)
-                samples.append(sample)
+            if isinstance(owned, SnapshotOwnedProcesses):
+                _take_owned_sample(samples, {"gradle": group}, "stage", None,
+                                   commands, owned)
+            else:
+                sample = _owned_sample({"gradle": group}, "stage", commands=commands,
+                                       owned=owned)
+                if sample["pids"]:
+                    _sample_bound(sample)
+                    samples.append(sample)
             time.sleep(0.1)
         budget.check()
         _read_checked(log)
         _require(process.returncode == 0, "diagnostic source stage failed")
         if owned is not None:
-            owned.refresh({"stage"})
-            owned.stop({"stage"}, sample=lambda: _append_owned_sample(
-                samples, {"gradle": group}, "stage", None, commands, owned))
+            if isinstance(owned, SnapshotOwnedProcesses):
+                owned.stop({"stage"})
+            else:
+                owned.refresh({"stage"})
+                owned.stop({"stage"}, sample=lambda: _append_owned_sample(
+                    samples, {"gradle": group}, "stage", None, commands, owned))
         active.remove(process)
         return began, time.monotonic_ns(), identity
 
@@ -1447,7 +1577,7 @@ def _collect_raw_files(output, scratch, xml, class_pattern, argument_pattern,
     return helper_pid, class_log, argument_log
 
 
-def capture(output, allocation):
+def capture(output, allocation, tracer_source=None):
     output = Path(output).resolve()
     _require(output.is_absolute() and output != Path.home() and
              output.is_relative_to(Path.home().resolve()) and not output.exists(),
@@ -1466,11 +1596,12 @@ def capture(output, allocation):
              "diagnostic allocated CPUs are unavailable")
     active = []
     samples = []
-    owned = OwnedProcesses()
     resource_commands = {}
     private = Path(tempfile.mkdtemp(prefix="ordinary-diagnostic-",
                                     dir=os.environ["TMPDIR"]))
     private.chmod(0o700)
+    owned = SnapshotOwnedProcesses(os.environ["TMPDIR"], private,
+                                   _proc_identity, _pidfd_exited, check_retained)
     generated = [ROOT / name for name in (
         "build", "dyn4k-core/build", "tools/numerical/portable/build")]
     budget = CaptureBudget(output, private, generated,
@@ -1486,6 +1617,15 @@ def capture(output, allocation):
         commit = clean_source(focused=True)
         environment = child_environment(focused=True)
         _write_checked(output / "source.zip", _source_archive(), "zip")
+        _require(tracer_source is not None, "UNAVAILABLE")
+        tracer_record = build_owned_tracer(tracer_source,
+                                           private / "tracer-build", timeout=600)
+        tracer_binary = private / "tracer-build/src/strace"
+        _write_checked(output / "strace-source.tar.xz",
+                       Path(tracer_source).read_bytes(), "binary")
+        _write_checked(output / "strace-binary", tracer_binary.read_bytes(), "binary")
+        _write_checked(output / "strace-build.json",
+                       _report_bytes(tracer_record), "report")
         environment["TMPDIR"] = str(Path(os.environ["TMPDIR"]).resolve())
         environment["JAVA_HOME"] = str(JDK21)
         environment["JAVA_TOOL_OPTIONS"] = (
@@ -1496,7 +1636,7 @@ def capture(output, allocation):
                  "pinned JDK 21 is unavailable")
         stage_commands, stage_command = _stage_commands()
         stage_trace_prefix = private / "stage-process-trace"
-        stage_trace_command = ["strace", "-ff", "-ttt", "-s", "131072",
+        stage_trace_command = [str(tracer_binary), "-ff", "-ttt", "-s", "131072",
                                "-e", "trace=process", "-o",
                                str(stage_trace_prefix), *stage_command]
         stage_start, stage_end, stage_root = _run_capture_process(
@@ -1527,7 +1667,7 @@ def capture(output, allocation):
         observer_prefix = private / "observer-trace"
         environment["JAVA_TOOL_OPTIONS"] += (
             f" -Xlog:arguments=info:file={argument_pattern}:pid,level,tags:filecount=0")
-        tracer = ["strace", *actual_trace.rich_trace_arguments(),
+        tracer = [str(tracer_binary), *actual_trace.rich_trace_arguments(),
                   "-o", str(trace_prefix)]
         command = gradle_test_command(tracer, "portable.ProspectiveArithmeticTest",
                                       METHOD, class_pattern)
@@ -1537,7 +1677,8 @@ def capture(output, allocation):
                "TEST-portable.ProspectiveArithmeticTest.xml")
         target_start = time.monotonic_ns()
         with (private / "gradle.log").open("xb") as stream:
-            target = subprocess.Popen(command, cwd=PORTABLE, env=environment,
+            target = subprocess.Popen(command, cwd=PORTABLE,
+                                      env=owned.prepare("target", environment),
                                       stdout=stream, stderr=subprocess.STDOUT,
                                       start_new_session=True,
                                       preexec_fn=lambda: _pin_child(cpus))
@@ -1568,11 +1709,8 @@ def capture(output, allocation):
                     groups = {"gradle": target_group}
                     if helper is not None and helper.poll() is None:
                         groups["helper"] = helper.pid
-                    sample = _owned_sample(groups, "target", worker_pid,
-                                           resource_commands, owned=owned)
-                    if sample["pids"]:
-                        _sample_bound(sample)
-                        samples.append(sample)
+                    _take_owned_sample(samples, groups, "target", worker_pid,
+                                       resource_commands, owned)
                     next_sample = now + 100000000
                 if response_path is None:
                     content = (private / "gradle.log").read_text(errors="replace")
@@ -1589,7 +1727,7 @@ def capture(output, allocation):
                 if (worker_pid is not None and helper is None and
                         socket_owner(Path("/proc"), worker_pid, port)):
                     socket_ready_at = now
-                    helper_command = ["strace", *actual_trace.rich_trace_arguments(),
+                    helper_command = [str(tracer_binary), *actual_trace.rich_trace_arguments(),
                         "-o", str(helper_prefix), str(JDK21 / "bin/java"),
                         "--add-modules", "jdk.jdi",
                         "-Djava.io.tmpdir=" + environment["TMPDIR"],
@@ -1597,7 +1735,7 @@ def capture(output, allocation):
                         str(helper_output), "127.0.0.1", str(port), "600"]
                     with (private / "helper.log").open("xb") as helper_log:
                         helper = subprocess.Popen(helper_command, cwd=PORTABLE,
-                            env=environment, stdout=helper_log,
+                            env=owned.prepare("helper", environment), stdout=helper_log,
                             stderr=subprocess.STDOUT, start_new_session=True,
                             preexec_fn=lambda: _pin_child(cpus))
                         active.append(helper)
@@ -1630,10 +1768,7 @@ def capture(output, allocation):
                  helper.poll() == 0 and helper_exit_at is not None and
                  worker_pid is not None and response_path is not None and
                  xml.is_file(), "TARGET_FAILED")
-        owned.refresh({"target", "helper"})
-        owned.stop({"target", "helper"}, sample=lambda: _append_owned_sample(
-            samples, {"gradle": target_group, "helper": helper.pid},
-            "target", worker_pid, resource_commands, owned))
+        owned.stop({"target", "helper"})
         target_exit_at = time.monotonic_ns()
         active.remove(target)
         active.remove(helper)
@@ -1644,7 +1779,7 @@ def capture(output, allocation):
             _read_checked(output / "portable-classes.zip", "zip"))
         _write_checked(output / "worker-classpath.json",
                        _report_bytes(classpath), "report")
-        observer_command = ["strace", *actual_trace.rich_trace_arguments(),
+        observer_command = [str(tracer_binary), *actual_trace.rich_trace_arguments(),
             "-o", str(observer_prefix), *_observer_command((
                 xml, Path(str(class_pattern).replace("%p", str(worker_pid))),
                 Path(str(argument_pattern).replace("%p", str(worker_pid))),
@@ -1652,7 +1787,8 @@ def capture(output, allocation):
         observer_start = time.monotonic_ns()
         with (private / "observer.log").open("xb") as stream:
             observer = subprocess.Popen(observer_command, cwd=PORTABLE,
-                env=environment, stdout=stream, stderr=subprocess.STDOUT,
+                env=owned.prepare("observer", environment), stdout=stream,
+                stderr=subprocess.STDOUT,
                 start_new_session=True,
                 preexec_fn=lambda: _pin_child(cpus))
             active.append(observer)
@@ -1661,17 +1797,11 @@ def capture(output, allocation):
             observer_root = _proc_identity(observer.pid)
             while observer.poll() is None:
                 budget.check()
-                sample = _owned_sample({"observer": observer_group}, "observer",
-                                       commands=resource_commands, owned=owned)
-                if sample["pids"]:
-                    _sample_bound(sample)
-                    samples.append(sample)
+                _take_owned_sample(samples, {"observer": observer_group},
+                                   "observer", None, resource_commands, owned)
                 time.sleep(0.05)
         _require(observer.returncode == 0, "diagnostic output observer failed")
-        owned.refresh({"observer"})
-        owned.stop({"observer"}, sample=lambda: _append_owned_sample(
-            samples, {"observer": observer_group}, "observer", None,
-            resource_commands, owned))
+        owned.stop({"observer"})
         active.remove(observer)
         observer_exit = time.monotonic_ns()
         _seal_existing(private / "observer.log", output / "observer.log")
@@ -1681,12 +1811,22 @@ def capture(output, allocation):
             worker_pid, budget)
         _require(clean_source(focused=True) == commit,
                  "diagnostic source changed during execution")
+        _require(tracer_digest(tracer_binary) == tracer_record["binary_sha256"] and
+                 tracer_binary.read_bytes() ==
+                 (output / "strace-binary").read_bytes() and
+                 hashlib.sha256(Path(tracer_source).read_bytes()).hexdigest() ==
+                 tracer_record["archive_sha256"],
+                 "diagnostic private tracer input changed during execution")
         _require(captured_file_identity(STAGED_JAR) == artifact_identity and
                  captured_file_identity(JDK21 / "bin/java") == runtime_identity and
                  STAGED_JAR.read_bytes() == (output / "artifact.jar").read_bytes(),
                  "diagnostic staged input changed during execution")
         samples_raw = b"".join(_report_bytes(sample) for sample in samples)
         _write_checked(output / "resource-samples.jsonl", samples_raw)
+        _seal_existing(private / "ptrace-events.jsonl",
+                       output / "ptrace-events.jsonl", "jsonl")
+        _seal_existing(private / "snapshot-controls.jsonl",
+                       output / "snapshot-controls.jsonl", "jsonl")
         metadata = {"schema": "ordinary-arithmetic-capture/1",
             "candidate_commit": commit, "method": METHOD, "case_id": CASE,
             "call_cap": CAP, "port": port, "worker_pid": worker_pid,
@@ -1700,6 +1840,7 @@ def capture(output, allocation):
             "launch_roots": {"stage": stage_root, "target": target_root,
                              "helper": helper_root, "observer": observer_root},
             "ownership_binding": OWNERSHIP_BINDING,
+            "tracer_build": tracer_record,
             "birth_clock": _birth_clock(),
             "owned_processes": owned.evidence(),
             "resource_commands": resource_commands,
@@ -1744,31 +1885,26 @@ def capture(output, allocation):
         signal.setitimer(signal.ITIMER_REAL, 0)
         cleanup_failure = None
         try:
-            owned.refresh(set(owned.roots))
-        except DiagnosticRejected:
-            pass
-        try:
             owned.stop()
-        except DiagnosticRejected as cleanup_error:
+        except (DiagnosticRejected, SnapshotIncomplete) as cleanup_error:
             cleanup_failure = cleanup_error
         for process in active:
             try:
-                if process.poll() is None:
-                    process.terminate()
                 process.wait(timeout=1)
             except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=1)
+                if cleanup_failure is None:
+                    cleanup_failure = SnapshotIncomplete(None, process.pid,
+                                                        "CLEANUP_SURVIVOR")
         report = {"schema": SCHEMA, "status": _typed_status(error),
                   "qualification": "UNPASSED", "method": METHOD,
                   "case_id": CASE, "call_cap": CAP, "runtime": "INCOMPLETE",
                   "last_complete_observation": _last_complete_observation(private,
                                                                            output)}
-        if isinstance(error, SampleUnavailable):
+        if isinstance(error, (SampleUnavailable, SnapshotIncomplete)):
             report["failure_detail"] = error.detail
         if cleanup_failure is not None:
             report["cleanup_status"] = _typed_status(cleanup_failure)
-            if isinstance(cleanup_failure, SampleUnavailable):
+            if isinstance(cleanup_failure, (SampleUnavailable, SnapshotIncomplete)):
                 report["cleanup_failure_detail"] = cleanup_failure.detail
         if not (output / "diagnostic.json").exists():
             _write_checked(output / "diagnostic.json", _report_bytes(report), "report")
@@ -1830,6 +1966,11 @@ def _read_archive(output, compare_report):
         "all-process-traces.zip", "worker-traces.zip", "helper-traces.zip",
         "observer-traces.zip", "jdi-evidence.zip", "resource-samples.jsonl",
         "metadata.json", "allocation.json"}
+    metadata = _decode_json(_read_checked(output / "metadata.json", "report"))
+    if metadata.get("ownership_binding") == OWNERSHIP_BINDING:
+        required.update({"strace-source.tar.xz", "strace-binary",
+                         "strace-build.json", "ptrace-events.jsonl",
+                         "snapshot-controls.jsonl"})
     expected = required | ({"diagnostic.json"} if compare_report else set())
     _require(output.is_dir() and not output.is_symlink() and
              {path.name for path in output.iterdir()} == expected,
@@ -1842,6 +1983,9 @@ def _read_archive(output, compare_report):
              "all-process-traces.zip": "trace_zip",
              "worker-traces.zip": "trace_zip", "helper-traces.zip": "trace_zip",
              "observer-traces.zip": "trace_zip", "metadata.json": "report",
+             "strace-source.tar.xz": "binary", "strace-binary": "binary",
+             "strace-build.json": "report", "ptrace-events.jsonl": "jsonl",
+             "snapshot-controls.jsonl": "jsonl",
              "allocation.json": "report",
              "diagnostic.json": "report"}
     return {name: _read_checked(output / name, kinds.get(name, "raw"))
@@ -1851,6 +1995,66 @@ def _read_archive(output, compare_report):
 def _raw_events(raw):
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         traces = {name[6:]: archive.read(name) for name in archive.namelist()}
+    for former, data in tuple(traces.items()):
+        lines = data.decode("utf-8").splitlines(keepends=True)
+        for line in lines:
+            match = re.fullmatch(
+                r"([0-9]+\.[0-9]+) (execve(?:at)?\(.*) <pid changed to ([1-9][0-9]*) \.\.\.>\n",
+                line)
+            if match is None:
+                continue
+            current = match[3]
+            _require(current in traces and current != former,
+                     "diagnostic non-leader exec target differs")
+            replacement = match[2] + ") = 0"
+            current_lines = traces[current].decode("utf-8").splitlines(keepends=True)
+            _require(any(item.endswith(
+                f" +++ superseded by execve in pid {former} +++\n")
+                for item in current_lines),
+                "diagnostic non-leader exec source differs")
+            resumed = [index for index, item in enumerate(current_lines)
+                       if item.endswith(" <... execve resumed>) = 0\n")]
+            _require(len(resumed) == 1,
+                     "diagnostic non-leader exec completion differs")
+            timestamp = current_lines[resumed[0]].split(" ", 1)[0]
+            current_lines[resumed[0]] = timestamp + " " + replacement + "\n"
+            traces[current] = "".join(current_lines).encode("utf-8")
+    for current, data in tuple(traces.items()):
+        current_lines = data.decode("utf-8").splitlines(keepends=True)
+        for marker in current_lines:
+            transfer = re.fullmatch(
+                r"([0-9]+\.[0-9]+) \+\+\+ superseded by execve in pid ([1-9][0-9]*) \+\+\+\n",
+                marker)
+            if transfer is None:
+                continue
+            former = transfer[2]
+            _require(former in traces and former != current,
+                     "diagnostic non-leader exec source differs")
+            former_lines = traces[former].decode("utf-8").splitlines(keepends=True)
+            abandoned = [(index, re.fullmatch(
+                r"([0-9]+\.[0-9]+) (execve(?:at)?\(.*) <unfinished \.\.\.>\) = \?\n",
+                line)) for index, line in enumerate(former_lines)]
+            abandoned = [(index, match) for index, match in abandoned if match]
+            if not abandoned:
+                continue
+            resumed = [index for index, line in enumerate(current_lines) if
+                       line.endswith(" <... execve resumed>) = 0\n")]
+            _require(sum(line.endswith(
+                         f" +++ superseded by execve in pid {former} +++\n")
+                         for line in current_lines) == 1 and
+                     not any("<pid changed to" in line
+                             for line in former_lines) and
+                     len(abandoned) == len(resumed) == 1 and
+                     Decimal(abandoned[0][1][1]) <= Decimal(transfer[1]) <=
+                     Decimal(current_lines[resumed[0]].split(" ", 1)[0]),
+                     "diagnostic non-leader exec completion differs")
+            index, call = abandoned[0]
+            stamp = current_lines[resumed[0]].split(" ", 1)[0]
+            current_lines[resumed[0]] = stamp + " " + call[2] + ") = 0\n"
+            former_lines[index] = (call[1] + " +++ execve transferred to pid " +
+                                   current + " +++\n")
+            traces[current] = "".join(current_lines).encode("utf-8")
+            traces[former] = "".join(former_lines).encode("utf-8")
     normalized, aborted = actual_trace.normalize_rich_traces(traces)
     _require(not aborted, "diagnostic raw process call is incomplete")
     return normalized, _events(normalized, ())
@@ -1876,7 +2080,8 @@ def _prove_worker(files, metadata, all_traces, all_events):
     _require(files["execve.log"] == ("\n".join(executions) + "\n").encode(),
              "diagnostic projected executions differ")
     command = metadata["command"]
-    _require(type(command) is list and command[:1] == ["strace"] and
+    _require(type(command) is list and
+             command[:1] == [_tracer_command_head(metadata)] and
              command.count("--tests") == 1 and
              command[command.index("--tests") + 1] ==
              "portable.ProspectiveArithmeticTest." + METHOD and
@@ -1953,7 +2158,8 @@ def _prove_helper(files, metadata, environment, worker):
                            loaded["loader_object_id"])
     lifecycle = verify_lifecycle(loaded["lifecycle"])
     argv = metadata["helper_command"]
-    _require(type(argv) is list and argv[:1] == ["strace"] and
+    _require(type(argv) is list and
+             argv[:1] == [_tracer_command_head(metadata)] and
              str(JDK21 / "bin/java") in argv and
              argv[-5:] == ["attach", metadata["helper_output_path"],
                           "127.0.0.1", str(metadata["port"]), "600"],
@@ -2020,7 +2226,8 @@ def _prove_outputs(files, metadata, all_traces, all_events):
 def _prove_observer(files, metadata):
     traces, events = _raw_events(files["observer-traces.zip"])
     argv = metadata["observer_command"]
-    _require(type(argv) is list and argv[:1] == ["strace"] and
+    _require(type(argv) is list and
+             argv[:1] == [_tracer_command_head(metadata)] and
              sys.executable in argv and
              argv[argv.index(sys.executable):] == list(_observer_command((
                  metadata["xml_path"], metadata["class_log_path"],
@@ -2133,9 +2340,9 @@ def _resource_execs(files, metadata=None):
 
 def _bound_lineage(samples, metadata, files):
     binding = metadata.get("ownership_binding")
-    _require(binding in ("trace-lineage/2", OWNERSHIP_BINDING),
+    _require(binding in ("trace-lineage/2", OLD_OWNERSHIP_BINDING),
              "diagnostic ownership binding differs")
-    strict = binding == OWNERSHIP_BINDING
+    strict = binding == OLD_OWNERSHIP_BINDING
     clock = metadata.get("birth_clock") if strict else None
     if strict:
         _require(type(clock) is dict and set(clock) ==
@@ -2265,6 +2472,293 @@ def _bound_lineage(samples, metadata, files):
     return owners, inventory
 
 
+def _snapshot_lines(raw):
+    check_retained(raw, "jsonl")
+    return [_json_privacy(line) for line in raw.splitlines()]
+
+
+def _verify_spawn_births(traces, raw_events, births):
+    edges = {}
+    for _, creator_text, _, call in raw_events:
+        match = re.search(r"(?:clone|clone3|fork|vfork)\(.*\)\s+= ([1-9][0-9]*)$", call)
+        if match:
+            child = int(match[1])
+            _require(child not in edges,
+                     "diagnostic duplicate raw spawn result")
+            edges[child] = (int(creator_text), "CLONE_THREAD" in call)
+    _require(set(edges) == set(births) and
+             set(edges) <= {int(tid) for tid in traces} and
+             all(edges[child] == (row["creator_tid"], child != row["tgid"])
+                 for child, row in births.items()),
+             "UNAVAILABLE")
+    return edges
+
+
+def _bound_snapshot(samples, metadata, files):
+    _tracer_identity(files, metadata)
+    events = _snapshot_lines(files["ptrace-events.jsonl"])
+    controls = _snapshot_lines(files["snapshot-controls.jsonl"])
+    inventory = metadata.get("owned_processes")
+    clock = metadata.get("birth_clock")
+    _require(type(inventory) is dict and set(inventory) == set(PHASES) and
+             type(clock) is dict and type(clock.get("boot_time_seconds")) is int and
+             type(clock.get("ticks_per_second")) is int and
+             clock["boot_time_seconds"] > 0 and clock["ticks_per_second"] > 0,
+             "diagnostic snapshot inventory differs")
+    all_sequenced = {phase: [] for phase in PHASES}
+    operations = {phase: {} for phase in PHASES}
+    for row in events + controls:
+        _require(type(row) is dict and row.get("phase") in PHASES and
+                 type(row.get("wall_ns")) is int and row["wall_ns"] > 0,
+                 "diagnostic snapshot record differs")
+        phase = row["phase"]
+        if "sequence" in row:
+            _require(set(row) == {"phase", "sequence", "kind", "fields",
+                                  "wall_ns", "pidfd_pid"}
+                     and type(row["sequence"]) is int and row["sequence"] > 0 and
+                     type(row["fields"]) is list and
+                     all(type(field) is str for field in row["fields"]),
+                     "diagnostic snapshot event differs")
+            all_sequenced[phase].append(row)
+        else:
+            _require(set(row) == {"phase", "operation", "snapshot_id", "wall_ns"}
+                     and row["operation"] in {"FREEZE", "RESUME"} and
+                     type(row["snapshot_id"]) is int and row["snapshot_id"] > 0,
+                     "diagnostic snapshot control differs")
+            key = (row["snapshot_id"], row["operation"])
+            _require(key not in operations[phase],
+                     "diagnostic duplicate snapshot control")
+            operations[phase][key] = row
+    trace_names = {"stage": "stage-process-traces.zip",
+                   "target": "all-process-traces.zip",
+                   "helper": "helper-traces.zip",
+                   "observer": "observer-traces.zip"}
+    owners = {}
+    held = {}
+    held_ticks = {}
+    for phase in PHASES:
+        rows = sorted(all_sequenced[phase], key=lambda row: row["sequence"])
+        _require([row["sequence"] for row in rows] == list(range(1, len(rows) + 1))
+                 and rows and rows[0]["kind"] == "ROOT",
+                 "diagnostic snapshot sequence differs")
+        traces, raw_events = _raw_events(files[trace_names[phase]])
+        traced = {int(tid) for tid in traces}
+        raw_forks = {}
+        raw_terminals = set()
+        raw_execs = set()
+        for stamp, tid_text, _, call in raw_events:
+            tid = int(tid_text)
+            match = re.search(r"(?:clone|clone3|fork|vfork)\(.*\)\s+= ([1-9][0-9]*)$", call)
+            if match:
+                child = int(match[1])
+                _require(child not in raw_forks,
+                         "diagnostic duplicate raw spawn result")
+                raw_forks[child] = (tid, "CLONE_THREAD" in call)
+            if call.startswith("+++ exited with ") or call.startswith("+++ killed by "):
+                raw_terminals.add(tid)
+            if (call.startswith(("execve(", "execveat(")) and
+                    call.endswith(" = 0")):
+                raw_execs.add(tid)
+        origin = traced - set(raw_forks)
+        _require(len(origin) == 1, "diagnostic snapshot raw origin differs")
+        active = {}
+        born = {}
+        birth_ppids = {}
+        current_ticks = {}
+        terminal = set()
+        former_execs = set()
+        last_wall = 0
+        for row in rows:
+            kind = row["kind"]
+            fields = row["fields"]
+            _require(kind in {"ROOT", "BIRTH", "EXEC", "EXIT", "HELD", "RESUMED"}
+                     and row["wall_ns"] >= last_wall,
+                     "diagnostic snapshot event order differs")
+            last_wall = row["wall_ns"]
+            if kind == "HELD":
+                _require(len(fields) >= 2,
+                         "diagnostic held roster differs")
+                sid = _number(fields[0])
+                roster = {}
+                for field in fields[1:]:
+                    pair = field.split(":")
+                    _require(len(pair) == 2, "diagnostic held member differs")
+                    tid, group = map(_number, pair)
+                    _require(tid not in roster, "diagnostic held member repeats")
+                    roster[tid] = group
+                _require(roster == active and (phase, sid) not in held,
+                         "diagnostic held live set differs")
+                held[(phase, sid)] = row
+                held_ticks[(phase, sid)] = dict(current_ticks)
+                continue
+            if kind == "RESUMED":
+                _require(len(fields) == 1 and
+                         (phase, _number(fields[0])) in held,
+                         "diagnostic resumed snapshot differs")
+                continue
+            _require(all(re.fullmatch(r"(?:0|[1-9][0-9]*)", field)
+                         for field in fields),
+                     "diagnostic snapshot integer differs")
+            values = list(map(int, fields))
+            if kind == "ROOT":
+                _require(len(values) == 4 and row is rows[0],
+                         "diagnostic snapshot origin differs")
+                tid, group, ticks, rss = values
+                _require(tid == group and tid in origin and ticks > 0 and
+                         row["pidfd_pid"] == tid,
+                         "diagnostic snapshot origin differs")
+                active[tid] = group
+                born[tid] = (ticks, metadata["launch_roots"][phase]["pid"],
+                             group, metadata["launch_roots"][phase]["pid"])
+                current_ticks[tid] = ticks
+            elif kind == "BIRTH":
+                _require(len(values) == 12,
+                         "diagnostic snapshot birth differs")
+                (ordinal, creator, creator_group, child, group, event, ticks, rss,
+                 ppid, boot_ns, stop_status, shared_vm) = values
+                _require(ordinal > 0 and creator in active and
+                         creator_group == active[creator] and child not in born and
+                         child in traced and raw_forks.get(child) ==
+                         (creator, child != group) and
+                         row["pidfd_pid"] == (child if child == group else None) and
+                         event in {1, 2, 3} and ticks > 0 and
+                         ppid > 0 and boot_ns > 0 and
+                         os.WIFSTOPPED(stop_status) and
+                         shared_vm == (0 if event == 1 else 1 if event == 2 else
+                                       1 if child != group else 2) and
+                         abs(row["wall_ns"] - boot_ns -
+                             clock["boot_time_seconds"] * 1_000_000_000) <=
+                             2_000_000_000 and
+                         ordinal == 1 + sum(parent == creator for _, parent, _, _
+                                            in born.values()),
+                         "diagnostic snapshot creator or birth differs")
+                active[child] = group
+                born[child] = (ticks, creator, group, creator_group)
+                birth_ppids[child] = ppid
+                if child == group:
+                    current_ticks[group] = ticks
+            elif kind == "EXEC":
+                _require(len(values) == 4,
+                         "diagnostic snapshot exec differs")
+                current, former, group, ticks = values
+                _require(former in active and current == group == active[former] and
+                         ticks > 0 and row["pidfd_pid"] == current and
+                         (current in raw_execs or former in raw_execs or
+                         b"pid changed to" in traces[str(former)]),
+                         "diagnostic snapshot exec lacks raw proof")
+                if former != current:
+                    former_execs.add(former)
+                    active = {tid: value for tid, value in active.items()
+                              if value != group or tid == current}
+                active[current] = group
+                current_ticks[current] = ticks
+            else:
+                _require(len(values) == 3,
+                         "diagnostic snapshot terminal differs")
+                tid, group, status = values
+                _require(tid in active and active[tid] == group and
+                         tid not in terminal and tid in raw_terminals,
+                         "diagnostic snapshot terminal lacks raw proof")
+                terminal.add(tid)
+                del active[tid]
+                if not any(value == group for value in active.values()):
+                    current_ticks.pop(group, None)
+        _require(set(born) == traced and set(raw_forks) == set(born) - origin and
+                 raw_terminals == terminal and not active,
+                 "diagnostic snapshot raw process graph differs")
+        _verify_spawn_births(traces, raw_events, {
+            tid: {"creator_tid": creator, "tgid": group}
+            for tid, (_, creator, group, _) in born.items() if tid not in origin})
+        bound = inventory[phase]
+        expected_bound = {metadata["launch_roots"][phase]["pid"]} | {
+            tid for tid, (_, _, group, _) in born.items() if tid == group}
+        _require(type(bound) is dict and
+                 {int(pid) for pid in bound} == expected_bound,
+                 "diagnostic snapshot owned inventory differs")
+        for tid, (ticks, creator, group, creator_group) in born.items():
+            if tid in former_execs:
+                continue
+            if group != tid:
+                continue
+            identity = bound.get(str(tid))
+            _require(type(identity) is dict and
+                     identity.get("birth_start_ticks") == ticks and
+                     identity.get("parent_pid") == creator and
+                     identity.get("kernel_ppid") == (
+                         metadata["launch_roots"][phase]["pid"]
+                         if tid in origin else birth_ppids[tid]) and
+                     identity.get("creator_tgid") == creator_group and
+                     tid not in owners,
+                     "diagnostic snapshot owned identity differs")
+            owners[tid] = phase
+            birth_ns = (clock["boot_time_seconds"] * 1_000_000_000 +
+                        ticks * 1_000_000_000 // clock["ticks_per_second"])
+            journal = next(row for row in rows if row["kind"] in {"ROOT", "BIRTH"}
+                           and int(row["fields"][0 if row["kind"] == "ROOT" else 3]) == tid)
+            _require(abs(birth_ns - journal["wall_ns"]) <= 2_000_000_000,
+                     "diagnostic snapshot birth clock differs")
+        root_pid = metadata["launch_roots"][phase]["pid"]
+        _require(bound[str(root_pid)]["start_ticks"] ==
+                 metadata["launch_roots"][phase]["start_ticks"] and
+                 bound[str(root_pid)]["birth_start_ticks"] ==
+                 metadata["launch_roots"][phase]["start_ticks"] and
+                 bound[str(root_pid)]["kernel_ppid"] ==
+                 metadata["launch_roots"][phase]["parent_pid"] and
+                 root_pid not in owners,
+                 "diagnostic snapshot tracer root differs")
+        owners[root_pid] = phase
+    for sample in samples:
+        sid = sample["snapshot_id"]
+        phase = sample["phase"]
+        phases = (("stage",) if phase == "stage" else
+                  ("observer",) if phase == "observer" else
+                  ("target", "helper") if ("helper", sid) in held else
+                  ("target",))
+        _require(set(sample["held_sequences"]) == set(phases),
+                 "diagnostic snapshot phase set differs")
+        groups = {int(field.split(":")[1]) for item in phases
+                  for field in held[(item, sid)]["fields"][1:]}
+        groups.update(metadata["launch_roots"][item]["pid"] for item in phases)
+        _require(sample["live_tgids"] == sorted(groups) and
+                 {row["pid"] for row in sample["pids"]} == groups,
+                 "diagnostic snapshot sample membership differs")
+        for row in sample["pids"]:
+            root_owner = next((item for item in phases if
+                               row["pid"] == metadata["launch_roots"][item]["pid"]),
+                              None)
+            if root_owner is not None:
+                _require(row["start_ticks"] ==
+                         metadata["launch_roots"][root_owner]["start_ticks"] and
+                         row["start_ticks"] ==
+                         inventory[root_owner][str(row["pid"])]["start_ticks"],
+                         "diagnostic sampled tracer root tick differs")
+                continue
+            owner = next(item for item in phases
+                         if row["pid"] in held_ticks[(item, sid)])
+            _require(row["start_ticks"] == held_ticks[(owner, sid)][row["pid"]],
+                     "diagnostic sampled snapshot start tick differs")
+        for item in phases:
+            receipt = held[(item, sid)]
+            freeze = operations[item].get((sid, "FREEZE"))
+            resume = operations[item].get((sid, "RESUME"))
+            resumed = [row for row in all_sequenced[item] if
+                       row["kind"] == "RESUMED" and row["fields"] == [str(sid)]]
+            _require(freeze and resume and len(resumed) == 1 and
+                     sample["held_sequences"][item] == receipt["sequence"] and
+                     freeze["wall_ns"] <= receipt["wall_ns"] <=
+                     sample["wall_start_ns"] <= sample["wall_end_ns"] <=
+                     resume["wall_ns"] <= resumed[0]["wall_ns"] and
+                     resumed[0]["wall_ns"] - freeze["wall_ns"] <= 5_000_000_000,
+                     "diagnostic snapshot control window differs")
+    used = {(item, sample["snapshot_id"])
+            for sample in samples for item in sample["held_sequences"]}
+    _require(used == set(held) and
+             used == {(item, sid) for item in PHASES
+                      for sid, _ in operations[item]},
+             "diagnostic snapshot control inventory differs")
+    return owners, inventory
+
+
 def _resource_ownership(samples, metadata, files, allocation):
     roots = metadata.get("launch_roots")
     cpus = allocation.get("cpu_set")
@@ -2294,9 +2788,12 @@ def _resource_ownership(samples, metadata, files, allocation):
                  "diagnostic resource launch identity differs")
     trace_sets, executions = _resource_execs(files, metadata)
     binding = metadata.get("ownership_binding")
-    _require(binding in (None, "trace-lineage/2", OWNERSHIP_BINDING),
+    _require(binding in (None, "trace-lineage/2", OLD_OWNERSHIP_BINDING,
+                         OWNERSHIP_BINDING),
              "diagnostic ownership binding differs")
-    owners, inventory = (_bound_lineage(samples, metadata, files)
+    owners, inventory = (_bound_snapshot(samples, metadata, files)
+                         if binding == OWNERSHIP_BINDING else
+                         _bound_lineage(samples, metadata, files)
                          if binding is not None else ({}, None))
     _require(metadata["worker_pid"] in trace_sets["target"] and
              metadata["helper_pid"] in trace_sets["helper"],
@@ -2329,8 +2826,12 @@ def _resource_ownership(samples, metadata, files, allocation):
                      "observer" if phase == "observer" else
                      "helper" if group == roots["helper"]["pid"] else "target")
             root = roots[owner]
-            parent = members.get(row["parent_pid"])
-            _require((binding is not None and
+            parent = (members.get(inventory[owner][str(pid)]["creator_tgid"])
+                      if binding == OWNERSHIP_BINDING and pid != root["pid"] else
+                      members.get(row["parent_pid"]))
+            _require((binding == OWNERSHIP_BINDING and
+                      phase == ("target" if owner == "helper" else owner) or
+                      binding not in (None, OWNERSHIP_BINDING) and
                       row["start_ticks"] == inventory[owner][str(pid)]["start_ticks"] and
                       phase == ("target" if owner == "helper" else owner) or
                       binding is None and group == root["pid"] and
@@ -2347,7 +2848,9 @@ def _resource_ownership(samples, metadata, files, allocation):
             digest = row["command_sha256"]
             _require(digest in commands, "diagnostic sampled command is missing")
             used_commands.add(digest)
-            identity = ((row["start_ticks"], owner, tuple(row["affinity"]))
+            identity = ((owner, tuple(row["affinity"]))
+                        if binding == OWNERSHIP_BINDING else
+                        (row["start_ticks"], owner, tuple(row["affinity"]))
                         if binding is not None else
                         (row["start_ticks"], row["parent_pid"], group,
                          row["session_pid"], owner, tuple(row["affinity"])))
@@ -2369,11 +2872,15 @@ def _resource_ownership(samples, metadata, files, allocation):
             else:
                 images = executions[owner].get(pid, [])
                 inherited = parent["command_sha256"] if parent else None
+                creator_group = (inventory[owner][str(pid)]["creator_tgid"]
+                                 if binding == OWNERSHIP_BINDING else row["parent_pid"])
                 candidates = []
                 if not images or images[0][0] >= sample["wall_start_ns"]:
-                    inherited_path = current_images.get(row["parent_pid"])
-                    if inherited_path is None and row["parent_pid"] in seen:
-                        inherited_path = seen[row["parent_pid"]][3]
+                    inherited_path = current_images.get(creator_group)
+                    if inherited_path is None and creator_group in seen:
+                        inherited_path = seen[creator_group][3]
+                    if inherited is None and creator_group in seen:
+                        inherited = seen[creator_group][1]
                     candidates.append((inherited_path, inherited))
                 for index, (at, path, image_digest, _, _) in enumerate(images):
                     until = (images[index + 1][0] if index + 1 < len(images)
@@ -2411,6 +2918,10 @@ def _resource_ownership(samples, metadata, files, allocation):
                                           metadata["worker_pid"],
                                           _command_bytes(commands[digest]),
                                           image_path))
+            if (binding == OWNERSHIP_BINDING and pid != root["pid"] and
+                    not any(at <= sample["wall_start_ns"]
+                            for at, _, _, _, _ in executions[owner].get(pid, []))):
+                expected_role = "other"
             _require(len(roles) == 1 and
                      roles == {expected_role} and
                      (owner == "target" or "worker" not in roles) and
@@ -2600,6 +3111,7 @@ def main(argv=None):
     parser.add_argument("--verify")
     parser.add_argument("--output")
     parser.add_argument("--allocation")
+    parser.add_argument("--tracer-source")
     parser.add_argument("--method", default=METHOD)
     parser.add_argument("--call-cap", type=int, default=CAP)
     args = parser.parse_args(argv)
@@ -2607,9 +3119,10 @@ def main(argv=None):
     _require(args.capture != bool(args.verify), "select one diagnostic action")
     if args.capture:
         _require(args.output is not None, "diagnostic output path is required")
-        result = capture(args.output, args.allocation)
+        result = capture(args.output, args.allocation, args.tracer_source)
     else:
-        _require(args.output is None and args.allocation is None,
+        _require(args.output is None and args.allocation is None and
+                 args.tracer_source is None,
                  "diagnostic replay accepts only its archive")
         result = verify_archive(args.verify)
     print(json.dumps({"schema": SCHEMA, "status": result["status"],

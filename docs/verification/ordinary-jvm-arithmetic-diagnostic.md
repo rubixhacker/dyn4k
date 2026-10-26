@@ -30,6 +30,7 @@ env -u OLLAMA_API_KEY TMPDIR=/path/to/private-scratch python3 -B \
   tools/numerical/portable/ordinary_arithmetic_diagnostic.py \
   --capture --output /path/to/new-private-output \
   --allocation /path/to/scheduled-allocation.json \
+  --tracer-source /path/to/pinned-strace-7.2.tar.xz \
   --method captureLongMotion --call-cap 64
 
 env -u OLLAMA_API_KEY TMPDIR=/path/to/private-scratch python3 -B \
@@ -40,7 +41,46 @@ env -u OLLAMA_API_KEY TMPDIR=/path/to/private-scratch python3 -B \
 The verifier reads the retained raw evidence. It rebuilds the helper from
 the committed source and checks the retained source archive, staged artifact,
 JDK executable, effective worker classpath and its captured inventory. It
-also checks the original case bytes, worker and helper executions, loaded
+also checks the official strace 7.2 source archive by SHA-256, the committed
+patch and include file, and a byte-for-byte rebuild of the private tracer.
+The capture uses only that private binary. The source archive SHA-256 is
+`4bde6246926890dcee824f6e6ac42a06752f47d77e5097d86e3c0d6d4b709fe5`.
+The build uses two compiler jobs and one 600-second deadline across extraction,
+patching, configuration, and compilation. It selects and records the compiler
+path and hash. It retains raw command output and a structured record on
+failure or timeout.
+
+The `owned-snapshot/1` binding records a child birth while ptrace holds its
+first stop. It joins the creator event and child stop in either order before
+acknowledging the birth. The record contains creator TID and TGID, child TID
+and TGID, kernel PPID, live start tick, boot-clock observation, actual
+first-stop status, and shared-address-space state. A `vfork` child is marked
+as shared before exec. A process clone event carries an unknown shared-space
+state until raw clone flags are checked. The tracer transfers a pidfd for
+each new process group. A snapshot freezes every traced thread, drains births
+and exits, records the exact held roster, and reads one RSS value per live
+TGID. It resumes each saved ptrace operation and signal. One five-second
+deadline covers FREEZE, the held read, and RESUME. The tracer root is included
+in RSS.
+An unknown executable stays in the `other` role. Missing RSS, an unproved
+exit, a failed hold or resume, and a cleanup survivor give a typed incomplete
+result. Cleanup signals every bound pidfd even if a later `/proc` identity
+read fails. It retains that uncertainty and proves exits where possible.
+Cleanup never signals an unbound PID.
+
+Replay checks every birth against the raw fork or clone result, every exit
+against its raw trace, the exact held roster and start ticks, and each
+sample's FREEZE and RESUME window. It binds sampled tracer-root start ticks
+to the independent launch identity and rejects windows over five seconds.
+It rejects a raw spawn without a birth record, including a successful untraced
+clone. Event and control journals, source and binary files, and raw traces
+pass archive limits and literal and decoded privacy checks. Earlier
+`trace-lineage/2` and `trace-lineage/3`
+archives keep their original replay rules. A new snapshot does not qualify
+an earlier archive or convert an unavailable start tick into a measured
+identity.
+
+It also checks the original case bytes, worker and helper executions, loaded
 class bytes and loader object, raw call bits, writers, both selected transport
 endpoint closes, worker progress, time limits, and sampled RSS.
 Replay also checks the selected worker's Gradle ancestry and compares its
@@ -65,7 +105,7 @@ exec Java.
 
 The staging replay requires exactly two successful wrapper executions in
 order: core publication, then portable `jvmTestClasses`. It rejects another
-wrapper execution and equal or reversed execution times. The
+wrapper execution and equal or reversed execution times. The earlier
 `trace-lineage/3` source binding records each observed descendant's start tick
 and traced parent. Replay requires an identity for every traced process
 descendant, including one that exits before a sample. A trace does not supply
