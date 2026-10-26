@@ -13,25 +13,38 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        id: checkout
         with:
           fetch-depth: 0
       - uses: actions/setup-java@v4
+        id: java-setup
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         with:
           distribution: temurin
           java-version: |
             8
             21
       - name: Reject hosted macOS routes
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 -B tools/qualification/guard_hosted_runners.py
       - name: Test qualification workflow contracts
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 -B -m unittest tools.compatibility.test_qualification_workflow
       - name: Test hosted runner guard
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners
       - name: Test declaration ledger contracts
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: env -u OLLAMA_API_KEY -u DYN4K_BASELINE_SOURCE -u DYN4K_BASELINE_JAR -u DYN4K_BASELINE_SOURCES_JAR PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/compatibility python3 -B -m unittest -v test_ledger
       - name: Verify pinned GNU MPFR runtime
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: env -u OLLAMA_API_KEY PYTHONPATH=tools/numerical/portable python3 -B -c 'from rotation_oracle import _MPFR; mpfr = _MPFR(); print("GNU MPFR", mpfr.version)'
-      - name: Test source-only numerical regressions
+      - name: Test portable Java banner controls
+        id: java-banner-units
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/compatibility python3 -B -m unittest -v test_governing_seams.GoverningSeamsTests.test_java_options_keep_the_inherited_route_for_both_providers test_governing_seams.GoverningSeamsTests.test_only_one_exact_java_options_banner_is_removed
+      - name: Test source-only numerical regressions including bounded live-process tests
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.java-setup.outcome == 'success' }}
         run: |
           set -euo pipefail
           umask 077
@@ -80,6 +93,7 @@ jobs:
               test_numeric_producer \
               test_run
       - name: Test bounded JDI wait on JDK 21
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.java-setup.outcome == 'success' }}
         run: |
           test -n "${JAVA_HOME_21_X64:-}"
           test -x "$JAVA_HOME_21_X64/bin/java"
@@ -97,6 +111,7 @@ jobs:
             PYTHONPATH=tools/numerical/portable/boolean_rotation_jdi \
             python3 -B -m unittest -v test_jdi_wait
       - name: Test numeric class witness on JDK 21
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.java-setup.outcome == 'success' }}
         run: |
           set -euo pipefail
           unset OLLAMA_API_KEY
@@ -120,16 +135,24 @@ jobs:
             PYTHONPATH=tools/numerical/portable \
             python3 -B -m unittest -v test_numeric_class_witness
       - name: Test qualification manifest and publication contracts
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/qualification python3 -B -m unittest -v test_full_suite_manifest test_publication
       - name: Test independent qualification gate seams
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/qualification python3 -B -m unittest -v test_independent_gates
       - name: Test portable qualification source modules
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: env -u OLLAMA_API_KEY -u DYN4K_UPSTREAM_SOURCE -u DYN4K_RETAINED_FULL_JVM_ARCHIVE -u DYN4K_JVM_MODE_PUBLICATION -u DYN4K_RETAINED_BROWSER_PRODUCER -u DYN4K_RETAINED_BROWSER_ARCHIVES PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/qualification python3 -B -m unittest -v test_collection test_compiler_modes test_full_corpus test_node_runtime_binding test_independent_adapter test_full_native_host_consumer
       - name: Check migration guide links and claims
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 python3 -B docs/guide/check_links.py
       - name: Test migration guide checks
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=docs/guide python3 -B -m unittest -v test_checks
       - name: Install migration image decoder
+        id: imagemagick-setup
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends imagemagick
       - name: Test migration scene validators
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.imagemagick-setup.outcome == 'success' }}
         run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest -v tools.migration.test_truck_camera tools.migration.test_validation

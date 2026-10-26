@@ -320,11 +320,15 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             r"(?m)^      - uses: actions/checkout@v4\n((?: {8,}.*\n)+)", job
         )
         self.assertIsNotNone(checkout)
-        self.assertEqual("        with:\n          fetch-depth: 0\n", checkout.group(1))
-        self.assertNotRegex(job, r"(?m)^        (?:if|continue-on-error):")
+        self.assertEqual(
+            "        id: checkout\n        with:\n          fetch-depth: 0\n",
+            checkout.group(1),
+        )
+        self.assertNotRegex(job, r"(?m)^    (?:if|continue-on-error):")
 
         step_matches = list(re.finditer(r"(?m)^      - (.+)$", job))
         step_contract = []
+        step_ids = []
         for index, match in enumerate(step_matches):
             end = step_matches[index + 1].start() if index + 1 < len(step_matches) else len(job)
             block = job[match.start():end]
@@ -333,18 +337,52 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             keys = [first_key, *(key for key, _ in continuation)]
             if len(keys) != len(set(keys)):
                 raise AssertionError("duplicate workflow step structural key")
+            fields = dict(continuation)
             if first_key == "uses":
-                self.assertEqual(["uses", "with"], keys)
+                self.assertIn(keys, (["uses", "id", "with"],
+                                     ["uses", "id", "if", "with"]))
+                step_ids.append(fields["id"])
                 if first_value == "actions/checkout@v4":
+                    self.assertNotIn("if", fields)
                     self.assertEqual([("fetch-depth", "0")],
                                      _yaml_structural_entries_at_indent(block, 10))
+                    self.assertEqual("checkout", fields["id"])
                 else:
                     self.assertEqual("actions/setup-java@v4", first_value)
+                    self.assertIn("if", fields)
+                    self.assertEqual("java-setup", fields["id"])
+                    self.assertEqual(
+                        "${{ !cancelled() && steps.checkout.outcome == 'success' }}",
+                        fields["if"],
+                    )
                     self.assertEqual([("distribution", "temurin"), ("java-version", "|")],
                                      _yaml_structural_entries_at_indent(block, 10))
                     self.assertIn("          java-version: |\n            8\n            21\n", block)
             else:
-                self.assertEqual(["name", "run"], keys)
+                self.assertIn(keys, (["name", "if", "run"],
+                                     ["name", "id", "if", "run"]))
+                condition = fields["if"]
+                required_condition = "${{ !cancelled() && steps.checkout.outcome == 'success' }}"
+                if first_value in (
+                    "Test source-only numerical regressions including bounded live-process tests",
+                    "Test bounded JDI wait on JDK 21",
+                    "Test numeric class witness on JDK 21",
+                ):
+                    required_condition = (
+                        "${{ !cancelled() && steps.checkout.outcome == 'success' "
+                        "&& steps.java-setup.outcome == 'success' }}"
+                    )
+                elif first_value == "Test migration scene validators":
+                    required_condition = (
+                        "${{ !cancelled() && steps.checkout.outcome == 'success' "
+                        "&& steps.imagemagick-setup.outcome == 'success' }}"
+                    )
+                self.assertEqual(required_condition, condition, first_value)
+                if "id" in fields:
+                    step_ids.append(fields["id"])
+                if first_value == "Install migration image decoder":
+                    self.assertEqual("imagemagick-setup", fields["id"])
+                self.assertNotIn("continue-on-error", fields)
             multiline = re.search(r"(?ms)^        run: \|\n((?: {10}.*\n)+)", block)
             if multiline is not None:
                 script = textwrap.dedent(multiline.group(1))
@@ -353,6 +391,11 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 inline = re.search(r"(?m)^        run: (.+)$", block)
                 command = inline.group(1) if inline is not None else None
             step_contract.append((match.group(1), command))
+
+        self.assertEqual(len(step_ids), len(set(step_ids)), "duplicate workflow step id")
+        self.assertEqual(["checkout", "java-setup", "imagemagick-setup"],
+                         [value for value in step_ids if value in {
+                             "checkout", "java-setup", "imagemagick-setup"}])
 
         self.assertEqual(
             [
@@ -373,7 +416,12 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "env -u OLLAMA_API_KEY PYTHONPATH=tools/numerical/portable python3 -B -c "
                  "'from rotation_oracle import _MPFR; mpfr = _MPFR(); "
                  "print(\"GNU MPFR\", mpfr.version)'"),
-                ("name: Test source-only numerical regressions",
+                ("name: Test portable Java banner controls",
+                 "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
+                 "PYTHONPATH=tools/compatibility python3 -B -m unittest -v "
+                 "test_governing_seams.GoverningSeamsTests.test_java_options_keep_the_inherited_route_for_both_providers "
+                 "test_governing_seams.GoverningSeamsTests.test_only_one_exact_java_options_banner_is_removed"),
+                ("name: Test source-only numerical regressions including bounded live-process tests",
                  "set -euo pipefail umask 077 "
                  "source_checks_tmp=\"$(realpath \"$(mktemp -d \"$HOME/d4t.XXXXXX\")\")\" "
                  "test -d \"$source_checks_tmp\" "
@@ -487,6 +535,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         self.assert_source_checks_job_contract(source)
         preflight = (
             "      - name: Verify pinned GNU MPFR runtime\n"
+            "        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}\n"
             "        run: env -u OLLAMA_API_KEY "
             "PYTHONPATH=tools/numerical/portable python3 -B -c "
             "'from rotation_oracle import _MPFR; mpfr = _MPFR(); "
@@ -500,7 +549,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         )
         for name, old, new in mutations:
             with self.subTest(mutation=name):
-                self.assertEqual(1, source.count(old), name)
+                self.assertIn(old, source, name)
                 with self.assertRaises(AssertionError):
                     self.assert_source_checks_job_contract(source.replace(old, new, 1))
 
@@ -510,6 +559,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         self.assert_source_checks_job_contract(source)
         ledger_step = (
             "      - name: Test declaration ledger contracts\n"
+            "        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}\n"
             "        run: env -u OLLAMA_API_KEY -u DYN4K_BASELINE_SOURCE "
             "-u DYN4K_BASELINE_JAR -u DYN4K_BASELINE_SOURCES_JAR "
             "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/compatibility "
@@ -524,11 +574,87 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.assert_source_checks_job_contract(source.replace(ledger_step, disabled, 1))
 
+    def test_source_checks_run_only_portable_java_banner_units(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assert_source_checks_job_contract(source)
+        banner_step = (
+            "      - name: Test portable Java banner controls\n"
+            "        id: java-banner-units\n"
+            "        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}\n"
+            "        run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
+            "PYTHONPATH=tools/compatibility python3 -B -m unittest -v "
+            "test_governing_seams.GoverningSeamsTests.test_java_options_keep_the_inherited_route_for_both_providers "
+            "test_governing_seams.GoverningSeamsTests.test_only_one_exact_java_options_banner_is_removed\n"
+        )
+        self.assertEqual(1, source.count(banner_step))
+        for forbidden in (
+            "test_uncovered_behavior_runs_against_both_exact_archives",
+            "test_pinned_jdks_run_baseline_and_candidate_options",
+        ):
+            self.assertNotIn(forbidden, banner_step)
+
+        mutations = (
+            ("banner selection removed", banner_step, ""),
+            ("first banner unit removed", "test_java_options_keep_the_inherited_route_for_both_providers ", ""),
+            ("second banner unit removed", "test_only_one_exact_java_options_banner_is_removed", "test_changed_fixture_artifact_or_method_hit_is_rejected"),
+            ("failure suppressed", "test_only_one_exact_java_options_banner_is_removed\n",
+             "test_only_one_exact_java_options_banner_is_removed || true\n"),
+            ("setup dependency removed", "steps.java-setup.outcome == 'success'", "true"),
+            ("cancellation ignored", "!cancelled()", "always()"),
+        )
+        for name, old, new in mutations:
+            with self.subTest(mutation=name):
+                mutated = source.replace(old, new, 1)
+                self.assertNotEqual(source, mutated, name)
+                with self.assertRaises(AssertionError):
+                    self.assert_source_checks_job_contract(mutated)
+
+    def test_source_steps_continue_after_failures_without_ignoring_cancellation(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assert_source_checks_job_contract(source)
+        job = workflow_jobs(source)["workflow-source-contracts"]
+        self.assertNotIn("continue-on-error", job)
+        self.assertNotRegex(job, r"(?m)^\s+run:.*(?:\|\|\s*true|;\s*true)\s*$")
+        steps = list(re.finditer(r"(?m)^      - (?:name|uses): .*\n", job))
+        for index, match in enumerate(steps):
+            block = job[match.start():steps[index + 1].start() if index + 1 < len(steps) else len(job)]
+            if "run:" in block:
+                self.assertIn("if: ${{ !cancelled()", block)
+        for step_name, setup_id in (
+            ("Test source-only numerical regressions including bounded live-process tests", "java-setup"),
+            ("Test bounded JDI wait on JDK 21", "java-setup"),
+            ("Test numeric class witness on JDK 21", "java-setup"),
+            ("Test migration scene validators", "imagemagick-setup"),
+        ):
+            block = re.search(
+                rf"(?ms)^      - name: {re.escape(step_name)}\n.*?(?=^      - (?:name|uses): |\Z)",
+                job,
+            )
+            self.assertIsNotNone(block, step_name)
+            self.assertIn(f"steps.{setup_id}.outcome == 'success'", block.group(0))
+            self.assertIn("steps.checkout.outcome == 'success'", block.group(0))
+
+        mutations = (
+            ("cancellation condition weakened", "!cancelled()", "always()"),
+            ("Java setup dependency removed", "steps.java-setup.outcome == 'success'", "true"),
+            ("ImageMagick setup dependency removed", "steps.imagemagick-setup.outcome == 'success'", "true"),
+            ("checkout dependency removed", "steps.checkout.outcome == 'success'", "true"),
+            ("continue-on-error added", "    timeout-minutes: 5\n", "    timeout-minutes: 5\n    continue-on-error: true\n"),
+            ("test failure suppressed", "python3 -B -m unittest tools.compatibility.test_qualification_workflow",
+             "python3 -B -m unittest tools.compatibility.test_qualification_workflow || true"),
+        )
+        for name, old, new in mutations:
+            with self.subTest(mutation=name):
+                self.assertIn(old, source, name)
+                with self.assertRaises(AssertionError):
+                    self.assert_source_checks_job_contract(source.replace(old, new, 1))
+
     def test_bounded_jdi_step_fails_when_required_jdk21_is_missing(self):
         source = SOURCE_CHECKS.read_text(encoding="utf-8")
         self.assert_source_checks_job_contract(source)
         step = re.search(
             r"(?m)^      - name: Test bounded JDI wait on JDK 21\n"
+            r"(?:        (?!run:)[^\n]*\n)*"
             r"        run: \|\n((?:          [^\n]*\n)+)", source,
         )
         self.assertIsNotNone(step)
@@ -667,7 +793,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("Pulley classpath input unset omitted", "-u DYN4K_PULLEY_REAL_CLASSPATH ", ""),
             ("Pulley cache input unset omitted", "-u DYN4K_PULLEY_CACHE_ROOT ", ""),
             ("added installation step",
-             "      - name: Test source-only numerical regressions\n",
+             "      - name: Test source-only numerical regressions including bounded live-process tests\n",
              "      - name: Install a dependency\n"
              "        run: pip install example\n"
              "      - name: Test source-only numerical regressions\n"),
@@ -715,6 +841,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "-m unittest -v"),
             ("migration decoder installation removed",
              "      - name: Install migration image decoder\n"
+             "        id: imagemagick-setup\n"
+             "        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}\n"
              "        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends imagemagick\n",
              ""),
             ("truck camera migration module omitted",
@@ -736,6 +864,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         self.assert_source_checks_job_contract(source)
         suite = re.search(
             r"(?m)^      - name: Test portable qualification source modules\n"
+            r"(?:        (?!run:)[^\n]*\n)*"
             r"        run: (.+)\n", source,
         ).group(0)
         self.assertEqual(1, source.count(suite))
@@ -851,7 +980,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "      - name: Test hosted runner guard",
              "      - name: Test declaration ledger contracts",
              "      - name: Verify pinned GNU MPFR runtime",
-             "      - name: Test source-only numerical regressions",
+             "      - name: Test portable Java banner controls",
+             "      - name: Test source-only numerical regressions including bounded live-process tests",
              "      - name: Test bounded JDI wait on JDK 21",
              "      - name: Test numeric class witness on JDK 21",
              "      - name: Test qualification manifest and publication contracts",
@@ -864,7 +994,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             step_names,
         )
         step = re.search(
-            r"(?ms)^      - name: Test source-only numerical regressions\n"
+            r"(?ms)^      - name: Test source-only numerical regressions including bounded live-process tests\n"
+            r"(?:        (?!run:)[^\n]*\n)*"
             r"        run: \|\n((?:          [^\n]*\n)+)",
             job,
         )
@@ -912,7 +1043,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         source = SOURCE_CHECKS.read_text(encoding="utf-8")
         job = workflow_jobs(source)["workflow-source-contracts"]
         step = re.search(
-            r"(?ms)^      - name: Test source-only numerical regressions\n"
+            r"(?ms)^      - name: Test source-only numerical regressions including bounded live-process tests\n"
+            r"(?:        (?!run:)[^\n]*\n)*"
             r"        run: \|\n((?:          [^\n]*\n)+)",
             job,
         )
@@ -972,6 +1104,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
 
         observer = re.search(
             r"(?ms)^      - name: Test numeric class witness on JDK 21\n"
+            r"(?:        (?!run:)[^\n]*\n)*"
             r"        run: \|\n((?:          [^\n]*\n)+)", job,
         )
         self.assertIsNotNone(observer)
@@ -1035,7 +1168,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         )
         self.assertIsNotNone(observer)
         numerical = re.search(
-            r"(?ms)^      - name: Test source-only numerical regressions\n"
+            r"(?ms)^      - name: Test source-only numerical regressions including bounded live-process tests\n"
             r".*?(?=^      - (?:name|uses): |\Z)", source,
         )
         self.assertIsNotNone(numerical)
@@ -1057,7 +1190,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         source = SOURCE_CHECKS.read_text(encoding="utf-8")
         self.assert_source_checks_job_contract(source)
         numerical = re.search(
-            r"(?ms)^      - name: Test source-only numerical regressions\n"
+            r"(?ms)^      - name: Test source-only numerical regressions including bounded live-process tests\n"
             r".*?(?=^      - (?:name|uses): |\Z)", source,
         )
         self.assertIsNotNone(numerical)
