@@ -1,0 +1,6 @@
+1793021458.410732 execve("/var/home/stewart/d4v.e1814f/as/tmpwk9gxa1l/toy", ["/var/home/stewart/d4v.e1814f/as/"..., "nonleader_hold"], 0x7fffa7347b20 /* 32 vars */) = 0
+1793021458.419992 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7fca7f1eece8, parent_tid=0x7fca7f1ee990, exit_signal=0, stack=0x7fca7e9ee000, stack_size=0x7fff80, tls=0x7fca7f1ee6c0} <unfinished ...>) = ?
+1793021458.434329 +++ superseded by execve in pid 1226728 +++
+1793021458.434407 <... execve resumed>) = 0
+1793021458.635503 exit_group(0)         = ?
+1793021458.647655 +++ exited with 0 +++

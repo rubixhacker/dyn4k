@@ -7,6 +7,7 @@ from pathlib import Path
 import select
 import shutil
 import signal
+import stat
 import subprocess
 import tarfile
 import time
@@ -18,6 +19,7 @@ HERE = Path(__file__).resolve().parent
 PATCH = HERE / "strace-7.2.patch"
 INCLUDE = HERE / "owned_snapshot.inc"
 _BUILD_DEADLINE = ContextVar("ordinary_build_deadline", default=None)
+_COMPILER_MAX_BYTES = 64 * 1024 * 1024
 
 
 class OwnedGroupIdentityError(RuntimeError):
@@ -26,6 +28,47 @@ class OwnedGroupIdentityError(RuntimeError):
 
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def compiler_identity(retained_path=None):
+    selected = shutil.which("gcc")
+    if selected is None:
+        raise ValueError("gcc compiler is unavailable")
+    path = str(Path(selected).resolve())
+    if retained_path is not None and (type(retained_path) is not str or
+                                      len(retained_path) > 4096 or
+                                      retained_path != path):
+        raise ValueError("compiler path differs")
+    try:
+        before = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > _COMPILER_MAX_BYTES:
+            raise ValueError("compiler file differs")
+        handle = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK |
+                         os.O_NOFOLLOW)
+        try:
+            opened = os.fstat(handle)
+            if (not stat.S_ISREG(opened.st_mode) or
+                    (opened.st_dev, opened.st_ino) !=
+                    (before.st_dev, before.st_ino) or
+                    opened.st_size > _COMPILER_MAX_BYTES):
+                raise ValueError("compiler file differs")
+            value = hashlib.sha256()
+            length = 0
+            while block := os.read(handle, 1024 * 1024):
+                length += len(block)
+                if length > _COMPILER_MAX_BYTES:
+                    raise ValueError("compiler file differs")
+                value.update(block)
+            after = os.fstat(handle)
+            if (length != opened.st_size or
+                    (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) !=
+                    (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)):
+                raise ValueError("compiler file differs")
+        finally:
+            os.close(handle)
+    except OSError as error:
+        raise ValueError("compiler file differs") from error
+    return path, value.hexdigest()
 
 
 def write_record(path, record):
@@ -341,10 +384,7 @@ def _build(archive, output, *, timeout):
     if digest(source_file) != SOURCE_SHA256:
         raise ValueError("pinned strace source file differs")
     shutil.copyfile(INCLUDE, tree / "src/owned_snapshot.inc")
-    compiler = shutil.which("gcc")
-    if compiler is None:
-        raise ValueError("gcc compiler is unavailable")
-    compiler = str(Path(compiler).resolve())
+    compiler, compiler_sha256 = compiler_identity()
     env = {key: value for key, value in os.environ.items()
            if key not in {"CC", "CXX", "MAKEFLAGS", "MFLAGS", "GNUMAKEFLAGS"}}
     env.update({"LC_ALL": "C", "TZ": "UTC", "SOURCE_DATE_EPOCH": "1770000000",
@@ -354,7 +394,7 @@ def _build(archive, output, *, timeout):
               "archive_sha256": ARCHIVE_SHA256,
               "upstream_source_sha256": SOURCE_SHA256,
               "patch_sha256": digest(PATCH), "include_sha256": digest(INCLUDE),
-              "compiler_path": compiler, "compiler_sha256": digest(compiler),
+              "compiler_path": compiler, "compiler_sha256": compiler_sha256,
               "commands": []}
     for index, (argv, cwd) in enumerate(((["git", "apply", str(PATCH)], tree),
                       ([str(tree / "configure"), "--disable-mpers",

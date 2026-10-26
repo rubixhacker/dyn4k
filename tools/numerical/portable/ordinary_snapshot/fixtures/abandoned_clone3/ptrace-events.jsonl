@@ -1,0 +1,5 @@
+{"fields":["1226717","1226717","82101218","141"],"kind":"ROOT","phase":"stage","pidfd_pid":1226717,"sequence":1,"wall_ns":1793021458407895997}
+{"fields":["1226717","1226717","1226717","82101218"],"kind":"EXEC","phase":"stage","pidfd_pid":1226717,"sequence":2,"wall_ns":1793021458417471528}
+{"fields":["1","1226717","1226717","1226728","1226717","3","82101220","283","1226701","821012207328521","8390015","1"],"kind":"BIRTH","phase":"stage","pidfd_pid":null,"sequence":3,"wall_ns":1793021458425099839}
+{"fields":["1226717","1226728","1226717","82101218"],"kind":"EXEC","phase":"stage","pidfd_pid":1226717,"sequence":4,"wall_ns":1793021458432027463}
+{"fields":["1226717","1226717","0"],"kind":"EXIT","phase":"stage","pidfd_pid":null,"sequence":5,"wall_ns":1793021458636724683}

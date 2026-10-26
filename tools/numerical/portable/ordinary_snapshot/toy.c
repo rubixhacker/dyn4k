@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,8 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+static atomic_int exec_gate;
 
 static void *thread_fork(void *unused)
 {
@@ -27,6 +30,9 @@ static void *thread_fork(void *unused)
 
 static void *thread_exec(void *hold)
 {
+	atomic_store_explicit(&exec_gate, 1, memory_order_release);
+	while (atomic_load_explicit(&exec_gate, memory_order_acquire) != 2)
+		sched_yield();
 	if (hold)
 		execl("/bin/sleep", "sleep", "0.2", (char *) NULL);
 	else
@@ -52,6 +58,9 @@ int main(int argc, char **argv)
 		if (pthread_create(&thread, NULL, thread_exec,
 		    !strcmp(argv[1], "nonleader_hold") ? (void *) 1 : NULL))
 			return 3;
+		while (atomic_load_explicit(&exec_gate, memory_order_acquire) != 1)
+			sched_yield();
+		atomic_store_explicit(&exec_gate, 2, memory_order_release);
 		pause();
 		return 4;
 	}

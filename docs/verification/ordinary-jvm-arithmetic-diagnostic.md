@@ -47,8 +47,12 @@ The capture uses only that private binary. The source archive SHA-256 is
 `4bde6246926890dcee824f6e6ac42a06752f47d77e5097d86e3c0d6d4b709fe5`.
 The build uses two compiler jobs and one 600-second deadline across extraction,
 patching, configuration, and compilation. It selects and records the compiler
-path and hash. It retains raw command output and a structured record on
-failure or timeout.
+path and hash. Replay accepts only the selected compiler path. It opens that
+file without following a final symlink and hashes at most 64 MiB from a regular
+file descriptor. A changed file identity or an incomplete read rejects the
+archive before the rebuild. The rebuild must record the same compiler path and
+hash. The build retains raw command output and a structured record on failure
+or timeout.
 
 The `owned-snapshot/1` binding records a child birth while ptrace holds its
 first stop. It joins the creator event and child stop in either order before
@@ -79,6 +83,13 @@ pass archive limits and literal and decoded privacy checks. Earlier
 archives keep their original replay rules. A new snapshot does not qualify
 an earlier archive or convert an unavailable start tick into a measured
 identity.
+
+The native nonleader-exec control waits until `pthread_create` returns before
+its new thread calls `execve`. The control checks that the raw clone result
+names the journal's child TID and precedes the thread's exec. It runs with
+normal and forced child-first tracer scheduling. A retained trace in which
+the leader's clone result is abandoned still rejects: its birth event alone
+does not prove the raw spawn result.
 
 It also checks the original case bytes, worker and helper executions, loaded
 class bytes and loader object, raw call bits, writers, both selected transport

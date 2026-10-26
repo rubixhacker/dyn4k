@@ -1,4 +1,5 @@
 import io
+from decimal import Decimal
 import hashlib
 import gc
 import inspect
@@ -24,6 +25,147 @@ from ordinary_snapshot.build_tracer import build as build_tracer, run as run_bui
 from ordinary_snapshot import build_tracer as builder
 from ordinary_arithmetic_diagnostic import _pidfd_exited, _proc_identity, check_retained
 import ordinary_arithmetic_diagnostic as diagnostic
+
+
+class CompilerIdentityTest(unittest.TestCase):
+    def test_rejects_untrusted_path_before_open(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            compiler = Path(directory) / "gcc"
+            compiler.write_bytes(b"compiler")
+            with mock.patch.object(builder.shutil, "which", return_value=str(compiler)), \
+                 mock.patch.object(builder.os, "open", side_effect=AssertionError("opened")):
+                with self.assertRaisesRegex(ValueError, "compiler path differs"):
+                    builder.compiler_identity("/dev/zero")
+
+    def test_fifo_directory_and_symlink_reject_without_reading(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            root = Path(directory)
+            for kind in ("fifo", "directory", "symlink"):
+                with self.subTest(kind=kind):
+                    compiler = root / "gcc"
+                    if kind == "fifo":
+                        os.mkfifo(compiler)
+                    elif kind == "directory":
+                        compiler.mkdir()
+                    else:
+                        compiler.symlink_to(root / "target")
+                    with mock.patch.object(builder.shutil, "which", return_value=str(compiler)):
+                        with self.assertRaises(ValueError):
+                            builder.compiler_identity(str(compiler))
+                    if kind == "directory":
+                        compiler.rmdir()
+                    else:
+                        compiler.unlink()
+
+    def test_replaced_regular_file_rejects_without_blocking(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            compiler = Path(directory) / "gcc"
+            compiler.write_bytes(b"compiler")
+            opened = builder.os.open
+            def replace_then_open(path, flags):
+                compiler.unlink()
+                os.mkfifo(compiler)
+                return opened(path, flags)
+            with mock.patch.object(builder.shutil, "which", return_value=str(compiler)), \
+                 mock.patch.object(builder.os, "open", side_effect=replace_then_open):
+                with self.assertRaises(ValueError):
+                    builder.compiler_identity(str(compiler))
+
+    def test_replaced_regular_file_is_not_read(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            compiler = Path(directory) / "gcc"
+            compiler.write_bytes(b"compiler")
+            opened = builder.os.open
+            def replace_then_open(path, flags):
+                compiler.unlink()
+                compiler.write_bytes(b"private replacement")
+                return opened(path, flags)
+            with mock.patch.object(builder.shutil, "which", return_value=str(compiler)), \
+                 mock.patch.object(builder.os, "open", side_effect=replace_then_open), \
+                 mock.patch.object(builder.os, "read",
+                                   side_effect=AssertionError("read replacement")):
+                with self.assertRaisesRegex(ValueError, "compiler file differs"):
+                    builder.compiler_identity(str(compiler))
+
+    def test_raced_symlink_does_not_open_target(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            compiler = Path(directory) / "gcc"
+            compiler.write_bytes(b"compiler")
+            opened = builder.os.open
+            def replace_then_open(path, flags):
+                self.assertTrue(flags & os.O_NOFOLLOW)
+                compiler.unlink()
+                compiler.symlink_to("/dev/zero")
+                return opened(path, flags)
+            with mock.patch.object(builder.shutil, "which", return_value=str(compiler)), \
+                 mock.patch.object(builder.os, "open", side_effect=replace_then_open), \
+                 mock.patch.object(builder.os, "read",
+                                   side_effect=AssertionError("read target")):
+                with self.assertRaisesRegex(ValueError, "compiler file differs"):
+                    builder.compiler_identity(str(compiler))
+
+    def test_malformed_retained_paths_reject_before_open(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            compiler = Path(directory) / "gcc"
+            compiler.write_bytes(b"compiler")
+            for value in ([], "x" * 4097, "/dev/zero"):
+                with self.subTest(value=type(value).__name__), \
+                     mock.patch.object(builder.shutil, "which", return_value=str(compiler)), \
+                     mock.patch.object(builder.os, "open",
+                                       side_effect=AssertionError("opened")):
+                    with self.assertRaisesRegex(ValueError, "compiler path differs"):
+                        builder.compiler_identity(value)
+
+    def test_regular_compiler_has_bounded_exact_hash(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            compiler = Path(directory) / "gcc"
+            compiler.write_bytes(b"compiler")
+            with mock.patch.object(builder.shutil, "which", return_value=str(compiler)):
+                path, digest = builder.compiler_identity(str(compiler))
+                self.assertEqual(path, str(compiler))
+                self.assertEqual(digest, hashlib.sha256(b"compiler").hexdigest())
+                with mock.patch.object(builder, "_COMPILER_MAX_BYTES", 7):
+                    with self.assertRaisesRegex(ValueError, "compiler file differs"):
+                        builder.compiler_identity(str(compiler))
+
+    def test_archive_compiler_rejection_is_typed(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            compiler = Path(directory) / "gcc"
+            compiler.write_bytes(b"compiler")
+            fifo = Path(directory) / "archive.fifo"
+            os.mkfifo(fifo)
+            record = {"schema": "ordinary-snapshot-build/1",
+                      "archive_sha256": hashlib.sha256(b"archive").hexdigest(),
+                      "upstream_source_sha256": builder.SOURCE_SHA256,
+                      "patch_sha256": builder.digest(builder.PATCH),
+                      "include_sha256": builder.digest(builder.INCLUDE),
+                      "compiler_path": str(fifo),
+                      "compiler_sha256": "0" * 64,
+                      "binary_sha256": hashlib.sha256(b"binary").hexdigest()}
+            files = {"strace-source.tar.xz": b"archive",
+                     "strace-binary": b"binary",
+                     "strace-build.json": json.dumps(record).encode()}
+            with mock.patch.object(builder, "ARCHIVE_SHA256", record["archive_sha256"]), \
+                 mock.patch.object(builder.shutil, "which", return_value=str(compiler)), \
+                 mock.patch.object(diagnostic, "build_owned_tracer",
+                                   side_effect=AssertionError("unexpected rebuild")):
+                with self.assertRaisesRegex(diagnostic.DiagnosticRejected,
+                                            "diagnostic private tracer source or binary differs"):
+                    diagnostic._tracer_identity(files, {"tracer_build": record})
+
+
+class RetainedAbandonedCloneTest(unittest.TestCase):
+    def test_original_trace_remains_rejected_despite_birth_journal(self):
+        root = Path(__file__).with_name("fixtures") / "abandoned_clone3"
+        events = [json.loads(line) for line in
+                  (root / "ptrace-events.jsonl").read_bytes().splitlines()]
+        self.assertEqual([(row["kind"], row["sequence"]) for row in events],
+                         [("ROOT", 1), ("EXEC", 2), ("BIRTH", 3),
+                          ("EXEC", 4), ("EXIT", 5)])
+        self.assertEqual(events[2]["fields"][3], "1226728")
+        with self.assertRaisesRegex(diagnostic.actual_trace.TraceRejected,
+                                    "rich abandoned syscall differs"):
+            diagnostic._raw_events(diagnostic._trace_archive(root / "trace"))
 
 
 class NativeAttempt:
@@ -968,7 +1110,7 @@ class NativeSnapshotControlTest(unittest.TestCase):
                  ("fast", "nested", "group_escape", "parent_exit",
                   "nonleader", "nonleader_hold", "vfork", "clone3",
                   "held_child", "drain_child", "untraced", "untraced_live")]
-        modes.append(("fast", True))
+        modes.extend((("fast", True), ("nonleader_hold", True)))
         for mode, child_first in modes:
             with self.subTest(mode=mode, child_first=child_first), NativeAttempt(
                     f"mode-{mode}-child-first-{int(child_first)}") as attempt:
@@ -1024,6 +1166,22 @@ class NativeSnapshotControlTest(unittest.TestCase):
                                 diagnostic._trace_archive(trace))) as archive:
                             members = {name: archive.read(name)
                                        for name in archive.namelist()}
+                        leader = next(raw for raw in members.values()
+                                      if b"superseded by execve" in raw)
+                        former_trace = next(raw for raw in members.values()
+                                            if b"<pid changed to" in raw)
+                        clone = re.search(rb"(?m)^([0-9]+\.[0-9]+) "
+                                          rb"(?:clone|clone3)\(.*\) = ([1-9][0-9]*)$",
+                                          leader)
+                        transfer = re.search(rb"(?m)^([0-9]+\.[0-9]+) execve\(.*"
+                                             rb"<pid changed to [1-9][0-9]* \.\.\.>$",
+                                             former_trace)
+                        self.assertIsNotNone(clone)
+                        self.assertIsNotNone(transfer)
+                        self.assertEqual(int(clone[2]), next(iter(
+                            owned.births["stage"])))
+                        self.assertLess(Decimal(clone[1].decode()),
+                                        Decimal(transfer[1].decode()))
                         former = next(name for name, raw in members.items()
                                       if b"<pid changed to" in raw)
                         members[former], replaced = re.subn(
@@ -1039,9 +1197,9 @@ class NativeSnapshotControlTest(unittest.TestCase):
                             return buffer.getvalue()
                         diagnostic._raw_events(variant_archive(members))
                         malformed = dict(members)
-                        leader = next(name for name, raw in members.items()
-                                      if b"+++ superseded by execve" in raw)
-                        malformed[leader] = members[leader].replace(
+                        leader_name = next(name for name, raw in members.items()
+                                           if b"+++ superseded by execve" in raw)
+                        malformed[leader_name] = members[leader_name].replace(
                             b"+++ superseded by execve", b"+++ unrelated event")
                         with self.assertRaises((diagnostic.DiagnosticRejected,
                                                 diagnostic.actual_trace.TraceRejected)):

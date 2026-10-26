@@ -754,6 +754,11 @@ def _source_identity(files, commit, environment):
 def _tracer_identity(files, metadata):
     from ordinary_snapshot import build_tracer
     archived = _decode_json(files["strace-build.json"])
+    try:
+        compiler_path, compiler_sha256 = build_tracer.compiler_identity(
+            archived.get("compiler_path"))
+    except ValueError as error:
+        raise DiagnosticRejected("diagnostic private tracer source or binary differs") from error
     _require(archived == metadata.get("tracer_build") and
              archived.get("schema") == "ordinary-snapshot-build/1" and
              hashlib.sha256(files["strace-source.tar.xz"]).hexdigest() ==
@@ -762,8 +767,8 @@ def _tracer_identity(files, metadata):
              archived.get("upstream_source_sha256") == build_tracer.SOURCE_SHA256 and
              archived.get("patch_sha256") == tracer_digest(build_tracer.PATCH) and
              archived.get("include_sha256") == tracer_digest(build_tracer.INCLUDE) and
-             archived.get("compiler_sha256") ==
-             tracer_digest(archived.get("compiler_path")) and
+             archived.get("compiler_path") == compiler_path and
+             archived.get("compiler_sha256") == compiler_sha256 and
              archived.get("binary_sha256") ==
              hashlib.sha256(files["strace-binary"]).hexdigest(),
              "diagnostic private tracer source or binary differs")
@@ -772,7 +777,9 @@ def _tracer_identity(files, metadata):
         source = Path(scratch) / "strace-7.2.tar.xz"
         source.write_bytes(files["strace-source.tar.xz"])
         rebuilt = build_owned_tracer(source, Path(scratch) / "build", timeout=600)
-        _require(rebuilt["binary_sha256"] == archived["binary_sha256"] and
+        _require(rebuilt["compiler_path"] == compiler_path and
+                 rebuilt["compiler_sha256"] == compiler_sha256 and
+                 rebuilt["binary_sha256"] == archived["binary_sha256"] and
                  (Path(scratch) / "build/src/strace").read_bytes() ==
                  files["strace-binary"],
                  "diagnostic private tracer binary rebuild differs")
