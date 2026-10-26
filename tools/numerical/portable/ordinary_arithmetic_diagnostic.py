@@ -913,6 +913,8 @@ def _owned_sample(groups, phase, worker_pid=None, commands=None):
             raise SampleUnavailable(phase, pid, "COMMAND_MALFORMED") from error
         if not argv:
             raise SampleUnavailable(phase, pid, "COMMAND_MISSING")
+        if not argv[0]:
+            raise SampleUnavailable(phase, pid, "COMMAND_MALFORMED")
         role = _sample_role(pid, group, groups, worker_pid, command, executable)
         digest = hashlib.sha256(command).hexdigest()
         if commands is not None:

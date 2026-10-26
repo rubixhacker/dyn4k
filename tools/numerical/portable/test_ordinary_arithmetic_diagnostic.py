@@ -973,6 +973,17 @@ class DiagnosticContractTest(unittest.TestCase):
                     _owned_sample({"gradle": child.pid}, "stage")
             self.assertEqual(error.exception.detail["reason"], "COMMAND_MISSING")
 
+            for command in (b"\0", b"\0sleep\0\0"):
+                def empty_first_argument(path, *args, **kwargs):
+                    if path == Path(f"/proc/{child.pid}/cmdline"):
+                        return command
+                    return read_bytes(path, *args, **kwargs)
+                with mock.patch.object(Path, "read_bytes", empty_first_argument):
+                    with self.assertRaisesRegex(DiagnosticRejected, "UNAVAILABLE") as error:
+                        _owned_sample({"gradle": child.pid}, "stage")
+                self.assertEqual(error.exception.detail["reason"],
+                                 "COMMAND_MALFORMED")
+
             def missing_rss(path, *args, **kwargs):
                 if path == Path(f"/proc/{child.pid}/status"):
                     return "Name:\tsleep\n"
