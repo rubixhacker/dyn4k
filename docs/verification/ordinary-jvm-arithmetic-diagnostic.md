@@ -50,8 +50,14 @@ affinity. Replay checks those records against launch groups, trace members,
 the allocated CPU set, and the process phase.
 The capture retains each distinct sampled command once. It reads the running
 executable from `/proc`. Replay rebuilds the command hash and matches it to a
-successful raw exec path and argument list. The role check uses that path,
-the executable's entry point, the selected PID, and its process ancestry.
+successful raw exec path and argument list. For the committed `#!/bin/sh`
+`gradlew` script, Linux records the script invocation in raw `execve` and
+`/bin/sh`, the script path, and the same arguments in `/proc/<pid>/cmdline`.
+Replay accepts that one mapping only when the raw script path and arguments
+match the selected stage or target launch. The source archive includes the
+committed wrapper bytes. Other commands still require an exact raw command
+match. The role check uses the proved path, the executable's entry point,
+the selected PID, and its process ancestry.
 It also checks the sample's wall clock interval against trace timestamps.
 A command or executable change without raw exec proof fails replay. A
 process-only trace records the staging phase, where the Gradle wrapper can

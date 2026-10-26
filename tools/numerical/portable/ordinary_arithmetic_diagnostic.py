@@ -52,6 +52,7 @@ LIFECYCLE = ("attach", "armed", "class-prepared", "first-entry", "cap-entry-reac
              "exits-drained", "requests-disabled", "event-set-resumed",
              "disposed", "detach-complete")
 SOURCE_MEMBERS = (
+    "gradlew",
     "dyn4k-core/src/commonMain/kotlin/org/dyn4j/geometry/Transform.kt",
     "dyn4k-core/src/commonMain/kotlin/org/dyn4j/geometry/RotationOperationTap.kt",
     "dyn4k-core/src/commonMain/kotlin/org/dyn4j/dynamics/AbstractPhysicsBody.kt",
@@ -442,6 +443,8 @@ def _verify_source_archive(raw, commit, environment):
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         _require(set(archive.namelist()) == set(SOURCE_MEMBERS),
                  "diagnostic source archive inventory differs")
+        _require(archive.read("gradlew").startswith(b"#!/bin/sh\n"),
+                 "diagnostic wrapper shebang differs")
         for name in SOURCE_MEMBERS:
             source = subprocess.run(("git", "--no-replace-objects", "show",
                                      commit + ":" + name), cwd=ROOT,
@@ -1635,7 +1638,23 @@ def _command_bytes(argv):
     return b"\0".join(item.encode("utf-8") for item in argv) + (b"\0" if argv else b"")
 
 
-def _resource_execs(files):
+def _wrapper_proc_image(phase, path, argv, metadata):
+    wrapper_file = ROOT / "gradlew"
+    wrapper = str(wrapper_file)
+    if path != wrapper:
+        return path, argv
+    _require(phase in ("stage", "target") and
+             wrapper_file.is_file() and not wrapper_file.is_symlink() and
+             wrapper_file.read_bytes().startswith(b"#!/bin/sh\n"),
+             "diagnostic wrapper shebang or launch differs")
+    launch = metadata.get("stage_command" if phase == "stage" else "command")
+    _require(type(launch) is list and launch.count(path) == 1 and
+             argv == launch[launch.index(path):],
+             "diagnostic wrapper invocation differs")
+    return "/bin/sh", ["/bin/sh", path, *argv[1:]]
+
+
+def _resource_execs(files, metadata=None):
     executions = {}
     trace_sets = {}
     for phase, name in (("stage", "stage-process-traces.zip"),
@@ -1651,10 +1670,16 @@ def _resource_execs(files):
             parsed = successful_execve(call)
             _require(parsed is not None,
                      "diagnostic sampled command execution is unproved")
+            raw_path, raw_argv = parsed
+            image_path, image_argv = (
+                _wrapper_proc_image(phase, raw_path, list(raw_argv), metadata)
+                if metadata is not None else (raw_path, list(raw_argv)))
             phase_execs.setdefault(int(tid), []).append(
                 (int(stamp * 1_000_000_000),
-                 parsed[0],
-                 hashlib.sha256(_command_bytes(list(parsed[1]))).hexdigest()))
+                 image_path,
+                 hashlib.sha256(_command_bytes(image_argv)).hexdigest(),
+                 raw_path,
+                 hashlib.sha256(_command_bytes(list(raw_argv))).hexdigest()))
         executions[phase] = phase_execs
     return trace_sets, executions
 
@@ -1686,7 +1711,7 @@ def _resource_ownership(samples, metadata, files, allocation):
                  type(root["start_ticks"]) is int and root["start_ticks"] > 0 and
                  root["affinity"] == sorted(cpus),
                  "diagnostic resource launch identity differs")
-    trace_sets, executions = _resource_execs(files)
+    trace_sets, executions = _resource_execs(files, metadata)
     _require(metadata["worker_pid"] in trace_sets["target"] and
              metadata["helper_pid"] in trace_sets["helper"],
              "diagnostic selected resource trace differs")
@@ -1758,7 +1783,7 @@ def _resource_ownership(samples, metadata, files, allocation):
                     if inherited_path is None and row["parent_pid"] in seen:
                         inherited_path = seen[row["parent_pid"]][3]
                     candidates.append((inherited_path, inherited))
-                for index, (at, path, image_digest) in enumerate(images):
+                for index, (at, path, image_digest, _, _) in enumerate(images):
                     until = (images[index + 1][0] if index + 1 < len(images)
                              else None)
                     if at <= sample["wall_end_ns"] and (
@@ -1773,13 +1798,13 @@ def _resource_ownership(samples, metadata, files, allocation):
                 _require(any(
                     prior[2] <= at <= sample["wall_end_ns"] and
                     image_digest == digest
-                    for at, _, image_digest in executions[owner].get(pid, [])),
+                    for at, _, image_digest, _, _ in executions[owner].get(pid, [])),
                     "diagnostic sampled command transition is unproved")
             if prior is not None and image_path != prior[3]:
                 _require(any(
                     prior[2] <= at <= sample["wall_end_ns"] and
                     path == image_path and image_digest == digest
-                    for at, path, image_digest in executions[owner].get(pid, [])),
+                    for at, path, image_digest, _, _ in executions[owner].get(pid, [])),
                     "diagnostic sampled executable transition is unproved")
             current_images[pid] = image_path
             seen[pid] = (identity, digest, sample["wall_start_ns"], image_path)

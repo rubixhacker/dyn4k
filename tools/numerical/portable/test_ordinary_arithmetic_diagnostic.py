@@ -21,11 +21,12 @@ from ordinary_arithmetic_diagnostic import (
     _verify_worker_raw_subset,
     _owned_sample, _resource_evidence, _executed_role, _observer_command,
     _sample_role, _resource_execs,
-    JDK21, ROOT,
+    _source_archive, _verify_source_archive, JDK21, ROOT,
 )
 from actual_arithmetic import CaptureRejected, verify_capture_receipt
 import actual_arithmetic
 from boolean_rotation_jdi import jdi_bridge
+from capture_actual import child_environment
 
 
 def sample_events():
@@ -191,6 +192,33 @@ def changed_resource_image(samples, metadata, files, pid, path, argv):
     assert changed == 1
     files[archive_name] = output.getvalue()
     return samples, metadata, files
+
+
+def wrapper_shebang_fixture():
+    samples, metadata, files, allocation = resource_replay_fixture()
+    wrapper = str(ROOT / "gradlew")
+    raw_argv = [wrapper, "jvmTest"]
+    proc_argv = ["/bin/sh", wrapper, "jvmTest"]
+    old = samples[0]["pids"][1]["command_sha256"]
+    metadata["resource_commands"].pop(old)
+    digest = hashlib.sha256(("\0".join(proc_argv) + "\0").encode()).hexdigest()
+    metadata["resource_commands"][digest] = proc_argv
+    samples[0]["pids"][1]["command_sha256"] = digest
+    old_root = samples[0]["pids"][0]["command_sha256"]
+    metadata["resource_commands"].pop(old_root)
+    metadata["command"] = ["strace", "-ff", *raw_argv]
+    root_digest = hashlib.sha256(("\0".join(metadata["command"]) + "\0").encode()).hexdigest()
+    metadata["resource_commands"][root_digest] = metadata["command"]
+    for sample in samples[:3]:
+        sample["pids"][0]["command_sha256"] = root_digest
+    with zipfile.ZipFile(io.BytesIO(files["all-process-traces.zip"])) as archive:
+        traces = {name: archive.read(name) for name in archive.namelist()}
+    old_exec = f'execve("/bin/sh", {json.dumps(["sh", wrapper])}, 0) = 0'.encode()
+    new_exec = f'execve({json.dumps(wrapper)}, {json.dumps(raw_argv)}, 0) = 0'.encode()
+    assert traces["trace.101"].count(old_exec) == 1
+    traces["trace.101"] = traces["trace.101"].replace(old_exec, new_exec, 1)
+    files["all-process-traces.zip"] = _zip_checked(traces, "trace_zip")
+    return samples, metadata, files, allocation
 
 
 class DiagnosticContractTest(unittest.TestCase):
@@ -500,6 +528,88 @@ class DiagnosticContractTest(unittest.TestCase):
             changed[1]["time_ns"] = 7_600_000_000
             _resource_ownership(changed, metadata, files, allocation)
 
+    def test_wrapper_shebang_replays_same_pid_shell_then_java(self):
+        samples, metadata, files, allocation = wrapper_shebang_fixture()
+        result = _resource_evidence(samples, metadata, files, allocation)
+        self.assertEqual(result["sampled_aggregate_peak_kib"], 500)
+        _, executions = _resource_execs(files, metadata)
+        wrapper = str(ROOT / "gradlew")
+        self.assertEqual(executions["target"][101][0][1], "/bin/sh")
+        self.assertEqual(executions["target"][101][0][3], wrapper)
+        self.assertEqual(executions["target"][101][1][1], str(JDK21 / "bin/java"))
+        self.assertEqual([sample["pids"][1]["roles"] for sample in samples[:2]],
+                         [["gradle"], ["gradle"]])
+
+    def test_wrapper_shebang_rejects_changed_identity_args_and_order(self):
+        samples, metadata, files, allocation = wrapper_shebang_fixture()
+        wrapper = str(ROOT / "gradlew")
+        original = f'execve({json.dumps(wrapper)}, {json.dumps([wrapper, "jvmTest"])}, 0) = 0'.encode()
+        with zipfile.ZipFile(io.BytesIO(files["all-process-traces.zip"])) as archive:
+            traces = {name: archive.read(name) for name in archive.namelist()}
+
+        def changed_trace(old, new):
+            changed = dict(files)
+            rows = dict(traces)
+            assert rows["trace.101"].count(old) == 1
+            rows["trace.101"] = rows["trace.101"].replace(old, new, 1)
+            changed["all-process-traces.zip"] = _zip_checked(rows, "trace_zip")
+            return changed
+
+        misordered = dict(files)
+        rows = dict(traces)
+        lines = rows["trace.101"].splitlines(keepends=True)
+        first_time, first_call = lines[0].split(b" ", 1)
+        second_time, second_call = lines[1].split(b" ", 1)
+        lines[:2] = [first_time + b" " + second_call,
+                     second_time + b" " + first_call]
+        rows["trace.101"] = b"".join(lines)
+        misordered["all-process-traces.zip"] = _zip_checked(rows, "trace_zip")
+        for label, altered in (
+            ("script", changed_trace(original, original.replace(
+                json.dumps(wrapper).encode(), json.dumps(wrapper + "-copy").encode(), 1))),
+            ("shell_lookalike", changed_trace(original, original.replace(
+                json.dumps(wrapper).encode(), b'"/tmp/sh"', 1))),
+            ("argument", changed_trace(original, original.replace(b'"jvmTest"', b'"test"'))),
+            ("argv0", changed_trace(original, original.replace(
+                b'["' + wrapper.encode() + b'",', b'["spoof",'))),
+            ("missing", changed_trace(original, b'getpid() = 101')),
+            ("missing_java", changed_trace(second_call.rstrip(b"\n"), b'getpid() = 101')),
+            ("order", misordered),
+        ):
+            with self.subTest(label=label), self.assertRaises(DiagnosticRejected):
+                _resource_ownership(samples, metadata, altered, allocation)
+        wrong = copy.deepcopy(samples)
+        wrong_meta = copy.deepcopy(metadata)
+        wrong[0]["pids"][1]["command_sha256"] = hashlib.sha256(
+            ("/bin/bash\0" + wrapper + "\0jvmTest\0").encode()).hexdigest()
+        wrong_meta["resource_commands"][wrong[0]["pids"][1]["command_sha256"]] = [
+            "/bin/bash", wrapper, "jvmTest"]
+        with self.assertRaises(DiagnosticRejected):
+            _resource_ownership(wrong, wrong_meta, files, allocation)
+        wrong = copy.deepcopy(samples)
+        wrong_meta = copy.deepcopy(metadata)
+        wrong_argv = ["/bin/sh", wrapper, "test"]
+        wrong_digest = hashlib.sha256(("\0".join(wrong_argv) + "\0").encode()).hexdigest()
+        wrong[0]["pids"][1]["command_sha256"] = wrong_digest
+        wrong_meta["resource_commands"][wrong_digest] = wrong_argv
+        with self.assertRaises(DiagnosticRejected):
+            _resource_ownership(wrong, wrong_meta, files, allocation)
+
+    def test_wrapper_shebang_is_pinned_to_committed_source(self):
+        raw = _source_archive()
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            wrapper = archive.read("gradlew")
+            members = {name: archive.read(name) for name in archive.namelist()}
+        committed = subprocess.check_output(("git", "show", "HEAD:gradlew"), cwd=ROOT)
+        self.assertEqual(wrapper, committed)
+        self.assertTrue(wrapper.startswith(b"#!/bin/sh\n"))
+        members["gradlew"] = b"#!/bin/bash\n" + wrapper.split(b"\n", 1)[1]
+        changed = _zip_checked(members)
+        commit = subprocess.check_output(("git", "rev-parse", "HEAD"), cwd=ROOT)
+        with self.assertRaisesRegex(DiagnosticRejected, "wrapper shebang differs"):
+            _verify_source_archive(changed, commit.decode().strip(),
+                                   child_environment(focused=True))
+
     def test_roles_require_executed_path_and_entry_point(self):
         samples, metadata, files, allocation = resource_replay_fixture()
         jdk = str(JDK21 / "bin/java")
@@ -601,21 +711,24 @@ class DiagnosticContractTest(unittest.TestCase):
     def test_stage_exec_requires_its_retained_process_trace(self):
         samples, metadata, files, allocation = resource_replay_fixture()
         command_hashes = metadata["resource_commands"]
-        shell = next(digest for digest, argv in command_hashes.items()
-                     if argv[:1] == ["sh"])
         java = next(digest for digest, argv in command_hashes.items()
                     if "org.gradle.launcher.daemon.bootstrap.GradleDaemon" in argv)
-        stage_command = ["strace", "stage"]
+        wrapper = str(ROOT / "gradlew")
+        proc_argv = ["/bin/sh", wrapper, "publish"]
+        proc_digest = hashlib.sha256(("\0".join(proc_argv) + "\0").encode()).hexdigest()
+        stage_command = ["strace", "stage", wrapper, "publish"]
         stage_hash = hashlib.sha256(("\0".join(stage_command) + "\0").encode()).hexdigest()
         metadata = {**metadata, "stage_trace_command": stage_command,
+                    "stage_command": [wrapper, "publish"],
                     "resource_commands": {digest: command_hashes[digest]
-                        for digest in (shell, java)} | {stage_hash: stage_command}}
+                        for digest in (java,)} | {stage_hash: stage_command,
+                                               proc_digest: proc_argv}}
         root = {"pid": 10, "parent_pid": 1, "group_pid": 10,
                 "session_pid": 10, "start_ticks": 10,
                 "affinity": [12, 13], "roles": ["tracer"], "rss_kib": 10,
                 "command_sha256": stage_hash}
         child = {**root, "pid": 11, "parent_pid": 10, "start_ticks": 11,
-                 "roles": ["gradle"], "command_sha256": shell}
+                 "roles": ["gradle"], "command_sha256": proc_digest}
         base = 1699999998 * 1_000_000_000
         stage_samples = [
             {"time_ns": 1_200_000_000, "wall_start_ns": base + 190_000_000,
@@ -624,8 +737,15 @@ class DiagnosticContractTest(unittest.TestCase):
             {"time_ns": 1_400_000_000, "wall_start_ns": base + 390_000_000,
              "wall_end_ns": base + 410_000_000, "phase": "stage",
              "pids": [root, {**child, "command_sha256": java}]}]
-        _resource_ownership(stage_samples, metadata, files, allocation)
         changed = dict(files)
+        with zipfile.ZipFile(io.BytesIO(files["stage-process-traces.zip"])) as source:
+            original = source.read("trace.11")
+        old_exec = f'execve("/bin/sh", {json.dumps(["sh", wrapper])}, 0) = 0'.encode()
+        new_exec = f'execve({json.dumps(wrapper)}, {json.dumps([wrapper, "publish"])}, 0) = 0'.encode()
+        self.assertEqual(original.count(old_exec), 1)
+        changed["stage-process-traces.zip"] = _zip_checked({
+            "trace.11": original.replace(old_exec, new_exec, 1)}, "trace_zip")
+        _resource_ownership(stage_samples, metadata, changed, allocation)
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w") as writer:
             writer.writestr("trace.11", b"1699999998.800000 +++ exited with 0 +++\n")
