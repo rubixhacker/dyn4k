@@ -63,6 +63,34 @@ class NativeSnapshotControlTest(unittest.TestCase):
                 owned._apply("stage", ["RESUMED", "1", "1"], None)
             self.assertEqual(failure.exception.detail["reason"], "ACK_SEND")
 
+    def test_timeout_tracer_error_and_cleanup_survivor_are_incomplete(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            owned = SnapshotOwnedProcesses(directory, directory,
+                                           lambda pid: {"start_ticks": 1},
+                                           lambda handle: False, check_retained)
+            with self.assertRaises(SnapshotIncomplete) as failure:
+                owned._receive_wait("stage", time.monotonic() - 1)
+            self.assertEqual(failure.exception.detail["reason"],
+                             "CONTROL_TIMEOUT")
+            with self.assertRaises(SnapshotIncomplete) as failure:
+                owned._apply("stage", ["ERROR", "SPAWN_MESSAGE"], None)
+            self.assertEqual(failure.exception.detail["reason"],
+                             "SPAWN_MESSAGE")
+            owned.roots["stage"] = (12345, Path(directory) / "trace")
+            owned.bound[12345] = {"phase": "stage", "handle": 99,
+                                  "identity": {"start_ticks": 1}}
+            owned.threads["stage"] = {12345: {"tgid": 12345}}
+            with mock.patch.object(owned, "pump"), mock.patch(
+                    "ordinary_snapshot.control.time.monotonic",
+                    side_effect=[0, 0, 6, 6, 12]), mock.patch(
+                    "ordinary_snapshot.control.time.sleep"), mock.patch(
+                    "ordinary_snapshot.control.signal.pidfd_send_signal") as sent:
+                with self.assertRaises(SnapshotIncomplete) as failure:
+                    owned.stop({"stage"})
+            self.assertEqual(failure.exception.detail["reason"],
+                             "CLEANUP_SURVIVOR")
+            self.assertEqual([call.args[0] for call in sent.call_args_list], [99])
+
     def test_four_phase_raw_snapshot_replay(self):
         binary = os.environ.get("DYN4K_PRIVATE_STRACE")
         if not binary:
