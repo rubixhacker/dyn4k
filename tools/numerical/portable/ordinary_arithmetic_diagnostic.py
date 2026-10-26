@@ -164,11 +164,11 @@ def _xml_privacy(raw):
 
 def check_retained(raw, kind):
     _require(type(raw) is bytes and kind in {
-        "raw", "binary", "trace", "zip", "trace_zip", "report", "jsonl"},
+        "raw", "binary", "trace", "zip", "trace_zip", "jar", "report", "jsonl"},
              "diagnostic retained input differs")
     _require(len(raw) <= (V6_RAW_MAX_BYTES if kind in {"trace", "trace_zip"}
                           else MAX_READER_BYTES), "diagnostic raw reader bound")
-    _privacy(raw, binary=kind in {"binary", "zip", "trace_zip"} or
+    _privacy(raw, binary=kind in {"binary", "zip", "trace_zip", "jar"} or
              kind in {"report", "jsonl"})
     if kind == "report":
         _json_privacy(raw)
@@ -176,7 +176,7 @@ def check_retained(raw, kind):
         _require(raw.endswith(b"\n"), "diagnostic JSON line stream is incomplete")
         for line in raw.splitlines():
             _json_privacy(line)
-    if kind in {"zip", "trace_zip"}:
+    if kind in {"zip", "trace_zip", "jar"}:
         try:
             with zipfile.ZipFile(io.BytesIO(raw)) as archive:
                 names = archive.namelist()
@@ -185,12 +185,26 @@ def check_retained(raw, kind):
                          all(not name.startswith("/") and ".." not in name.split("/")
                              for name in names),
                          "diagnostic ZIP inventory differs")
+                if kind == "jar":
+                    paths = {name.removesuffix("/") for name in names}
+                    files = {item.filename for item in archive.infolist()
+                             if not item.is_dir()}
+                    _require(len(paths) == len(names) and all(
+                        name and "\\" not in name and ":" not in name and
+                        all(part not in {"", ".", ".."} for part in
+                            name.removesuffix("/").split("/"))
+                        for name in names) and not any(
+                            "/".join(name.split("/")[:index]) in files
+                            for name in paths for index in range(1, len(name.split("/")))),
+                        "diagnostic JAR namespace differs")
                 limit = (V6_RAW_MAX_BYTES if kind == "trace_zip" else MAX_READER_BYTES)
                 _require(sum(item.file_size for item in archive.infolist()) <=
                          limit, "diagnostic ZIP decoded bound")
                 for item in archive.infolist():
                     _require(item.file_size <= limit and
-                             not item.is_dir(), "diagnostic ZIP member bound")
+                             (not item.is_dir() or
+                              kind == "jar" and item.file_size == 0 and item.CRC == 0),
+                             "diagnostic ZIP member bound")
                 if kind == "trace_zip":
                     validate_version6_raw_archive(raw, archive)
                 for item in archive.infolist():
@@ -561,7 +575,7 @@ def _markers(xml):
 def _source_site(artifact, environment):
     with tempfile.TemporaryDirectory(dir=environment["TMPDIR"]) as directory:
         jar = Path(directory) / "artifact.jar"
-        _write_checked(jar, artifact, "zip")
+        _write_checked(jar, artifact, "jar")
         command = (str(JDK21 / "bin/javap"), "-classpath", str(jar),
                    "-c", "-l", "-p", "org.dyn4j.dynamics.AbstractPhysicsBody")
         result = subprocess.run(command, env=environment, capture_output=True,
@@ -1102,7 +1116,7 @@ def capture(output, allocation):
         _write_checked(output / "stage-process-traces.zip",
                        _trace_archive(stage_trace_prefix), "trace_zip")
         _require(STAGED_JAR.is_file(), "diagnostic staged artifact is unavailable")
-        _seal_existing(STAGED_JAR, output / "artifact.jar", "zip")
+        _seal_existing(STAGED_JAR, output / "artifact.jar", "jar")
         artifact_identity = captured_file_identity(STAGED_JAR)
         _seal_existing(JDK21 / "bin/java", output / "runtime-java", "binary")
         runtime_identity = captured_file_identity(JDK21 / "bin/java")
@@ -1389,7 +1403,7 @@ def _read_archive(output, compare_report):
     _require(output.is_dir() and not output.is_symlink() and
              {path.name for path in output.iterdir()} == expected,
              "diagnostic archive inventory differs")
-    kinds = {"artifact.jar": "zip", "portable-classes.zip": "zip",
+    kinds = {"artifact.jar": "jar", "portable-classes.zip": "zip",
              "source.zip": "zip", "worker-classpath.json": "report",
              "runtime-java": "binary",
              "stage-process-traces.zip": "trace_zip",

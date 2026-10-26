@@ -435,6 +435,66 @@ class DiagnosticContractTest(unittest.TestCase):
         with self.assertRaisesRegex(DiagnosticRejected, "decoded bound"):
             check_retained(bytes(raw), "zip")
 
+    def test_staged_jar_accepts_empty_directories_only(self):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("org/", b"")
+            writer.writestr("org/dyn4j/", b"")
+            writer.writestr("org/dyn4j/Example.class", b"class bytes")
+        raw = archive.getvalue()
+        self.assertEqual(check_retained(raw, "jar"), raw)
+        with self.assertRaises(DiagnosticRejected):
+            check_retained(raw, "zip")
+        with self.assertRaises(DiagnosticRejected):
+            check_retained(raw, "trace_zip")
+
+        malformed = (
+            (("org/", b"payload"), ("org/Example.class", b"class bytes")),
+            (("org/", b""), ("org", b"file")),
+            (("org", b"file"), ("org/Example.class", b"class bytes")),
+            (("org/", b""), ("org/", b"")),
+            (("../outside.class", b"class bytes"),),
+            (("/outside.class", b"class bytes"),),
+            (("org/./Example.class", b"class bytes"),),
+            (("org//Example.class", b"class bytes"),),
+            (("org\\Example.class", b"class bytes"),),
+        )
+        for entries in malformed:
+            with self.subTest(entries=entries):
+                archive = io.BytesIO()
+                with zipfile.ZipFile(archive, "w") as writer:
+                    for name, payload in entries:
+                        writer.writestr(name, payload)
+                with self.assertRaises(DiagnosticRejected):
+                    check_retained(archive.getvalue(), "jar")
+
+    def test_staged_jar_keeps_size_crc_and_privacy_checks(self):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("org/", b"")
+            writer.writestr("org/Example.class", b"class bytes")
+        raw = archive.getvalue()
+        central = raw.find(b"PK\x01\x02")
+        self.assertGreaterEqual(central, 0)
+        oversized = bytearray(raw)
+        oversized[central + 24:central + 28] = (129 * 1024 * 1024).to_bytes(4, "little")
+        with self.assertRaises(DiagnosticRejected):
+            check_retained(bytes(oversized), "jar")
+        corrupt = bytearray(raw)
+        second_central = corrupt.find(b"PK\x01\x02", central + 1)
+        self.assertGreaterEqual(second_central, 0)
+        corrupt[second_central + 16] ^= 1
+        with self.assertRaises(DiagnosticRejected):
+            check_retained(bytes(corrupt), "jar")
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("org/", b"")
+            writer.writestr("META-INF/details.json",
+                            b'{"secret":"\\u0044YN4K_CAPTURE_ENV_'
+                            b'SENTINEL=portable-capture-check"}')
+        with self.assertRaises(DiagnosticRejected):
+            check_retained(archive.getvalue(), "jar")
+
     def test_equal_poll_observations_and_causal_order(self):
         names = ("stage_start", "stage_end", "gradle_start", "worker_observed",
                  "socket_ready", "attach_observed", "cap_observed", "helper_exit",
