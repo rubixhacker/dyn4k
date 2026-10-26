@@ -1921,6 +1921,28 @@ class IndependentGateSeamTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(committed).hexdigest(), source[path])
         self.assertEqual(bound[path], source[path])
 
+    def test_build_lifecycle_pins_source_and_rejects_mutated_helper(self):
+        revision = independent_gates.ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_REVISION
+        source = independent_gates.ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_DEPENDENCIES
+        self.assertEqual(revision, "74f958fc7ea7bf5031275f6e2e41d3d268888dfb")
+        bound = independent_gates._prospective_checker_binding(ROOT, revision)
+        self.assertEqual({path: bound[path] for path in source}, source)
+        self.assertEqual(independent_gates._p2_producer_binding(ROOT, revision),
+                         independent_gates.APPROVED_P2_OBSERVER_ENV_REPLAY_PRODUCERS)
+        for relative, expected in source.items():
+            committed = subprocess.check_output(
+                ["git", "--no-replace-objects", "show", f"{revision}:{relative}"],
+                cwd=ROOT)
+            self.assertEqual(hashlib.sha256(committed).hexdigest(), expected)
+        helper = ROOT / "tools/numerical/portable/ordinary_snapshot/adverse_build_child.py"
+        original = Path.read_bytes
+        with mock.patch.object(Path, "read_bytes", lambda path: b"changed helper bytes"
+                               if path == helper else original(path)):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, revision)
+            with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, revision)
+
     def test_ordinary_diagnostic_jar_window_binds_new_and_historical_bytes(self):
         source = "tools/numerical/portable/ordinary_arithmetic_diagnostic.py"
         revised = independent_gates.ORDINARY_DIAGNOSTIC_JAR_SOURCE_REVISION

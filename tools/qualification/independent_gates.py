@@ -176,6 +176,7 @@ ORDINARY_DIAGNOSTIC_CHILD_FIRST_SOURCE_REVISION = "e12a85ff5541d60ca0ceb673b0024
 ORDINARY_DIAGNOSTIC_REMEDY_SOURCE_REVISION = "ff6515cc7249876349adf08d5bee7d84f333c15a"
 ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_SOURCE_REVISION = "0949a3de445395ac76f3c786cedd32729903cfc4"
 ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_REVISION = "f5007605c8058c389e2e025e10edb9d03178401c"
+ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_REVISION = "74f958fc7ea7bf5031275f6e2e41d3d268888dfb"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -712,6 +713,17 @@ ORDINARY_DIAGNOSTIC_BUILD_PID_CAPTURE_DEPENDENCIES = {
     **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
     **ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_DEPENDENCIES,
 }
+ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_DEPENDENCIES = {
+    **ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_DEPENDENCIES,
+    "tools/numerical/portable/ordinary_snapshot/build_tracer.py":
+        "504a847c75ed626a3d0525909a5c48c7370adf01ffe72d6c1b0ae15d23778bc8",
+    "tools/numerical/portable/ordinary_snapshot/test_control.py":
+        "22007bc6e8b885294b8a56d647d060160b5196760e8abdf96b8049f417dfc90f",
+}
+ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_DEPENDENCIES,
+}
 P2_V6_DEPENDENCIES = {
     **P2_EXECUTABLE_LOCAL_DEPENDENCIES,
     "tools/numerical/portable/build.gradle.kts":
@@ -879,6 +891,10 @@ P2_ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_DEPENDENCIES = {
 P2_ORDINARY_DIAGNOSTIC_BUILD_PID_DEPENDENCIES = {
     **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
     **ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_DEPENDENCIES,
+}
+P2_ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_DEPENDENCIES = {
+    **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_DEPENDENCIES,
 }
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_JVM8_PRODUCERS = {
@@ -1431,6 +1447,8 @@ def _prospective_checker_binding(repository, candidate_sha):
         ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_SOURCE_REVISION)
     ordinary_diagnostic_build_pid_window = descends_from(
         ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_REVISION)
+    ordinary_diagnostic_build_lifecycle_window = descends_from(
+        ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_REVISION)
     observer_env_replay_window = descends_from(OBSERVER_ENV_REPLAY_SOURCE_REVISION)
     jdi_replay_cost_window = descends_from(JDI_REPLAY_COST_SOURCE_REVISION)
     replay_cost_window = descends_from(REPLAY_COST_SOURCE_REVISION)
@@ -1520,7 +1538,9 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
         if hashlib.sha256(committed).hexdigest() != expected:
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
-    executable_dependencies = (ORDINARY_DIAGNOSTIC_BUILD_PID_CAPTURE_DEPENDENCIES
+    executable_dependencies = (ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_build_lifecycle_window else
+                               ORDINARY_DIAGNOSTIC_BUILD_PID_CAPTURE_DEPENDENCIES
                                if ordinary_diagnostic_build_pid_window else
                                ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_CAPTURE_DEPENDENCIES
                                if ordinary_diagnostic_build_cleanup_window else
@@ -1570,7 +1590,7 @@ def _prospective_checker_binding(repository, candidate_sha):
                                PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES
                                if executable_window else {})
     local_dependencies = (APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
-                          ORDINARY_DIAGNOSTIC_BUILD_PID_CAPTURE_DEPENDENCIES)
+                          ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_CAPTURE_DEPENDENCIES)
     for relative, expected in local_dependencies.items():
         local = Path(__file__).resolve().parents[2] / relative
         try:
@@ -1710,6 +1730,8 @@ def _p2_producer_binding(repository, candidate_sha):
         ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_SOURCE_REVISION)
     ordinary_diagnostic_build_pid_window = descends_from(
         ORDINARY_DIAGNOSTIC_BUILD_PID_SOURCE_REVISION)
+    ordinary_diagnostic_build_lifecycle_window = descends_from(
+        ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_REVISION)
     jdk21_jdi = descends_from(P2_JDK21_JDI_SOURCE_REVISION)
     corrected_jdi = descends_from(P2_CORRECTED_JDI_SOURCE_REVISION)
     bounded_jdi = descends_from(P2_BOUNDED_JDI_SOURCE_REVISION)
@@ -1805,7 +1827,9 @@ def _p2_producer_binding(repository, candidate_sha):
         if hashlib.sha256(committed).hexdigest() != digest:
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     if jdk21_jdi:
-        dependencies = (P2_ORDINARY_DIAGNOSTIC_BUILD_PID_DEPENDENCIES
+        dependencies = (P2_ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_DEPENDENCIES
+                        if ordinary_diagnostic_build_lifecycle_window else
+                        P2_ORDINARY_DIAGNOSTIC_BUILD_PID_DEPENDENCIES
                         if ordinary_diagnostic_build_pid_window else
                         P2_ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_DEPENDENCIES
                         if ordinary_diagnostic_build_cleanup_window else
@@ -1857,7 +1881,7 @@ def _p2_producer_binding(repository, candidate_sha):
                         else P2_JDK21_JDI_DEPENDENCIES)
         _source_binding(repository, candidate_sha, dependencies,
                         "JDK 21 JDI producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_BUILD_PID_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_DEPENDENCIES)
     elif corrected_jdi:
         _source_binding(repository, candidate_sha, P2_CORRECTED_JDI_DEPENDENCIES,
                         "corrected JDI producer",
