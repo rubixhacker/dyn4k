@@ -1,11 +1,34 @@
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 
 FRAMES = ("initial", "drive-0", *("drive-%d" % i for i in range(1, 7)),
           "drive", "brake-mid", "after-input")
 FOLLOW_PIXELS = (10, 10, 20, 20, 40, 40, 50, 60, 70, 80, 100, 110, 120)
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+PNG_WIDTH = 1024
+PNG_HEIGHT = 768
+MAX_PNG_BYTES = 16 * 1024 * 1024
+
+
+def _valid_png(data):
+    if (len(data) > MAX_PNG_BYTES or len(data) < 24 or
+            not data.startswith(PNG_SIGNATURE) or
+            int.from_bytes(data[16:20], "big") != PNG_WIDTH or
+            int.from_bytes(data[20:24], "big") != PNG_HEIGHT):
+        return False
+    try:
+        result = subprocess.run(
+            ["identify", "-regard-warnings", "-limit", "memory", "64MiB", "-limit", "map", "64MiB",
+             "-limit", "disk", "0", "-format", "%w %h", "PNG:-"],
+            input=data, capture_output=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return (result.returncode == 0 and result.stdout == b"1024 768" and
+            not result.stderr)
 
 
 def validate(directory):
@@ -45,6 +68,13 @@ def validate(directory):
         setup = one("camera", "setup")
         follows = [one("camera", "follow-%02d" % i) for i in range(1, 14)]
         brake_follows = [one("camera", "brake-follow-%d" % i) for i in (1, 2)]
+        gestures = [setup, *follows, *brake_follows]
+        pointer_events = [
+            (one("pointer", row["name"] + "-position"),
+             one("pointer", row["name"] + "-down"), row,
+             one("pointer", row["name"] + "-up"))
+            for row in gestures
+        ]
         frames = [one("frame", name) for name in FRAMES]
         hashes = [one("frame_hash", name) for name in FRAMES]
     except ValueError as error:
@@ -57,10 +87,15 @@ def validate(directory):
     if [(row.get("from_x"), row.get("to_x"), row.get("from_y"), row.get("to_y"))
         for row in brake_follows] != [(650, 530, 80, 80), (650, 530, 240, 80)]:
         return False, "brake camera path changed"
+    if any(not (position["start_ns"] <= position["end_ns"] <= down["start_ns"]
+                <= down["end_ns"] <= move["start_ns"] <= move["end_ns"]
+                <= up["start_ns"] <= up["end_ns"])
+           for position, down, move, up in pointer_events):
+        return False, "camera pointer gesture out of order"
     if not (setup["end_ns"] < frames[0]["start_ns"] < right_down["start_ns"]
             <= right_down["end_ns"] < frames[1]["start_ns"]):
         return False, "setup or drive start out of order"
-    if not all(right_down["end_ns"] < row["start_ns"] < row["end_ns"] < right_up["start_ns"]
+    if not all(right_down["end_ns"] <= row["start_ns"] < row["end_ns"] <= right_up["end_ns"]
                for row in follows):
         return False, "camera gesture outside drive"
     if not all(a["end_ns"] <= b["start_ns"] for a, b in zip(follows, follows[1:])):
@@ -108,13 +143,12 @@ def validate(directory):
         name = frame["name"] + ".png"
         path = directory / name
         try:
-            data = path.read_bytes()
+            with path.open("rb") as image:
+                data = image.read(MAX_PNG_BYTES + 1)
         except OSError:
             return False, "missing frame " + name
         if (frame.get("file") != name or digest.get("file") != name or
-                data[:16] != b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" or
-                int.from_bytes(data[16:20], "big") != 1024 or
-                int.from_bytes(data[20:24], "big") != 768 or
+                not _valid_png(data) or
                 digest.get("sha256") != hashlib.sha256(data).hexdigest()):
             return False, "invalid or changed frame " + name
         if frame["end_ns"] > digest["start_ns"]:

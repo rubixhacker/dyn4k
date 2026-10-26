@@ -1,12 +1,27 @@
 import hashlib
 import json
+import struct
 import tempfile
 import time
 import unittest
+import zlib
 from pathlib import Path
 
 from tools.migration.truck_camera import TruckRun
 from tools.migration.truck_timeline import FOLLOW_PIXELS, FRAMES, validate
+
+
+def _png_chunk(kind, data):
+    payload = kind + data
+    return struct.pack(">I", len(data)) + payload + struct.pack(">I", zlib.crc32(payload) & 0xFFFFFFFF)
+
+
+def valid_png():
+    header = struct.pack(">IIBBBBB", 1024, 768, 8, 2, 0, 0, 0)
+    row = b"\x00" + b"\x00\x00\x00" * 1024
+    pixels = zlib.compress(row * 768)
+    return (b"\x89PNG\r\n\x1a\n" + _png_chunk(b"IHDR", header)
+            + _png_chunk(b"IDAT", pixels) + _png_chunk(b"IEND", b""))
 
 
 class TruckTimelineTest(unittest.TestCase):
@@ -50,7 +65,7 @@ class TruckTimelineTest(unittest.TestCase):
         add("key", "keyup-s", brake_up, brake_up + 10_000_000)
         add("frame", "after-input", brake_up + 20_000_000,
             brake_up + 30_000_000, file="after-input.png")
-        png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + (1024).to_bytes(4, "big") + (768).to_bytes(4, "big")
+        png = valid_png()
         for name in FRAMES:
             (directory / (name + ".png")).write_bytes(png)
             frame = next(row for row in rows if row["kind"] == "frame" and row["name"] == name)
@@ -89,6 +104,85 @@ class TruckTimelineTest(unittest.TestCase):
                     row["end_ns"] += -500_000_000 if change == "short" else 500_000_000
                 self.write_rows(directory, changed)
                 self.assertFalse(validate(directory)[0], change)
+
+    def test_pointer_gesture_rejects_reversal_overlap_and_wrong_association(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            rows = self.make_evidence(directory)
+            camera = next(row for row in rows if row["kind"] == "camera" and row["name"] == "follow-01")
+            down = next(row for row in rows if row["kind"] == "pointer" and row["name"] == "follow-01-down")
+            down["start_ns"] = camera["end_ns"] + 1
+            down["end_ns"] = down["start_ns"] + 1
+            self.write_rows(directory, rows)
+            self.assertFalse(validate(directory)[0], "press after its camera move")
+
+            rows = self.make_evidence(directory)
+            position = next(row for row in rows if row["kind"] == "pointer" and row["name"] == "follow-01-position")
+            down = next(row for row in rows if row["kind"] == "pointer" and row["name"] == "follow-01-down")
+            position["end_ns"] = down["start_ns"] + 1
+            self.write_rows(directory, rows)
+            self.assertFalse(validate(directory)[0], "overlapping position and press")
+
+            rows = self.make_evidence(directory)
+            up = next(row for row in rows if row["kind"] == "pointer" and row["name"] == "follow-01-up")
+            up["name"] = "follow-02-up"
+            self.write_rows(directory, rows)
+            self.assertFalse(validate(directory)[0], "release associated with another gesture")
+
+    def test_pointer_gesture_rejects_missing_or_duplicate_intervals(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            rows = self.make_evidence(directory)
+            rows = [row for row in rows if row["name"] != "follow-01-position"]
+            self.write_rows(directory, rows)
+            self.assertFalse(validate(directory)[0], "missing position event")
+
+            rows = self.make_evidence(directory)
+            release = next(row for row in rows if row["kind"] == "pointer" and row["name"] == "follow-01-up")
+            rows.append(dict(release))
+            self.write_rows(directory, rows)
+            self.assertFalse(validate(directory)[0], "duplicate release event")
+
+    def test_camera_gesture_may_overlap_timestamped_key_release(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            rows = self.make_evidence(directory)
+            camera = next(row for row in rows if row["kind"] == "camera" and row["name"] == "follow-13")
+            key_up = next(row for row in rows if row["kind"] == "key" and row["name"] == "keyup-Right")
+            pointer_up = next(row for row in rows if row["kind"] == "pointer" and row["name"] == "follow-13-up")
+            camera["end_ns"] = key_up["start_ns"] + 1
+            pointer_up["start_ns"] = camera["end_ns"]
+            pointer_up["end_ns"] = pointer_up["start_ns"] + 1
+            self.write_rows(directory, rows)
+            self.assertTrue(validate(directory)[0])
+
+    def test_png_requires_complete_valid_pixels_crc_and_bounded_size(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            rows = self.make_evidence(directory)
+            self.write_rows(directory, rows)
+            self.assertTrue(validate(directory)[0], "complete generated PNG")
+
+            original = valid_png()
+            corrupt_payload = bytearray(original)
+            corrupt_payload[41] ^= 1
+            idat_crc = 41 + int.from_bytes(original[33:37], "big")
+            corrupt_payload[idat_crc:idat_crc + 4] = zlib.crc32(
+                corrupt_payload[37:idat_crc]).to_bytes(4, "big")
+            cases = {
+                "truncated": original[:-12],
+                "corrupt IDAT payload": bytes(corrupt_payload),
+                "corrupt IDAT CRC": original[:-16] + bytes([original[-16] ^ 1]) + original[-15:],
+                "malformed chunk": original[:33] + b"\xff\xff\xff\xff" + original[37:],
+                "oversized": original + b"x" * (16 * 1024 * 1024),
+            }
+            digest = next(row for row in rows if row["kind"] == "frame_hash" and row["name"] == "initial")
+            path = directory / "initial.png"
+            for name, data in cases.items():
+                path.write_bytes(data)
+                digest["sha256"] = hashlib.sha256(data).hexdigest()
+                self.write_rows(directory, rows)
+                self.assertFalse(validate(directory)[0], name)
 
     def test_slow_camera_work_does_not_extend_key_hold(self):
         with tempfile.TemporaryDirectory() as temp:

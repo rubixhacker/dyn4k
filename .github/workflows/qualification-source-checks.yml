@@ -128,3 +128,7 @@ jobs:
         run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 python3 -B docs/guide/check_links.py
       - name: Test migration guide checks
         run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=docs/guide python3 -B -m unittest -v test_checks
+      - name: Install migration image decoder
+        run: sudo apt-get update && sudo apt-get install --yes imagemagick
+      - name: Test migration scene validators
+        run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest -v tools.migration.test_truck_camera tools.migration.test_validation
