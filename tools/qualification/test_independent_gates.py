@@ -1779,9 +1779,21 @@ class IndependentGateSeamTests(unittest.TestCase):
         source = "tools/numerical/portable/ordinary_arithmetic_diagnostic.py"
         revised = independent_gates.ORDINARY_DIAGNOSTIC_JAR_SOURCE_REVISION
         historical = "bdf3846819c0fcae44c344452a38da8805dca5b8"
+        unreviewed = ("b1af4f397f1bc6b375c8f4904b1192d198125c3d",
+                      "045716ef0c89d4d5f64c38a45cd4d1fbc744e49f")
         old_hash = independent_gates.ORDINARY_DIAGNOSTIC_CAPTURE_DEPENDENCIES[source]
         new_hash = independent_gates.ORDINARY_DIAGNOSTIC_JAR_CAPTURE_DEPENDENCIES[source]
         self.assertNotEqual(old_hash, new_hash)
+        for revision in unreviewed:
+            with self.subTest(unreviewed=revision):
+                committed = subprocess.check_output(
+                    ["git", "--no-replace-objects", "show", f"{revision}:{source}"], cwd=ROOT)
+                self.assertEqual("9aa9fe2954f61a24bd3a8bc43dfa7341c560903e1f3bda7355bf7fbb7ddc77ef",
+                                 hashlib.sha256(committed).hexdigest())
+                with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                    independent_gates._prospective_checker_binding(ROOT, revision)
+                with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
+                    independent_gates._p2_producer_binding(ROOT, revision)
         for revision, expected in ((historical, old_hash), (revised, new_hash),
                                    ("HEAD", new_hash)):
             with self.subTest(revision=revision):
