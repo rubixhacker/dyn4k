@@ -1943,6 +1943,48 @@ class IndependentGateSeamTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
                 independent_gates._p2_producer_binding(ROOT, revision)
 
+    def test_normal_build_exit_has_distinct_source_window(self):
+        old = independent_gates.ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_REVISION
+        revision = independent_gates.ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_SOURCE_REVISION
+        previous = independent_gates.ORDINARY_DIAGNOSTIC_BUILD_LIFECYCLE_SOURCE_DEPENDENCIES
+        source = independent_gates.ORDINARY_DIAGNOSTIC_BUILD_NORMAL_EXIT_SOURCE_DEPENDENCIES
+        helper = "tools/numerical/portable/ordinary_snapshot/adverse_normal_exit_child.py"
+        self.assertEqual(revision, "d205669e2a53246382917b148af6be5e7004b2c4")
+        self.assertEqual(set(source) - set(previous), {helper})
+        self.assertNotEqual(source["tools/numerical/portable/ordinary_snapshot/build_tracer.py"],
+                            previous["tools/numerical/portable/ordinary_snapshot/build_tracer.py"])
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor",
+                                         old, revision], cwd=ROOT).returncode, 0)
+        old_bound = independent_gates._prospective_checker_binding(ROOT, old)
+        self.assertEqual({path: old_bound[path] for path in previous}, previous)
+        bound = independent_gates._prospective_checker_binding(ROOT, revision)
+        self.assertEqual({path: bound[path] for path in source}, source)
+        self.assertEqual(independent_gates._p2_producer_binding(ROOT, revision),
+                         independent_gates.APPROVED_P2_OBSERVER_ENV_REPLAY_PRODUCERS)
+        for relative, expected in source.items():
+            committed = subprocess.check_output(
+                ["git", "--no-replace-objects", "show", f"{revision}:{relative}"],
+                cwd=ROOT)
+            self.assertEqual(hashlib.sha256(committed).hexdigest(), expected)
+        local = ROOT / helper
+        original_read = Path.read_bytes
+        with mock.patch.object(Path, "read_bytes", lambda path: b"changed"
+                               if path == local else original_read(path)):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, revision)
+            with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, revision)
+        original_show = subprocess.check_output
+        def changed_show(command, *args, **kwargs):
+            if command[-1] == f"{revision}:{helper}":
+                return b"changed"
+            return original_show(command, *args, **kwargs)
+        with mock.patch.object(subprocess, "check_output", changed_show):
+            with self.assertRaisesRegex(ValueError, "prospective policy/checker blob differs"):
+                independent_gates._prospective_checker_binding(ROOT, revision)
+            with self.assertRaisesRegex(ValueError, "JDK 21 JDI producer blob differs"):
+                independent_gates._p2_producer_binding(ROOT, revision)
+
     def test_ordinary_diagnostic_jar_window_binds_new_and_historical_bytes(self):
         source = "tools/numerical/portable/ordinary_arithmetic_diagnostic.py"
         revised = independent_gates.ORDINARY_DIAGNOSTIC_JAR_SOURCE_REVISION
