@@ -167,6 +167,7 @@ ORDINARY_DIAGNOSTIC_JAR_SOURCE_REVISION = "6e5f83bfe148820e205bfde1a9f23a2e0849c
 ORDINARY_DIAGNOSTIC_SAMPLE_SOURCE_REVISION = "d2b086a8c5d88cf0afba85621db74d9a25aeaa8f"
 ORDINARY_DIAGNOSTIC_SAMPLE_FIXED_SOURCE_REVISION = "fd461bef920b8b73e3d5d681c0de9fea5c4bf697"
 ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_SOURCE_REVISION = "67313673872ad2f9e7b6db33536f2c471defb25c"
+ORDINARY_DIAGNOSTIC_OWNED_PROCESS_SOURCE_REVISION = "298ae2c9c2002da93a902c55433a10b792a194af"
 APPROVED_PROSPECTIVE_V6_CHECKERS = {
     **APPROVED_PROSPECTIVE_JVM8_AGENT_CHECKERS,
     "numeric_producer.py": "619eab8b1bcbda8131ffb94e4c154064e96e639ccc480263441a15624166f85c",
@@ -598,6 +599,15 @@ ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_CAPTURE_DEPENDENCIES = {
     **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
     **ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_SOURCE_DEPENDENCIES,
 }
+ORDINARY_DIAGNOSTIC_OWNED_PROCESS_SOURCE_DEPENDENCIES = {
+    **ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_SOURCE_DEPENDENCIES,
+    "tools/numerical/portable/ordinary_arithmetic_diagnostic.py":
+        "5e5292832df0c6484455b26d9fd5db0ff5eec480ff9baa00fdee74584592aa9a",
+}
+ORDINARY_DIAGNOSTIC_OWNED_PROCESS_CAPTURE_DEPENDENCIES = {
+    **OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_OWNED_PROCESS_SOURCE_DEPENDENCIES,
+}
 P2_V6_DEPENDENCIES = {
     **P2_EXECUTABLE_LOCAL_DEPENDENCIES,
     "tools/numerical/portable/build.gradle.kts":
@@ -729,6 +739,10 @@ P2_ORDINARY_DIAGNOSTIC_SAMPLE_FIXED_DEPENDENCIES = {
 P2_ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_DEPENDENCIES = {
     **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
     **ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_SOURCE_DEPENDENCIES,
+}
+P2_ORDINARY_DIAGNOSTIC_OWNED_PROCESS_DEPENDENCIES = {
+    **P2_ORDINARY_DIAGNOSTIC_DEPENDENCIES,
+    **ORDINARY_DIAGNOSTIC_OWNED_PROCESS_SOURCE_DEPENDENCIES,
 }
 APPROVED_P2_LOCAL_PRODUCERS = dict(P2_ROTATION_PREMISE_PRODUCERS)
 APPROVED_P2_JVM8_PRODUCERS = {
@@ -1263,6 +1277,8 @@ def _prospective_checker_binding(repository, candidate_sha):
         ORDINARY_DIAGNOSTIC_SAMPLE_FIXED_SOURCE_REVISION)
     ordinary_diagnostic_portable_stage_window = descends_from(
         ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_SOURCE_REVISION)
+    ordinary_diagnostic_owned_process_window = descends_from(
+        ORDINARY_DIAGNOSTIC_OWNED_PROCESS_SOURCE_REVISION)
     observer_env_replay_window = descends_from(OBSERVER_ENV_REPLAY_SOURCE_REVISION)
     jdi_replay_cost_window = descends_from(JDI_REPLAY_COST_SOURCE_REVISION)
     replay_cost_window = descends_from(REPLAY_COST_SOURCE_REVISION)
@@ -1352,7 +1368,9 @@ def _prospective_checker_binding(repository, candidate_sha):
             raise ValueError(f"prospective policy/checker blob differs: {relative}") from error
         if hashlib.sha256(committed).hexdigest() != expected:
             raise ValueError(f"prospective policy/checker blob differs: {relative}")
-    executable_dependencies = (ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_CAPTURE_DEPENDENCIES
+    executable_dependencies = (ORDINARY_DIAGNOSTIC_OWNED_PROCESS_CAPTURE_DEPENDENCIES
+                               if ordinary_diagnostic_owned_process_window else
+                               ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_CAPTURE_DEPENDENCIES
                                if ordinary_diagnostic_portable_stage_window else
                                ORDINARY_DIAGNOSTIC_SAMPLE_FIXED_CAPTURE_DEPENDENCIES
                                if ordinary_diagnostic_sample_fixed_window else
@@ -1384,7 +1402,7 @@ def _prospective_checker_binding(repository, candidate_sha):
                                PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES
                                if executable_window else {})
     local_dependencies = (APPROVED_PROSPECTIVE_EXECUTABLE_SHARED |
-                          ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_CAPTURE_DEPENDENCIES)
+                          ORDINARY_DIAGNOSTIC_OWNED_PROCESS_CAPTURE_DEPENDENCIES)
     for relative, expected in local_dependencies.items():
         local = Path(__file__).resolve().parents[2] / relative
         try:
@@ -1506,6 +1524,8 @@ def _p2_producer_binding(repository, candidate_sha):
         ORDINARY_DIAGNOSTIC_SAMPLE_FIXED_SOURCE_REVISION)
     ordinary_diagnostic_portable_stage_window = descends_from(
         ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_SOURCE_REVISION)
+    ordinary_diagnostic_owned_process_window = descends_from(
+        ORDINARY_DIAGNOSTIC_OWNED_PROCESS_SOURCE_REVISION)
     jdk21_jdi = descends_from(P2_JDK21_JDI_SOURCE_REVISION)
     corrected_jdi = descends_from(P2_CORRECTED_JDI_SOURCE_REVISION)
     bounded_jdi = descends_from(P2_BOUNDED_JDI_SOURCE_REVISION)
@@ -1601,7 +1621,9 @@ def _p2_producer_binding(repository, candidate_sha):
         if hashlib.sha256(committed).hexdigest() != digest:
             raise ValueError(f"reviewed P2 raw producer blob differs: {relative}")
     if jdk21_jdi:
-        dependencies = (P2_ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_DEPENDENCIES
+        dependencies = (P2_ORDINARY_DIAGNOSTIC_OWNED_PROCESS_DEPENDENCIES
+                        if ordinary_diagnostic_owned_process_window else
+                        P2_ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_DEPENDENCIES
                         if ordinary_diagnostic_portable_stage_window else
                         P2_ORDINARY_DIAGNOSTIC_SAMPLE_FIXED_DEPENDENCIES
                         if ordinary_diagnostic_sample_fixed_window else
@@ -1635,27 +1657,27 @@ def _p2_producer_binding(repository, candidate_sha):
                         else P2_JDK21_JDI_DEPENDENCIES)
         _source_binding(repository, candidate_sha, dependencies,
                         "JDK 21 JDI producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_OWNED_PROCESS_DEPENDENCIES)
     elif corrected_jdi:
         _source_binding(repository, candidate_sha, P2_CORRECTED_JDI_DEPENDENCIES,
                         "corrected JDI producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_OWNED_PROCESS_DEPENDENCIES)
     elif bounded_jdi:
         _source_binding(repository, candidate_sha, P2_BOUNDED_JDI_DEPENDENCIES,
                         "bounded JDI producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_OWNED_PROCESS_DEPENDENCIES)
     elif rotation_premise:
         _source_binding(repository, candidate_sha, P2_ROTATION_PREMISE_DEPENDENCIES,
                         "rotation premise producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_OWNED_PROCESS_DEPENDENCIES)
     elif boolean_jdi_final:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_FINAL_DEPENDENCIES,
                         "Boolean JDI final producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_OWNED_PROCESS_DEPENDENCIES)
     elif boolean_jdi:
         _source_binding(repository, candidate_sha, P2_BOOLEAN_JDI_DEPENDENCIES,
                         "Boolean JDI producer",
-                        local_approved=P2_ORDINARY_DIAGNOSTIC_PORTABLE_STAGE_DEPENDENCIES)
+                        local_approved=P2_ORDINARY_DIAGNOSTIC_OWNED_PROCESS_DEPENDENCIES)
     if not v6_window:
         for relative in (P2_BASELINE_COMPAT_DEPENDENCIES.keys() -
                          P2_EXECUTABLE_LOCAL_DEPENDENCIES.keys()):
