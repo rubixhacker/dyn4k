@@ -6,9 +6,11 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from contextlib import redirect_stdout
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 import zlib
 from pathlib import Path
@@ -22,8 +24,9 @@ from ordinary_arithmetic_diagnostic import (
     _verify_worker_raw_subset,
     _owned_sample, _resource_evidence, _executed_role, _observer_command,
     _sample_role, _resource_execs,
-    _source_archive, _verify_source_archive, JDK21, ROOT,
+    _source_archive, _verify_source_archive, JDK21, ROOT, SampleUnavailable,
 )
+import ordinary_arithmetic_diagnostic as diagnostic
 from actual_arithmetic import CaptureRejected, verify_capture_receipt
 import actual_arithmetic
 from boolean_rotation_jdi import jdi_bridge
@@ -888,6 +891,106 @@ class DiagnosticContractTest(unittest.TestCase):
             self.assertEqual(leader["session_pid"], child.pid)
             self.assertGreater(leader["start_ticks"], 0)
             self.assertEqual(set(leader["affinity"]), os.sched_getaffinity(0))
+        finally:
+            child.terminate()
+            child.wait(timeout=5)
+
+    def test_exited_child_is_absent_and_zombie_is_not_sampled_as_live(self):
+        exited = subprocess.Popen(["true"], start_new_session=True)
+        exited.wait(timeout=5)
+        self.assertEqual(_owned_sample({"gradle": exited.pid}, "stage")["pids"], [])
+        zombie = subprocess.Popen(["true"], start_new_session=True)
+        try:
+            for _ in range(100):
+                if (Path(f"/proc/{zombie.pid}/stat").read_text().split(") ", 1)[1]
+                        .startswith("Z ")):
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail("child did not enter zombie state")
+            self.assertEqual(_owned_sample({"gradle": zombie.pid}, "stage")["pids"], [])
+        finally:
+            zombie.wait(timeout=5)
+
+    def test_sampler_rejects_changed_pid_identity_and_access_failure(self):
+        child = subprocess.Popen(["sleep", "5"], start_new_session=True)
+        original = diagnostic._proc_identity
+        try:
+            def changed(pid):
+                identity = original(pid)
+                if pid == child.pid:
+                    identity["start_ticks"] += 1
+                return identity
+            with mock.patch.object(diagnostic, "_proc_identity", side_effect=changed):
+                with self.assertRaisesRegex(DiagnosticRejected, "UNAVAILABLE") as failure:
+                    _owned_sample({"gradle": child.pid}, "stage")
+            self.assertEqual(failure.exception.detail["reason"], "PID_IDENTITY_CHANGED")
+            real_readlink = os.readlink
+            def denied(path, *args, **kwargs):
+                if str(path) == f"/proc/{child.pid}/exe":
+                    raise PermissionError(13, "private command output must not be copied")
+                return real_readlink(path, *args, **kwargs)
+            with mock.patch.object(diagnostic.os, "readlink", side_effect=denied):
+                with self.assertRaisesRegex(DiagnosticRejected, "UNAVAILABLE") as failure:
+                    _owned_sample({"gradle": child.pid}, "stage")
+            self.assertEqual(failure.exception.detail["reason"], "EXECUTABLE_READ_FAILED")
+            self.assertNotIn("private command output", str(failure.exception.detail))
+        finally:
+            child.terminate()
+            child.wait(timeout=5)
+
+    def test_sample_failure_report_retains_only_typed_process_evidence(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            allocation = Path(directory) / "allocation.json"
+            allocation.write_text(json.dumps({
+                "schema": "ordinary-arithmetic-resource-allocation/1",
+                "diagnostic_runtime_allocation": "SCHEDULED",
+                "available_memory_kib": 1024,
+                "other_tasks_preserved": True,
+                "cpu_set": [min(os.sched_getaffinity(0))]}))
+            output = Path(directory) / "output"
+            failure = SampleUnavailable("stage", 123, "EXECUTABLE_READ_FAILED",
+                                        PermissionError(13, "private command text"))
+            with mock.patch.object(diagnostic, "clean_source", side_effect=failure):
+                report = diagnostic.capture(output, allocation)
+            self.assertEqual(report["status"], "UNAVAILABLE")
+            self.assertEqual(report["runtime"], "INCOMPLETE")
+            self.assertEqual(report["failure_detail"], {
+                "phase": "stage", "pid": 123,
+                "reason": "EXECUTABLE_READ_FAILED", "errno": 13})
+            self.assertNotIn(b"private command text",
+                             (output / "diagnostic.json").read_bytes())
+
+    def test_live_unknown_command_rss_and_stat_fail_closed(self):
+        child = subprocess.Popen(["sleep", "5"], start_new_session=True)
+        read_bytes = Path.read_bytes
+        read_text = Path.read_text
+        try:
+            def missing_command(path):
+                return b"" if path == Path(f"/proc/{child.pid}/cmdline") else read_bytes(path)
+            with mock.patch.object(Path, "read_bytes", missing_command):
+                with self.assertRaisesRegex(DiagnosticRejected, "UNAVAILABLE") as error:
+                    _owned_sample({"gradle": child.pid}, "stage")
+            self.assertEqual(error.exception.detail["reason"], "COMMAND_MISSING")
+
+            def missing_rss(path, *args, **kwargs):
+                if path == Path(f"/proc/{child.pid}/status"):
+                    return "Name:\tsleep\n"
+                return read_text(path, *args, **kwargs)
+            with mock.patch.object(Path, "read_text", missing_rss):
+                with self.assertRaisesRegex(DiagnosticRejected, "UNAVAILABLE") as error:
+                    _owned_sample({"gradle": child.pid}, "stage")
+            self.assertEqual(error.exception.detail["reason"], "RSS_MISSING")
+
+            def denied_stat(path, *args, **kwargs):
+                if path == Path(f"/proc/{child.pid}/stat"):
+                    raise PermissionError(13, "private text")
+                return read_text(path, *args, **kwargs)
+            with mock.patch.object(Path, "read_text", denied_stat):
+                with self.assertRaisesRegex(DiagnosticRejected, "UNAVAILABLE") as error:
+                    _owned_sample({"gradle": child.pid}, "stage")
+            self.assertEqual(error.exception.detail["reason"], "STAT_READ_FAILED")
+            self.assertNotIn("private text", str(error.exception.detail))
         finally:
             child.terminate()
             child.wait(timeout=5)

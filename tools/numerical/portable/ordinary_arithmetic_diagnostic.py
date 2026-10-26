@@ -73,6 +73,13 @@ class DiagnosticRejected(ValueError):
     pass
 
 
+class SampleUnavailable(DiagnosticRejected):
+    def __init__(self, phase, pid, reason, error=None):
+        super().__init__("UNAVAILABLE")
+        self.detail = {"phase": phase, "pid": pid, "reason": reason,
+                       "errno": error.errno if isinstance(error, OSError) else None}
+
+
 def _require(condition, message):
     if not condition:
         raise DiagnosticRejected(message)
@@ -860,29 +867,61 @@ def _owned_sample(groups, phase, worker_pid=None, commands=None):
             raw = (path / "stat").read_text()
             fields = raw[raw.rfind(")") + 2:].split()
             group = int(fields[2])
+            start_ticks = int(fields[19])
             pid = int(path.name)
-        except (OSError, ValueError, IndexError):
-            continue
+        except OSError as error:
+            if isinstance(error, FileNotFoundError) and not path.exists():
+                continue
+            raise SampleUnavailable(phase, int(path.name), "STAT_READ_FAILED",
+                                    error) from error
+        except (ValueError, IndexError) as error:
+            raise SampleUnavailable(phase, int(path.name), "STAT_MALFORMED") from error
         if group not in groups.values():
             continue
         try:
             identity = _proc_identity(pid)
-            command = (path / "cmdline").read_bytes()
-            executable = os.readlink(path / "exe")
-            status = (path / "status").read_text()
         except (OSError, ValueError, IndexError) as error:
-            raise DiagnosticRejected("UNAVAILABLE") from error
+            raise SampleUnavailable(phase, pid, "IDENTITY_READ_FAILED", error) from error
+        if identity["group_pid"] != group or identity["start_ticks"] != start_ticks:
+            raise SampleUnavailable(phase, pid, "PID_IDENTITY_CHANGED")
+        if fields[0] == "Z":
+            continue
+        try:
+            command = (path / "cmdline").read_bytes()
+        except OSError as error:
+            raise SampleUnavailable(phase, pid, "COMMAND_READ_FAILED", error) from error
+        try:
+            executable = os.readlink(path / "exe")
+        except OSError as error:
+            raise SampleUnavailable(phase, pid, "EXECUTABLE_READ_FAILED", error) from error
+        try:
+            status = (path / "status").read_text()
+        except OSError as error:
+            raise SampleUnavailable(phase, pid, "STATUS_READ_FAILED", error) from error
+        try:
+            final_identity = _proc_identity(pid)
+        except (OSError, ValueError, IndexError) as error:
+            raise SampleUnavailable(phase, pid, "IDENTITY_READ_FAILED", error) from error
+        if final_identity != identity:
+            raise SampleUnavailable(phase, pid, "PID_IDENTITY_CHANGED")
         match = re.search(r"^VmRSS:\s+([0-9]+) kB$", status, re.M)
+        if match is None:
+            raise SampleUnavailable(phase, pid, "RSS_MISSING")
+        try:
+            argv = _command_argv(command)
+        except DiagnosticRejected as error:
+            raise SampleUnavailable(phase, pid, "COMMAND_MALFORMED") from error
+        if not argv:
+            raise SampleUnavailable(phase, pid, "COMMAND_MISSING")
         role = _sample_role(pid, group, groups, worker_pid, command, executable)
         digest = hashlib.sha256(command).hexdigest()
         if commands is not None:
-            argv = _command_argv(command)
             _require(digest not in commands or commands[digest] == argv,
                      "diagnostic sampled command differs")
             commands[digest] = argv
         pids.append({**identity, "roles": [role],
                      "command_sha256": digest,
-                     "rss_kib": int(match[1]) if match else None})
+                     "rss_kib": int(match[1])})
     wall_end = time.time_ns()
     return {"time_ns": time.monotonic_ns(),
             "wall_start_ns": wall_start, "wall_end_ns": wall_end,
@@ -1388,6 +1427,8 @@ def capture(output, allocation):
                   "case_id": CASE, "call_cap": CAP, "runtime": "INCOMPLETE",
                   "last_complete_observation": _last_complete_observation(private,
                                                                            output)}
+        if isinstance(error, SampleUnavailable):
+            report["failure_detail"] = error.detail
         if not (output / "diagnostic.json").exists():
             _write_checked(output / "diagnostic.json", _report_bytes(report), "report")
         return report
