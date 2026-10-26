@@ -226,6 +226,42 @@ def wrapper_shebang_fixture():
 
 
 class DiagnosticContractTest(unittest.TestCase):
+    def test_stage_plan_builds_portable_main_and_test_classes(self):
+        commands, launch = diagnostic._stage_commands()
+        self.assertEqual(2, len(commands))
+        self.assertIn(":dyn4k-core:publishJvmPublicationToStagingRepository",
+                      commands[0])
+        self.assertEqual([str(ROOT / "gradlew"), "-p", str(diagnostic.PORTABLE),
+                          "jvmTestClasses"], commands[1][:4])
+        self.assertIn("--offline", commands[1])
+        self.assertIn("--max-workers=1", commands[1])
+        self.assertEqual(["/bin/sh", "-c"], launch[:2])
+        for command in commands:
+            self.assertEqual(("/bin/sh", ["/bin/sh", *command]),
+                             diagnostic._wrapper_proc_image(
+                                 "stage", command[0], command,
+                                 {"stage_commands": commands}))
+        with self.assertRaisesRegex(DiagnosticRejected,
+                                    "diagnostic wrapper invocation differs"):
+            diagnostic._wrapper_proc_image("stage", commands[1][0],
+                                            [*commands[1], "jvmTest"],
+                                            {"stage_commands": commands})
+
+    def test_core_publication_alone_cannot_prepare_portable_class_archive(self):
+        core_only = [str(ROOT / "gradlew"),
+            ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
+            ":dyn4k-core:publishJvmPublicationToStagingRepository", "--rerun-tasks",
+            "--no-daemon", "--console=plain", "--offline", "--max-workers=1",
+            "-Pkotlin.compiler.execution.strategy=in-process"]
+        metadata = {"stage_command": core_only,
+                    "artifact_identity": "sealed", "runtime_identity": "sealed"}
+        with mock.patch.object(diagnostic, "captured_file_identity",
+                               return_value="sealed"):
+            with self.assertRaisesRegex(DiagnosticRejected,
+                                        "diagnostic staged source or runtime identity differs"):
+                diagnostic._stage_identity({"stage.log": b"BUILD SUCCESSFUL\n"},
+                                           metadata)
+
     def test_root_allocation_is_separate_from_sampled_rss_limit(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
             path = Path(directory) / "allocation.json"

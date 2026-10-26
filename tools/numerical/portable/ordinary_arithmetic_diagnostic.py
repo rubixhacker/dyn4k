@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import signal
 import struct
 import subprocess
@@ -721,17 +722,39 @@ def _source_identity(files, commit, environment):
 
 
 def _stage_identity(files, metadata):
-    expected = [str(ROOT / "gradlew"),
-        ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
-        ":dyn4k-core:publishJvmPublicationToStagingRepository", "--rerun-tasks",
-        "--no-daemon", "--console=plain", "--offline", "--max-workers=1",
-        "-Pkotlin.compiler.execution.strategy=in-process"]
-    _require(metadata.get("stage_command") == expected and
-             b"BUILD SUCCESSFUL" in files["stage.log"] and
+    commands, expected = _stage_commands()
+    log = files["stage.log"]
+    _require(metadata.get("stage_commands") == commands and
+             metadata.get("stage_command") == expected and
+             log.count(b"BUILD SUCCESSFUL") == 2 and
+             b":dyn4k-core:publishJvmPublicationToStagingRepository" in log and
+             b":jvmTestClasses" in log and
              metadata.get("artifact_identity") == captured_file_identity(STAGED_JAR) and
              metadata.get("runtime_identity") ==
              captured_file_identity(JDK21 / "bin/java"),
              "diagnostic staged source or runtime identity differs")
+    _, events = _raw_events(files["stage-process-traces.zip"])
+    executed = [list(parsed[1]) for _, _, _, call in events
+                if (parsed := successful_execve(call)) is not None and
+                parsed[0] == str(ROOT / "gradlew")]
+    _require(all(executed.count(command) == 1 for command in commands),
+             "diagnostic staged command execution differs")
+
+
+def _stage_commands():
+    core = [str(ROOT / "gradlew"),
+        ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
+        ":dyn4k-core:publishJvmPublicationToStagingRepository", "--rerun-tasks",
+        "--no-daemon", "--console=plain", "--offline", "--max-workers=1",
+        "-Pkotlin.compiler.execution.strategy=in-process"]
+    portable = [str(ROOT / "gradlew"), "-p", str(PORTABLE), "jvmTestClasses",
+        f"-PportableRepository={ROOT / 'build/staging-repository'}",
+        "--rerun-tasks", "--no-daemon", "--console=plain", "--offline",
+        "--max-workers=1", "-Pkotlin.compiler.execution.strategy=in-process"]
+    commands = [core, portable]
+    bounded = [["/usr/bin/timeout", "--foreground", "--signal=TERM",
+                "--kill-after=5s", "300s", *command] for command in commands]
+    return commands, ["/bin/sh", "-c", " && ".join(map(shlex.join, bounded))]
 
 
 def _process_group(process):
@@ -1188,11 +1211,7 @@ def capture(output, allocation):
         _require((JDK21 / "bin/java").is_file() and
                  (JDK21 / "bin/javac").is_file(),
                  "pinned JDK 21 is unavailable")
-        stage_command = [str(ROOT / "gradlew"),
-            ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository",
-            ":dyn4k-core:publishJvmPublicationToStagingRepository", "--rerun-tasks",
-            "--no-daemon", "--console=plain", "--offline", "--max-workers=1",
-            "-Pkotlin.compiler.execution.strategy=in-process"]
+        stage_commands, stage_command = _stage_commands()
         stage_trace_prefix = private / "stage-process-trace"
         stage_trace_command = ["strace", "-ff", "-ttt", "-s", "131072",
                                "-e", "trace=process", "-o",
@@ -1376,6 +1395,7 @@ def capture(output, allocation):
         metadata = {"schema": "ordinary-arithmetic-capture/1",
             "candidate_commit": commit, "method": METHOD, "case_id": CASE,
             "call_cap": CAP, "port": port, "worker_pid": worker_pid,
+            "stage_commands": stage_commands,
             "stage_command": stage_command,
             "stage_trace_command": stage_trace_command,
             "artifact_identity": artifact_identity,
@@ -1752,9 +1772,11 @@ def _wrapper_proc_image(phase, path, argv, metadata):
              wrapper_file.is_file() and not wrapper_file.is_symlink() and
              wrapper_file.read_bytes().startswith(b"#!/bin/sh\n"),
              "diagnostic wrapper shebang or launch differs")
-    launch = metadata.get("stage_command" if phase == "stage" else "command")
-    _require(type(launch) is list and launch.count(path) == 1 and
-             argv == launch[launch.index(path):],
+    launches = (metadata.get("stage_commands", [metadata.get("stage_command")])
+                if phase == "stage" else [metadata.get("command")])
+    _require(type(launches) is list and any(
+                type(launch) is list and launch.count(path) == 1 and
+                argv == launch[launch.index(path):] for launch in launches),
              "diagnostic wrapper invocation differs")
     return "/bin/sh", ["/bin/sh", path, *argv[1:]]
 
