@@ -1700,7 +1700,7 @@ class IndependentGateSeamTests(unittest.TestCase):
                 committed = subprocess.check_output(
                     ["git", "--no-replace-objects", "show", f"{current}:{path}"], cwd=ROOT)
                 self.assertEqual(digest, hashlib.sha256(committed).hexdigest())
-                self.assertEqual(independent_gates.P2_ORDINARY_DIAGNOSTIC_BUILD_PID_DEPENDENCIES[path],
+                self.assertEqual(independent_gates.P2_ORDINARY_DIAGNOSTIC_REPLAY_BOUNDARIES_DEPENDENCIES[path],
                                  hashlib.sha256((ROOT / path).read_bytes()).hexdigest())
         old_checker = independent_gates._prospective_checker_binding(ROOT, prior)
         self.assertEqual(independent_gates.OBSERVER_ENV_REPLAY_CAPTURE_DEPENDENCIES[bridge],
