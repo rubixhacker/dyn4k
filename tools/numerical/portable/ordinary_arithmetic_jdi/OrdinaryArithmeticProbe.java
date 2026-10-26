@@ -149,6 +149,7 @@ public final class OrdinaryArithmeticProbe {
             lifecycle.add("armed\t" + System.nanoTime());
             vm.resume();
             long deadline = System.nanoTime() + Duration.ofSeconds(seconds).toNanos();
+            boolean heldForDrain = false;
             while (exited < CAP) {
                 long remaining = deadline - System.nanoTime();
                 if (remaining <= 0) throw new IllegalStateException("JDI deadline");
@@ -173,8 +174,7 @@ public final class OrdinaryArithmeticProbe {
                             pending.computeIfAbsent(call.thread(), ignored -> new ArrayDeque<>())
                                 .push(call);
                             if (entered == CAP) {
-                                entry.disable();
-                                lifecycle.add("cap-entry-disabled\t" + System.nanoTime());
+                                lifecycle.add("cap-entry-reached\t" + System.nanoTime());
                                 Files.writeString(output.resolve("cap-reached.tsv"),
                                     "64\t" + System.nanoTime() + "\n");
                             }
@@ -206,6 +206,9 @@ public final class OrdinaryArithmeticProbe {
                                 stack -> !stack.isEmpty()))
                             throw new IllegalStateException("Incomplete cap sequence");
                         lifecycle.add("exits-drained\t" + System.nanoTime());
+                        vm.suspend();
+                        heldForDrain = true;
+                        entry.disable();
                         exit.disable();
                         prepare.disable();
                         lifecycle.add("requests-disabled\t" + System.nanoTime());
@@ -216,6 +219,31 @@ public final class OrdinaryArithmeticProbe {
                         lifecycle.add("event-set-resumed\t" + System.nanoTime());
                 }
             }
+            int drained = 0;
+            while (true) {
+                if (System.nanoTime() >= deadline || drained > 1024)
+                    throw new IllegalStateException("CAP_SEQUENCE_UNBOUND");
+                EventSet queued = vm.eventQueue().remove(100);
+                if (queued == null) break;
+                try {
+                    for (Event event : queued) {
+                        if (event instanceof MethodEntryEvent item &&
+                                item.method().name().equals("rotatePivotObserved"))
+                            throw new IllegalStateException("Excess pivot entry");
+                        if (event instanceof MethodExitEvent item &&
+                                item.method().name().equals("rotatePivotObserved"))
+                            throw new IllegalStateException("Unpaired pivot exit");
+                        if (event instanceof ClassPrepareEvent ||
+                                event instanceof VMDeathEvent ||
+                                event instanceof VMDisconnectEvent)
+                            throw new IllegalStateException("CAP_SEQUENCE_UNBOUND");
+                    }
+                    drained++;
+                } finally {
+                    queued.resume();
+                }
+            }
+            if (heldForDrain) vm.resume();
             Files.write(output.resolve("events.tsv"), rows);
             vm.dispose();
             disposed = true;

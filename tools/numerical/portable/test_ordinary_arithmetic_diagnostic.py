@@ -2,6 +2,7 @@ import io
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from contextlib import redirect_stdout
 import tempfile
@@ -13,7 +14,10 @@ from ordinary_arithmetic_diagnostic import (
     DiagnosticRejected, check_retained, verify_events, verify_lifecycle,
     verify_resource_samples, verify_case_output, validate_request,
     verify_runtime_limits, verify_worker_classpath, _allocation_ready,
-    main, verify_archive,
+    main, verify_archive, _supervisor_phases, _replay_failure,
+    _last_complete_observation, _resource_ownership, _zip_checked,
+    _verify_worker_raw_subset,
+    _owned_sample, _resource_evidence,
 )
 from actual_arithmetic import CaptureRejected, verify_capture_receipt
 import actual_arithmetic
@@ -113,7 +117,7 @@ class DiagnosticContractTest(unittest.TestCase):
                 verify_events(changed, markers, 151, 41)
 
     def test_detach_requires_complete_monotonic_sequence(self):
-        stages = ("attach", "armed", "class-prepared", "first-entry", "cap-entry-disabled",
+        stages = ("attach", "armed", "class-prepared", "first-entry", "cap-entry-reached",
                   "exits-drained", "requests-disabled", "event-set-resumed",
                   "disposed", "detach-complete")
         raw = "".join(f"{stage}\t{index + 1}\n" for index, stage in enumerate(stages)).encode()
@@ -126,11 +130,17 @@ class DiagnosticContractTest(unittest.TestCase):
 
     def test_sampled_rss_deduplicates_owned_pids_and_rejects_gaps(self):
         roles = {"gradle", "worker", "helper", "tracer", "observer"}
-        samples = [{"time_ns": 1, "pids": [
-            {"pid": 11, "roles": ["gradle", "tracer"], "rss_kib": 100},
-            {"pid": 12, "roles": ["worker"], "rss_kib": 200},
-            {"pid": 13, "roles": ["helper"], "rss_kib": 300},
-            {"pid": 14, "roles": ["observer"], "rss_kib": 400}]}]
+        def row(pid, role, rss):
+            return {"pid": pid, "roles": role, "rss_kib": rss,
+                    "parent_pid": 1, "group_pid": pid, "session_pid": pid,
+                    "start_ticks": pid,
+                    "affinity": [12, 13], "command_sha256": "0" * 64}
+        samples = [{"time_ns": 1, "phase": "target", "pids": [
+            row(11, ["gradle"], 100),
+            row(12, ["worker"], 200),
+            row(13, ["helper"], 300),
+            row(14, ["observer"], 300),
+            row(15, ["tracer"], 100)]}]
         self.assertEqual(verify_resource_samples(samples, roles)["peak_aggregate_kib"], 1000)
         duplicate = json.loads(json.dumps(samples))
         duplicate[0]["pids"].append(duplicate[0]["pids"][0])
@@ -155,6 +165,172 @@ class DiagnosticContractTest(unittest.TestCase):
         with zipfile.ZipFile(safe, "w") as writer:
             writer.writestr("trace.1", b"safe raw record\n")
         self.assertEqual(check_retained(safe.getvalue(), "zip"), safe.getvalue())
+
+    def test_nested_json_privacy_rejects_escaped_sentinel_at_seams(self):
+        leaked = (b'{"outer":{"nested":["\\u0044YN4K_CAPTURE_ENV_'
+                  b'SENTINEL=portable-capture-check"]}}\n')
+        with self.assertRaises(DiagnosticRejected):
+            check_retained(leaked, "report")
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            from ordinary_arithmetic_diagnostic import _write_checked, _read_checked
+            path = Path(directory) / "sample.json"
+            with self.assertRaises(DiagnosticRejected):
+                _write_checked(path, leaked)
+            path.write_bytes(leaked)
+            with self.assertRaises(DiagnosticRejected):
+                _read_checked(path)
+            with self.assertRaises(DiagnosticRejected):
+                _write_checked(Path(directory) / "sample.jsonl", leaked)
+            with self.assertRaises(DiagnosticRejected):
+                _write_checked(Path(directory) / "malformed.json", b'{"open":')
+        zipped = io.BytesIO()
+        with zipfile.ZipFile(zipped, "w") as archive:
+            archive.writestr("nested.json", leaked)
+        with self.assertRaises(DiagnosticRejected):
+            check_retained(zipped.getvalue(), "zip")
+        with self.assertRaises(DiagnosticRejected):
+            _zip_checked({"nested.json": leaked})
+        xml = (b"<testsuite><system-out>NUMERICAL_JSON " + leaked.strip() +
+               b"</system-out></testsuite>")
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            from ordinary_arithmetic_diagnostic import _write_checked
+            with self.assertRaises(DiagnosticRejected):
+                _write_checked(Path(directory) / "capture.xml", xml)
+
+    def test_declared_zip_limit_rejects_before_member_open(self):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("large.bin", b"x")
+        raw = bytearray(archive.getvalue())
+        central = raw.find(b"PK\x01\x02")
+        self.assertGreaterEqual(central, 0)
+        raw[central + 24:central + 28] = (129 * 1024 * 1024).to_bytes(4, "little")
+        with self.assertRaisesRegex(DiagnosticRejected, "decoded bound"):
+            check_retained(bytes(raw), "zip")
+
+    def test_equal_poll_observations_and_causal_order(self):
+        names = ("stage_start", "stage_end", "gradle_start", "worker_observed",
+                 "socket_ready", "attach_observed", "cap_observed", "helper_exit",
+                 "target_exit", "observer_start", "observer_exit")
+        moments = dict(zip(names, (1, 2, 3, 4, 4, 5, 6, 7, 8, 9, 10)))
+        self.assertEqual(_supervisor_phases({"supervisor_milestones_ns": moments})[
+            "socket_ready_to_attach_observed_ns"], 1)
+        for left, right in (("stage_end", "gradle_start"),
+                            ("helper_exit", "target_exit"),
+                            ("observer_start", "observer_exit")):
+            changed = {**moments, right: moments[left]}
+            with self.subTest(left=left), self.assertRaises(DiagnosticRejected):
+                _supervisor_phases({"supervisor_milestones_ns": changed})
+
+    def test_typed_replay_failure_and_last_checked_row(self):
+        self.assertEqual(str(_replay_failure(DiagnosticRejected("UNAVAILABLE"))),
+                         "UNAVAILABLE")
+        self.assertEqual(str(_replay_failure(DiagnosticRejected("changed byte"))),
+                         "INDEPENDENT_REPLAY_FAILED")
+        raw, _ = sample_events()
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            private = Path(directory) / "private"
+            output = Path(directory) / "output"
+            private.mkdir()
+            output.mkdir()
+            (private / "progress.tsv").write_bytes(raw.splitlines(keepends=True)[0])
+            record = _last_complete_observation(private, output)
+            self.assertEqual(record["ordinal"], 0)
+            self.assertEqual(hashlib.sha256((output / record["file"]).read_bytes()).hexdigest(),
+                             record["sha256"])
+            (private / "progress.tsv").write_bytes(
+                b'0\t7\t19\t\\u0044YN4K_CAPTURE_ENV_SENTINEL=portable-capture-check\n')
+            self.assertIsNone(_last_complete_observation(private, output))
+            later = Path(directory) / "later"
+            later.mkdir()
+            (private / "progress.tsv").write_bytes(
+                raw.splitlines(keepends=True)[0] +
+                b'1\t7\t19\t\\u0044YN4K_CAPTURE_ENV_SENTINEL=portable-capture-check\n')
+            retained = _last_complete_observation(private, later)
+            self.assertEqual(retained["ordinal"], 0)
+            self.assertEqual((later / retained["file"]).read_bytes(),
+                             raw.splitlines(keepends=True)[0])
+
+    def test_resource_replay_binds_process_identity_role_phase_and_affinity(self):
+        def archive(*pids):
+            stream = io.BytesIO()
+            with zipfile.ZipFile(stream, "w") as writer:
+                for pid in pids:
+                    raw = (b'1.0 execve("/usr/bin/python", '
+                           b'["python", "ordinary-diagnostic-observer"], 0) = 0\n'
+                           b'1.1 +++ exited with 0 +++\n') if pid == 301 else (
+                           b"1.0 +++ exited with 0 +++\n")
+                    writer.writestr(f"trace.{pid}", raw)
+            return stream.getvalue()
+        files = {"all-process-traces.zip": archive(101, 102),
+                 "helper-traces.zip": archive(201),
+                 "observer-traces.zip": archive(301)}
+        def root(pid):
+            return {"pid": pid, "parent_pid": 1, "group_pid": pid,
+                    "session_pid": pid, "start_ticks": pid,
+                    "affinity": [12, 13]}
+        metadata = {"launch_roots": {"stage": root(10), "target": root(100),
+                    "helper": root(200), "observer": root(300)},
+                    "gradle_root_pid": 100, "helper_root_pid": 200,
+                    "observer_root_pid": 300, "worker_pid": 102, "helper_pid": 201,
+                    "supervisor_milestones_ns": {"stage_start": 1,
+                    "stage_end": 2, "gradle_start": 3, "target_exit": 8,
+                    "observer_start": 9, "observer_exit": 10}}
+        allocation = {"cpu_set": [12, 13]}
+        row = {**root(102), "parent_pid": 100, "group_pid": 100,
+               "session_pid": 100, "roles": ["worker"],
+               "rss_kib": 1, "command_sha256": "0" * 64}
+        leader = {**root(100), "roles": ["tracer"], "rss_kib": 1,
+                  "command_sha256": "1" * 64}
+        samples = [{"time_ns": 5, "phase": "target", "pids": [leader, row]}]
+        _resource_ownership(samples, metadata, files, allocation)
+        with self.assertRaisesRegex(DiagnosticRejected, "^UNAVAILABLE$"):
+            _resource_evidence(samples, metadata, files, allocation)
+        for changed in ({**row, "pid": 999999999},
+                        {**row, "group_pid": 200},
+                        {**row, "affinity": [11]},
+                        {**row, "roles": ["observer"]}):
+            with self.subTest(changed=changed), self.assertRaises(DiagnosticRejected):
+                _resource_ownership([{"time_ns": 5, "phase": "target",
+                                      "pids": [leader, changed]}], metadata, files,
+                                    allocation)
+        with self.assertRaises(DiagnosticRejected):
+            _resource_ownership([{"time_ns": 11, "phase": "target",
+                                  "pids": [leader, row]}], metadata, files, allocation)
+
+    def test_live_proc_sample_records_own_group_start_and_cpu_affinity(self):
+        child = subprocess.Popen(["sleep", "5"], start_new_session=True)
+        try:
+            sample = _owned_sample({"gradle": child.pid}, "stage")
+            leader = next(row for row in sample["pids"] if row["pid"] == child.pid)
+            self.assertEqual(leader["roles"], ["tracer"])
+            self.assertEqual(leader["group_pid"], child.pid)
+            self.assertEqual(leader["session_pid"], child.pid)
+            self.assertGreater(leader["start_ticks"], 0)
+            self.assertEqual(set(leader["affinity"]), os.sched_getaffinity(0))
+        finally:
+            child.terminate()
+            child.wait(timeout=5)
+
+    def test_worker_raw_subset_rejects_changed_missing_and_extra_members(self):
+        parent = (b"1.0 clone(child_stack=NULL) = 11\n"
+                  b"1.1 vfork() = 12\n1.2 +++ exited with 0 +++\n")
+        child = b"1.0 +++ exited with 0 +++\n"
+        all_raw = _zip_checked({"trace.10": parent, "trace.11": child,
+                                "trace.12": child},
+                               "trace_zip")
+        worker = _zip_checked({"trace.10": parent, "trace.11": child,
+                               "trace.12": child},
+                              "trace_zip")
+        _verify_worker_raw_subset(all_raw, worker, 10)
+        for changed in ({"trace.10": parent},
+                        {"trace.10": parent, "trace.11": child,
+                         "trace.12": child.replace(b"1.0", b"1.1")},
+                        {"trace.10": parent, "trace.11": child,
+                         "trace.12": child, "trace.13": child}):
+            with self.subTest(members=list(changed)), self.assertRaises(DiagnosticRejected):
+                _verify_worker_raw_subset(all_raw,
+                    _zip_checked(changed, "trace_zip"), 10)
 
     def test_incomplete_case_and_diagnostic_report_cannot_pass(self):
         with self.assertRaises(DiagnosticRejected):

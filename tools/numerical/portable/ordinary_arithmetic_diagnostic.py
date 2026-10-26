@@ -13,6 +13,7 @@ import tempfile
 import time
 import xml.etree.ElementTree as ET
 import zipfile
+import zlib
 from urllib.parse import unquote, urlparse
 
 from actual_arithmetic import CaptureRejected, verify_capture
@@ -46,7 +47,7 @@ RSS_CEILING_KIB = 10 * 1024 * 1024
 REQUIRED_ROLES = frozenset({"gradle", "worker", "helper", "tracer", "observer"})
 CALLER = "org.dyn4j.dynamics.AbstractPhysicsBody.integratePosition$lambda$0"
 HEX64 = re.compile(r"[0-9a-f]{16}\Z")
-LIFECYCLE = ("attach", "armed", "class-prepared", "first-entry", "cap-entry-disabled",
+LIFECYCLE = ("attach", "armed", "class-prepared", "first-entry", "cap-entry-reached",
              "exits-drained", "requests-disabled", "event-set-resumed",
              "disposed", "detach-complete")
 SOURCE_MEMBERS = (
@@ -82,6 +83,16 @@ def validate_request(method, call_cap):
 def _privacy(raw, binary=False):
     if ENVIRONMENT_SENTINEL in raw or FORBIDDEN_ENVIRONMENT_KEY in raw:
         raise DiagnosticRejected("diagnostic evidence exposed the environment")
+    stripped = raw.lstrip()
+    if not binary and (stripped.startswith(b"{") or
+                       re.match(rb'\[\s*(?:\[|\{|")', stripped)):
+        lines = raw.splitlines()
+        for line in lines:
+            _json_privacy(line)
+        return
+    if not binary and stripped.startswith(b"<"):
+        _xml_privacy(raw)
+        return
     inspected = (b"\n".join(re.findall(rb"[\x20-\x7e]{4,}", raw))
                  if binary else raw)
     try:
@@ -91,23 +102,79 @@ def _privacy(raw, binary=False):
         raise DiagnosticRejected("diagnostic privacy decoding failed") from error
 
 
+def _decoded_privacy(value):
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, str):
+            raw = item.encode("utf-8")
+            if ENVIRONMENT_SENTINEL in raw or FORBIDDEN_ENVIRONMENT_KEY in raw:
+                raise DiagnosticRejected("diagnostic evidence exposed the environment")
+
+
+def _json_privacy(raw):
+    try:
+        value = json.loads(raw, object_pairs_hook=_unique_pairs,
+                           parse_constant=lambda value: (_ for _ in ()).throw(
+                               DiagnosticRejected("nonfinite diagnostic JSON")))
+    except (UnicodeError, ValueError, TypeError, RecursionError) as error:
+        if isinstance(error, DiagnosticRejected):
+            raise
+        raise DiagnosticRejected("diagnostic JSON is malformed") from error
+    _decoded_privacy(value)
+    return value
+
+
+def _xml_privacy(raw):
+    try:
+        root = ET.fromstring(raw)
+    except (ET.ParseError, RecursionError) as error:
+        raise DiagnosticRejected("diagnostic XML is malformed") from error
+    for element in root.iter():
+        for value in (element.text, element.tail, *element.attrib.keys(),
+                      *element.attrib.values()):
+            if value is not None:
+                _decoded_privacy(value)
+        if element.tag == "system-out" and element.text:
+            for line in element.text.splitlines():
+                for prefix in ("NUMERICAL_JSON ", "PROSPECTIVE_ROTATION_JSON "):
+                    if line.startswith(prefix):
+                        _json_privacy(line[len(prefix):].encode("utf-8"))
+
+
 def check_retained(raw, kind):
     _require(type(raw) is bytes and kind in {
-        "raw", "binary", "trace", "zip", "trace_zip", "report"},
+        "raw", "binary", "trace", "zip", "trace_zip", "report", "jsonl"},
              "diagnostic retained input differs")
     _require(len(raw) <= (V6_RAW_MAX_BYTES if kind in {"trace", "trace_zip"}
                           else MAX_READER_BYTES), "diagnostic raw reader bound")
-    _privacy(raw, binary=kind in {"binary", "zip", "trace_zip"})
+    if kind in {"report", "jsonl"}:
+        if ENVIRONMENT_SENTINEL in raw or FORBIDDEN_ENVIRONMENT_KEY in raw:
+            raise DiagnosticRejected("diagnostic evidence exposed the environment")
+    elif kind in {"zip", "trace_zip"}:
+        if ENVIRONMENT_SENTINEL in raw or FORBIDDEN_ENVIRONMENT_KEY in raw:
+            raise DiagnosticRejected("diagnostic evidence exposed the environment")
+    else:
+        _privacy(raw, binary=kind in {"binary", "zip", "trace_zip"})
+    if kind == "report":
+        _json_privacy(raw)
+    if kind == "jsonl":
+        _require(raw.endswith(b"\n"), "diagnostic JSON line stream is incomplete")
+        for line in raw.splitlines():
+            _json_privacy(line)
     if kind in {"zip", "trace_zip"}:
         try:
             with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-                if kind == "trace_zip":
-                    validate_version6_raw_archive(raw, archive)
                 names = archive.namelist()
                 _require(bool(names) and len(names) <= V6_RAW_MAX_MEMBERS and
                          len(names) == len(set(names)) and
                          all(not name.startswith("/") and ".." not in name.split("/")
-                             for name in names) and archive.testzip() is None,
+                             for name in names),
                          "diagnostic ZIP inventory differs")
                 limit = (V6_RAW_MAX_BYTES if kind == "trace_zip" else MAX_READER_BYTES)
                 _require(sum(item.file_size for item in archive.infolist()) <=
@@ -115,10 +182,24 @@ def check_retained(raw, kind):
                 for item in archive.infolist():
                     _require(item.file_size <= limit and
                              not item.is_dir(), "diagnostic ZIP member bound")
-                    _privacy(archive.read(item), binary=item.filename.endswith(
-                        (".class", ".bin", ".jar")))
-        except (OSError, zipfile.BadZipFile, RuntimeError, ValueError,
-                TraceRejected) as error:
+                if kind == "trace_zip":
+                    validate_version6_raw_archive(raw, archive)
+                for item in archive.infolist():
+                    with archive.open(item) as stream:
+                        member = stream.read(item.file_size + 1)
+                    _require(len(member) == item.file_size,
+                             "diagnostic ZIP member decoded size differs")
+                    if item.filename.endswith((".json", ".jsonl")):
+                        for line in member.splitlines() if item.filename.endswith(
+                                ".jsonl") else (member,):
+                            _json_privacy(line)
+                    elif item.filename.endswith(".xml"):
+                        _xml_privacy(member)
+                    else:
+                        _privacy(member, binary=item.filename.endswith(
+                            (".class", ".bin", ".jar")))
+        except (OSError, EOFError, OverflowError, zipfile.BadZipFile,
+                zlib.error, RuntimeError, ValueError, TraceRejected) as error:
             if isinstance(error, DiagnosticRejected):
                 raise
             raise DiagnosticRejected("diagnostic ZIP is malformed") from error
@@ -198,7 +279,7 @@ def verify_lifecycle(raw):
     _require(all(start < end for start, end in zip(times, times[1:])),
              "diagnostic helper clock moved backwards")
     return {"attach_ns": times[0], "class_prepare_ns": times[2],
-            "first_entry_ns": times[3], "cap_entry_disabled_ns": times[4],
+            "first_entry_ns": times[3], "cap_entry_reached_ns": times[4],
             "exits_drained_ns": times[5],
             "detach_complete_ns": times[-1],
             "helper_local_phases_ns": {
@@ -218,15 +299,27 @@ def verify_resource_samples(samples, required_roles=REQUIRED_ROLES):
     previous = -1
     retained = []
     for sample in samples:
-        _require(type(sample) is dict and set(sample) == {"time_ns", "pids"} and
+        _require(type(sample) is dict and set(sample) == {"time_ns", "phase", "pids"} and
+                 sample["phase"] in {"stage", "target", "observer"} and
                  type(sample["time_ns"]) is int and sample["time_ns"] > previous and
                  type(sample["pids"]) is list and sample["pids"],
                  "diagnostic resource sample time differs")
         previous = sample["time_ns"]
         pids = {}
         for row in sample["pids"]:
-            _require(type(row) is dict and set(row) == {"pid", "roles", "rss_kib"} and
+            _require(type(row) is dict and set(row) == {"pid", "roles", "rss_kib",
+                    "parent_pid", "group_pid", "session_pid", "start_ticks",
+                    "affinity", "command_sha256"} and
                      type(row["pid"]) is int and row["pid"] > 0 and
+                     type(row["parent_pid"]) is int and row["parent_pid"] >= 0 and
+                     type(row["group_pid"]) is int and row["group_pid"] > 0 and
+                     type(row["session_pid"]) is int and row["session_pid"] > 0 and
+                     type(row["start_ticks"]) is int and row["start_ticks"] > 0 and
+                     type(row["affinity"]) is list and bool(row["affinity"]) and
+                     all(type(cpu) is int and cpu >= 0 for cpu in row["affinity"]) and
+                     row["affinity"] == sorted(set(row["affinity"])) and
+                     type(row["command_sha256"]) is str and
+                     re.fullmatch(r"[0-9a-f]{64}", row["command_sha256"]) is not None and
                      type(row["roles"]) is list and row["roles"] and
                      all(role in required_roles for role in row["roles"]) and
                      (row["rss_kib"] is None or
@@ -239,7 +332,7 @@ def verify_resource_samples(samples, required_roles=REQUIRED_ROLES):
             missing = True
         total = sum(row["rss_kib"] or 0 for row in pids.values())
         peak = max(peak, total)
-        retained.append({"time_ns": previous, "aggregate_kib":
+        retained.append({"time_ns": previous, "phase": sample["phase"], "aggregate_kib":
                          None if missing else total,
                          "pids": sorted(pids.values(), key=lambda row: row["pid"])})
     status = ("RSS_BOUND" if peak > RSS_CEILING_KIB else
@@ -266,9 +359,7 @@ def verify_case_output(xml, case, exit_code):
                  not testcases[0].findall("skipped") and
                  outputs[0].text is not None,
                  "diagnostic original JVM test output differs")
-        lines = outputs[0].text.splitlines()
-        extracted = b"".join((line.removeprefix("NUMERICAL_JSON ") + "\n").encode()
-                             for line in lines if line.startswith("NUMERICAL_JSON "))
+        extracted = _case_lines(outputs[0].text)
         _require(extracted == case, "diagnostic case bytes differ from XML")
         summary = verify_capture(xml, METHOD, [CASE], reset_order="post")
         _require(summary.get("steps") == 36000 and summary.get("cases") == 1,
@@ -283,6 +374,8 @@ def verify_case_output(xml, case, exit_code):
 
 
 def _write_checked(path, raw, kind="raw"):
+    if kind == "raw" and Path(path).suffix in {".json", ".jsonl"}:
+        kind = "report" if Path(path).suffix == ".json" else "jsonl"
     check_retained(raw, kind)
     with Path(path).open("xb") as stream:
         stream.write(raw)
@@ -290,6 +383,8 @@ def _write_checked(path, raw, kind="raw"):
 
 def _read_checked(path, kind="raw"):
     path = Path(path)
+    if kind == "raw" and path.suffix in {".json", ".jsonl"}:
+        kind = "report" if path.suffix == ".json" else "jsonl"
     _require(path.is_file() and not path.is_symlink(),
              "diagnostic retained file is missing or replaced")
     limit = V6_RAW_MAX_BYTES if kind in {"trace", "trace_zip"} else MAX_READER_BYTES
@@ -389,14 +484,7 @@ def compile_helper(source, scratch, environment):
 
 def _decode_json(raw):
     check_retained(raw, "report")
-    try:
-        return json.loads(raw, object_pairs_hook=lambda pairs:
-            _unique_pairs(pairs), parse_constant=lambda value:
-            (_ for _ in ()).throw(DiagnosticRejected("nonfinite diagnostic JSON")))
-    except (UnicodeError, ValueError, TypeError) as error:
-        if isinstance(error, DiagnosticRejected):
-            raise
-        raise DiagnosticRejected("diagnostic JSON is malformed") from error
+    return _json_privacy(raw)
 
 
 def _unique_pairs(pairs):
@@ -487,7 +575,7 @@ def _verify_loaded(raw, artifact, environment):
             _require(len(cap) == 1 and re.fullmatch(r"64\t[1-9][0-9]*", cap[0])
                      is not None, "diagnostic cap milestone differs")
             lifecycle = verify_lifecycle((output / "lifecycle.tsv").read_bytes())
-            _require(lifecycle["cap_entry_disabled_ns"] <=
+            _require(lifecycle["cap_entry_reached_ns"] <=
                      int(cap[0].split("\t")[1]) < lifecycle["exits_drained_ns"],
                      "diagnostic cap acknowledgment time differs")
             attach = (output / "attach-ready.tsv").read_text().splitlines()
@@ -592,7 +680,16 @@ def _stop_owned(processes):
             pass
 
 
-def _owned_sample(groups, worker_pid=None):
+def _proc_identity(pid):
+    raw = (Path("/proc") / str(pid) / "stat").read_text()
+    fields = raw[raw.rfind(")") + 2:].split()
+    return {"pid": pid, "parent_pid": int(fields[1]),
+            "group_pid": int(fields[2]), "session_pid": int(fields[3]),
+            "start_ticks": int(fields[19]),
+            "affinity": sorted(os.sched_getaffinity(pid))}
+
+
+def _owned_sample(groups, phase, worker_pid=None):
     pids = []
     for path in Path("/proc").iterdir():
         if not path.name.isdecimal():
@@ -601,39 +698,35 @@ def _owned_sample(groups, worker_pid=None):
             raw = (path / "stat").read_text()
             fields = raw[raw.rfind(")") + 2:].split()
             group = int(fields[2])
-            if group not in groups.values():
-                continue
             pid = int(path.name)
         except (OSError, ValueError, IndexError):
             continue
+        if group not in groups.values():
+            continue
         try:
+            identity = _proc_identity(pid)
             command = (path / "cmdline").read_bytes()
             status = (path / "status").read_text()
-        except OSError:
-            command = b""
-            status = ""
+        except (OSError, ValueError, IndexError) as error:
+            raise DiagnosticRejected("UNAVAILABLE") from error
         match = re.search(r"^VmRSS:\s+([0-9]+) kB$", status, re.M)
-        roles = set()
-        if pid == worker_pid:
-            roles.add("worker")
-        if b"OrdinaryArithmeticProbe" in command:
-            roles.add("helper")
-        if b"ordinary-diagnostic-observer" in command:
-            roles.add("observer")
-        if b"strace" in command or pid == group:
-            roles.add("tracer")
-        if group == groups.get("gradle") and "worker" not in roles and \
-                "tracer" not in roles:
-            roles.add("gradle")
-        if group == groups.get("gradle") and b"GradleDaemon" in command:
-            roles.add("gradle")
-        if group == groups.get("gradle") and b"gradlew" in command:
-            roles.add("gradle")
-        if not roles:
-            roles.add("tracer")
-        pids.append({"pid": pid, "roles": sorted(roles),
+        if pid == group:
+            role = "tracer"
+        elif group == groups.get("helper"):
+            role = "helper" if b"OrdinaryArithmeticProbe" in command else "tracer"
+        elif group == groups.get("observer"):
+            role = "observer" if b"ordinary-diagnostic-observer" in command else "tracer"
+        elif pid == worker_pid:
+            role = "worker"
+        elif any(token in command for token in
+                 (b"GradleDaemon", b"gradlew", b"GradleWorkerMain")):
+            role = "gradle"
+        else:
+            role = "tracer"
+        pids.append({**identity, "roles": [role],
+                     "command_sha256": hashlib.sha256(command).hexdigest(),
                      "rss_kib": int(match[1]) if match else None})
-    return {"time_ns": time.monotonic_ns(),
+    return {"time_ns": time.monotonic_ns(), "phase": phase,
             "pids": sorted(pids, key=lambda row: row["pid"])}
 
 
@@ -667,6 +760,7 @@ def _run_capture_process(command, cwd, environment, log, budget,
         active.append(process)
         group = _process_group(process)
         began = time.monotonic_ns()
+        identity = _proc_identity(process.pid)
         next_budget = 0
         while process.poll() is None:
             now = time.monotonic_ns()
@@ -675,7 +769,7 @@ def _run_capture_process(command, cwd, environment, log, budget,
                 next_budget = now + 250000000
             if deadline is not None and time.monotonic_ns() - began > deadline:
                 raise DiagnosticRejected("TIME_BOUND")
-            sample = _owned_sample({"gradle": group})
+            sample = _owned_sample({"gradle": group}, "stage")
             if sample["pids"]:
                 _sample_bound(sample)
                 samples.append(sample)
@@ -684,7 +778,7 @@ def _run_capture_process(command, cwd, environment, log, budget,
         _read_checked(log)
         _require(process.returncode == 0, "diagnostic source stage failed")
         active.remove(process)
-        return began, time.monotonic_ns()
+        return began, time.monotonic_ns(), identity
 
 
 def _allocation_ready(path, require_local_cpus=False):
@@ -731,16 +825,28 @@ def _typed_status(error):
     return "TARGET_FAILED"
 
 
+def _replay_failure(error):
+    if isinstance(error, DiagnosticRejected) and str(error) in {
+            "UNAVAILABLE", "RSS_BOUND", "TIME_BOUND", "BYTE_BOUND",
+            "CAP_SEQUENCE_UNBOUND"}:
+        return error
+    return DiagnosticRejected("INDEPENDENT_REPLAY_FAILED")
+
+
 def _extract_case(xml):
     try:
         output = ET.fromstring(xml).findall("system-out")
         _require(len(output) == 1 and output[0].text is not None,
                  "diagnostic original XML output is missing")
-        return b"".join((line.removeprefix("NUMERICAL_JSON ") + "\n").encode()
-                        for line in output[0].text.splitlines()
-                        if line.startswith("NUMERICAL_JSON "))
+        return _case_lines(output[0].text)
     except ET.ParseError as error:
         raise DiagnosticRejected("diagnostic original XML is malformed") from error
+
+
+def _case_lines(text):
+    return b"".join((line[len("NUMERICAL_JSON "):]+"\n").encode()
+                    for line in text.splitlines()
+                    if line.startswith("NUMERICAL_JSON "))
 
 
 def _observer_command(paths):
@@ -764,7 +870,8 @@ def _worker_descendants(raw_traces, worker_pid):
         parent = pending.pop()
         _require(parent in raw_traces, "diagnostic worker trace is missing")
         for line in raw_traces[parent].decode("utf-8").splitlines():
-            match = re.search(r"(?:clone|clone3)\(.*\) = ([1-9][0-9]*)$", line)
+            match = re.search(r"(?:clone|clone3|fork|vfork)\(.*\) = ([1-9][0-9]*)$",
+                              line)
             if match and match[1] not in descendants:
                 descendants.add(match[1])
                 pending.append(match[1])
@@ -882,7 +989,7 @@ def capture(output, allocation):
             ":dyn4k-core:publishJvmPublicationToStagingRepository", "--rerun-tasks",
             "--no-daemon", "--console=plain", "--offline", "--max-workers=1",
             "-Pkotlin.compiler.execution.strategy=in-process"]
-        stage_start, stage_end = _run_capture_process(
+        stage_start, stage_end, stage_root = _run_capture_process(
             stage_command, ROOT, environment, private / "stage.log", budget,
             samples, active, cpus, deadline=900 * 1000000000)
         _seal_existing(private / "stage.log", output / "stage.log")
@@ -922,6 +1029,7 @@ def capture(output, allocation):
                                       preexec_fn=lambda: _pin_child(cpus))
             active.append(target)
             target_group = _process_group(target)
+            target_root = _proc_identity(target.pid)
             worker_pid = None
             response_path = None
             response_identity = None
@@ -945,7 +1053,7 @@ def capture(output, allocation):
                     groups = {"gradle": target_group}
                     if helper is not None and helper.poll() is None:
                         groups["helper"] = helper.pid
-                    sample = _owned_sample(groups, worker_pid)
+                    sample = _owned_sample(groups, "target", worker_pid)
                     if sample["pids"]:
                         _sample_bound(sample)
                         samples.append(sample)
@@ -978,6 +1086,7 @@ def capture(output, allocation):
                             preexec_fn=lambda: _pin_child(cpus))
                         active.append(helper)
                         _process_group(helper)
+                        helper_root = _proc_identity(helper.pid)
                 if helper is not None:
                     if attach_observed_at is None and (
                             helper_output / "attach-ready.tsv").is_file():
@@ -995,7 +1104,7 @@ def capture(output, allocation):
                                 errors="replace")
                             if any(reason in failure for reason in (
                                     "Excess pivot entry", "Unpaired pivot exit",
-                                    "Incomplete cap sequence")):
+                                    "Incomplete cap sequence", "CAP_SEQUENCE_UNBOUND")):
                                 raise DiagnosticRejected("CAP_SEQUENCE_UNBOUND")
                         _require(helper.returncode == 0 and cap_observed_at is not None,
                                  "DETACH_UNACKNOWLEDGED")
@@ -1027,9 +1136,10 @@ def capture(output, allocation):
                 preexec_fn=lambda: _pin_child(cpus))
             active.append(observer)
             observer_group = _process_group(observer)
+            observer_root = _proc_identity(observer.pid)
             while observer.poll() is None:
                 budget.check()
-                sample = _owned_sample({"observer": observer_group})
+                sample = _owned_sample({"observer": observer_group}, "observer")
                 if sample["pids"]:
                     _sample_bound(sample)
                     samples.append(sample)
@@ -1058,6 +1168,8 @@ def capture(output, allocation):
             "runtime_identity": runtime_identity,
             "helper_pid": helper_pid, "gradle_root_pid": target.pid,
             "helper_root_pid": helper.pid, "observer_root_pid": observer.pid,
+            "launch_roots": {"stage": stage_root, "target": target_root,
+                             "helper": helper_root, "observer": observer_root},
             "command": command, "helper_command": helper_command,
             "observer_command": observer_command,
             "helper_output_path": str(helper_output),
@@ -1089,7 +1201,10 @@ def capture(output, allocation):
         try:
             report = verify_archive(output, compare_report=False)
         except Exception as error:
-            raise DiagnosticRejected("INDEPENDENT_REPLAY_FAILED") from error
+            failure = _replay_failure(error)
+            if failure is error:
+                raise
+            raise failure from error
         _write_checked(output / "diagnostic.json", _report_bytes(report), "report")
         return report
     except Exception as error:
@@ -1097,7 +1212,8 @@ def capture(output, allocation):
         report = {"schema": SCHEMA, "status": _typed_status(error),
                   "qualification": "UNPASSED", "method": METHOD,
                   "case_id": CASE, "call_cap": CAP, "runtime": "INCOMPLETE",
-                  "last_complete_call": _last_complete_call(private)}
+                  "last_complete_observation": _last_complete_observation(private,
+                                                                           output)}
         if not (output / "diagnostic.json").exists():
             _write_checked(output / "diagnostic.json", _report_bytes(report), "report")
         return report
@@ -1108,14 +1224,35 @@ def capture(output, allocation):
             signal.setitimer(signal.ITIMER_REAL, *previous_timer)
 
 
-def _last_complete_call(private):
+def _last_complete_observation(private, output):
     path = Path(private) / "progress.tsv"
-    if not path.is_file():
+    if not path.is_file() or path.is_symlink():
         return None
     try:
-        raw = _read_checked(path)
-        lines = raw.decode("ascii").splitlines()
-        return len(lines) - 1 if raw.endswith(b"\n") and lines else None
+        _require(path.stat().st_size <= MAX_READER_BYTES,
+                 "diagnostic progress exceeds reader bound")
+        last = None
+        for ordinal, line in enumerate(path.read_bytes().splitlines(keepends=True)):
+            if ordinal >= CAP or not line.endswith(b"\n"):
+                break
+            try:
+                check_retained(line, "raw")
+                fields = line.decode("ascii").removesuffix("\n").split("\t")
+                _require(len(fields) == 14 and fields[0] == str(ordinal) and
+                         all(_number(fields[index]) >= 0 for index in
+                             (1, 2, 11, 12, 13)) and
+                         all(HEX64.fullmatch(fields[index]) for index in
+                             range(3, 10)) and fields[10] == CALLER,
+                         "diagnostic progress row differs")
+            except (DiagnosticRejected, UnicodeError):
+                break
+            last = (ordinal, line)
+        if last is None:
+            return None
+        name = "last-complete-observation.tsv"
+        _write_checked(Path(output) / name, last[1])
+        return {"ordinal": last[0], "file": name,
+                "sha256": hashlib.sha256(last[1]).hexdigest()}
     except (DiagnosticRejected, UnicodeError, OSError):
         return None
 
@@ -1161,6 +1298,17 @@ def _raw_events(raw):
     return normalized, _events(normalized, ())
 
 
+def _verify_worker_raw_subset(all_archive, worker_archive, worker_pid):
+    check_retained(all_archive, "trace_zip")
+    check_retained(worker_archive, "trace_zip")
+    with zipfile.ZipFile(io.BytesIO(all_archive)) as archive:
+        raw_all = {name[6:]: archive.read(name) for name in archive.namelist()}
+    with zipfile.ZipFile(io.BytesIO(worker_archive)) as archive:
+        raw_worker = {name: archive.read(name) for name in archive.namelist()}
+    _require(raw_worker == _worker_descendants(raw_all, worker_pid),
+             "diagnostic worker raw subset differs from complete trace")
+
+
 def _prove_worker(files, metadata, all_traces, all_events):
     selected = select_worker_exec(all_traces, str(JDK21 / "bin/java"))
     _require(selected[0] == str(metadata["worker_pid"]),
@@ -1180,12 +1328,16 @@ def _prove_worker(files, metadata, all_traces, all_events):
              all(command.count(flag) == 1 for flag in
                  ("--offline", "--no-daemon", "--rerun-tasks")),
              "diagnostic selected Gradle command differs")
-    actual_commands = [successful_execve(call) for _, _, _, call in all_events
-                       if call.startswith("execve(") and call.endswith(" = 0")]
-    _require(any(item is not None and item[0] == str(ROOT / "gradlew") and
-                 list(item[1]) == command[command.index(str(ROOT / "gradlew")):]
-                 for item in actual_commands),
+    gradle_argv = tuple(command[command.index(str(ROOT / "gradlew")):])
+    root_pids = [tid for _, tid, _, call in all_events
+                 if call.startswith("execve(") and call.endswith(" = 0") and
+                 successful_execve(call) == (str(ROOT / "gradlew"), gradle_argv)]
+    _require(len(root_pids) == 1,
              "diagnostic Gradle execution differs")
+    jdi_bridge.verify_gradle_fork_parent_v6(
+        all_events, int(selected[0]), int(root_pids[0]))
+    _verify_worker_raw_subset(files["all-process-traces.zip"],
+                              files["worker-traces.zip"], metadata["worker_pid"])
     _require("@" + metadata["response_path"] in selected[2],
              "diagnostic worker response path differs")
     verify_stable_input(all_traces, metadata["response_path"],
@@ -1366,8 +1518,93 @@ def _worker_progress_after_close(worker_traces, closed_at):
     raise DiagnosticRejected("diagnostic worker continuation after detach is unproved")
 
 
-def _resource_evidence(samples):
+def _resource_ownership(samples, metadata, files, allocation):
+    roots = metadata.get("launch_roots")
+    cpus = allocation.get("cpu_set")
+    _require(type(roots) is dict and set(roots) ==
+             {"stage", "target", "helper", "observer"} and
+             type(cpus) is list and bool(cpus),
+             "diagnostic resource launch inventory differs")
+    for phase, root in roots.items():
+        _require(type(root) is dict and set(root) ==
+                 {"pid", "parent_pid", "group_pid", "session_pid",
+                  "start_ticks", "affinity"},
+                 "diagnostic resource launch identity differs")
+        expected = (root["pid"] if phase == "stage" else
+                    metadata.get({"target": "gradle_root_pid",
+                                  "helper": "helper_root_pid",
+                                  "observer": "observer_root_pid"}[phase]))
+        _require(
+                 root["pid"] == root["group_pid"] == root["session_pid"] == expected and
+                 type(root["start_ticks"]) is int and root["start_ticks"] > 0 and
+                 root["affinity"] == sorted(cpus),
+                 "diagnostic resource launch identity differs")
+    trace_sets = {}
+    for phase, name in (("target", "all-process-traces.zip"),
+                        ("helper", "helper-traces.zip"),
+                        ("observer", "observer-traces.zip")):
+        with zipfile.ZipFile(io.BytesIO(files[name])) as archive:
+            trace_sets[phase] = {int(item.filename[6:]) for item in archive.infolist()}
+    _require(metadata["worker_pid"] in trace_sets["target"] and
+             metadata["helper_pid"] in trace_sets["helper"],
+             "diagnostic selected resource trace differs")
+    observer_traces, _ = _raw_events(files["observer-traces.zip"])
+    observer_processes = [int(pid) for pid, raw in observer_traces.items()
+        if any(" execve(" in line and "ordinary-diagnostic-observer" in line and
+               line.endswith(" = 0") for line in raw.decode("utf-8").splitlines())]
+    _require(len(observer_processes) == 1,
+             "diagnostic selected observer resource identity differs")
+    seen = {}
+    moments = metadata["supervisor_milestones_ns"]
+    intervals = {"stage": (moments["stage_start"], moments["stage_end"]),
+                 "target": (moments["gradle_start"], moments["target_exit"]),
+                 "observer": (moments["observer_start"], moments["observer_exit"])}
+    for sample in samples:
+        phase = sample["phase"]
+        _require(intervals[phase][0] <= sample["time_ns"] <= intervals[phase][1],
+                 "diagnostic resource sample is outside its process lifetime")
+        members = {row["pid"]: row for row in sample["pids"]}
+        for row in sample["pids"]:
+            pid = row["pid"]
+            group = row["group_pid"]
+            owner = ("stage" if phase == "stage" else
+                     "observer" if phase == "observer" else
+                     "helper" if group == roots["helper"]["pid"] else "target")
+            root = roots[owner]
+            parent = members.get(row["parent_pid"])
+            _require(group == root["pid"] and
+                     row["session_pid"] == root["pid"] and
+                     row["start_ticks"] >= root["start_ticks"] and
+                     (pid == root["pid"] or parent is not None and
+                      parent["start_ticks"] <= row["start_ticks"] and
+                      parent["group_pid"] == group) and
+                     set(row["affinity"]) <= set(cpus) and
+                     (pid == root["pid"] and
+                      row["start_ticks"] == root["start_ticks"] or
+                      pid != root["pid"] and
+                      (owner == "stage" or pid in trace_sets[owner])),
+                     "diagnostic sampled PID ownership differs")
+            identity = (row["start_ticks"], row["parent_pid"], group,
+                        row["session_pid"], row["command_sha256"])
+            _require(pid not in seen or seen[pid] == identity,
+                     "diagnostic sampled PID identity changed")
+            seen[pid] = identity
+            roles = set(row["roles"])
+            allowed = ({"gradle", "tracer"} if owner in {"stage", "target"}
+                       else {"helper", "tracer"} if owner == "helper"
+                       else {"observer", "tracer"})
+            _require(len(roles) == 1 and
+                     roles <= allowed | ({"worker"} if owner == "target" else set()) and
+                     ("worker" not in roles or pid == metadata["worker_pid"]) and
+                     ("helper" not in roles or pid == metadata["helper_pid"]) and
+                     ("observer" not in roles or owner == "observer" and
+                      pid == observer_processes[0]),
+                     "diagnostic sampled PID role differs")
+
+
+def _resource_evidence(samples, metadata, files, allocation):
     result = verify_resource_samples(samples)
+    _resource_ownership(samples, metadata, files, allocation)
     if result["status"] != "OBSERVED_UNDER_CEILING":
         raise DiagnosticRejected(result["status"])
     peaks = {role: None for role in REQUIRED_ROLES}
@@ -1399,10 +1636,16 @@ def _supervisor_phases(metadata):
     order = ("stage_start", "stage_end", "gradle_start", "worker_observed",
              "socket_ready", "attach_observed", "cap_observed", "helper_exit",
              "target_exit", "observer_start", "observer_exit")
+    poll_observations = {("worker_observed", "socket_ready"),
+                         ("socket_ready", "attach_observed"),
+                         ("attach_observed", "cap_observed"),
+                         ("cap_observed", "helper_exit")}
     _require(type(moments) is dict and set(moments) == set(order) and
              all(type(moments[name]) is int and moments[name] > 0
                  for name in order) and
-             all(moments[left] < moments[right]
+             all(moments[left] <= moments[right] if
+                 (left, right) in poll_observations else
+                 moments[left] < moments[right]
                  for left, right in zip(order, order[1:])),
              "diagnostic supervisor clock or process order differs")
     _require(moments["helper_exit"] - moments["cap_observed"] <=
@@ -1469,7 +1712,8 @@ def verify_archive(output, compare_report=True):
         files["worker-traces.zip"], max(transport["helper_closed_at"],
             transport["worker_closed_at"], key=Decimal))
     samples = _read_samples(files["resource-samples.jsonl"])
-    resource = _resource_evidence(samples)
+    allocation = _decode_json(files["allocation.json"])
+    resource = _resource_evidence(samples, metadata, files, allocation)
     supervisor = _supervisor_phases(metadata)
     limits = verify_runtime_limits(metadata["supervisor_milestones_ns"],
         lifecycle, sum(len(raw) for name, raw in files.items()

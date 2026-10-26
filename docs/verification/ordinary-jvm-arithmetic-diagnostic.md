@@ -43,6 +43,12 @@ JDK executable, effective worker classpath and its captured inventory. It
 also checks the original case bytes, worker and helper executions, loaded
 class bytes and loader object, raw call bits, writers, both selected transport
 endpoint closes, worker progress, time limits, and sampled RSS.
+Replay also checks the selected worker's Gradle ancestry and compares its
+raw trace subset with the full process trace. Each sampled PID records its
+parent, process group, session, start tick, command hash, and observed CPU
+affinity. Replay checks those records against launch groups, trace members,
+the allocated CPU set, and the process phase.
+
 It recomputes `diagnostic.json` exactly. A changed report or an extra
 `receipt.json` fails archive admission.
 
@@ -62,6 +68,11 @@ PIDs. Each sample stores its time and PID-to-role membership. The reader
 deduplicates a PID before summing RSS. Missing measurements remain
 `UNAVAILABLE`. Samples cannot prove that no higher peak occurred between
 samples or that physical memory was contained by a hard limit.
+
+If a run stops after a checked call, the incomplete report names
+`last-complete-observation.tsv` and its SHA-256. This file holds one raw
+observation row. A row that fails the privacy or shape checks is not retained
+as proof. A stopped run remains incomplete even when the row is present.
 
 The report lists bytes and observed peak RSS by role. It leaves pair-input,
 direct-reset, TOI, subnormal, and zero-product categories `UNEXERCISED`
