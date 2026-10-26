@@ -5,12 +5,22 @@ seconds="${2:-12}"
 case "$scene" in Tracking|Pyramid|Crank|Billiards|Truck) ;; *) exit 2 ;; esac
 evidence="${EVIDENCE_DIR:-/work/evidence}/$scene"
 mkdir -p "$evidence"
+taskset -pc $$ >"$evidence/affinity.log"
+if [[ -n "${MIGRATION_CPUSET:-}" ]]; then
+    [[ "$(taskset -pc $$)" == *"$MIGRATION_CPUSET" ]] || exit 5
+fi
 export DISPLAY=:99
 Xvfb :99 -screen 0 1024x768x24 -nolisten tcp >"$evidence/xvfb.log" 2>&1 &
 xvfb_pid=$!
 wm_pid=''
 observer_pid=''
-trap 'if [[ -n "$observer_pid" ]]; then kill "$observer_pid" 2>/dev/null || true; fi; if [[ -n "$wm_pid" ]]; then kill "$wm_pid" 2>/dev/null || true; fi; kill "$xvfb_pid" 2>/dev/null || true' EXIT
+cleanup() {
+    if [[ -n "$observer_pid" ]]; then kill "$observer_pid" 2>/dev/null || true; wait "$observer_pid" 2>/dev/null || true; fi
+    if [[ -n "$wm_pid" ]]; then kill "$wm_pid" 2>/dev/null || true; fi
+    kill "$xvfb_pid" 2>/dev/null || true
+    wait "$xvfb_pid" 2>/dev/null || true
+}
+trap cleanup EXIT
 for attempt in $(seq 1 50); do
     if xdpyinfo >/dev/null 2>&1; then break; fi
     sleep 0.1
@@ -24,6 +34,7 @@ dependencies="${DEPENDENCY_CP:-/work/lib/dyn4j-6.0.0.jar:/work/lib/jogl-all-2.3.
 classes="${CLASSES_DIR:-/work/classes}"
 /jdk/bin/java -Djava.awt.headless=false -cp "$classes:$dependencies:/work/samples/src/main/java" org.dyn4j.samples.framework.SceneObserver "$scene" "$seconds" >"$evidence/observer.log" 2>&1 &
 observer_pid=$!
+taskset -pc "$observer_pid" >>"$evidence/affinity.log"
 window=''
 for attempt in $(seq 1 100); do
     window="$(xdotool search --name "^$scene$" 2>/dev/null | head -1 || true)"
@@ -33,14 +44,16 @@ for attempt in $(seq 1 100); do
 done
 if [[ -z "$window" ]]; then
     wait "$observer_pid" || true
-    python3 /work/tools/migration/validate_scene.py "$scene" "$evidence/observer.log" "$evidence/inputs.log" "$evidence/validation.json" || true
+    env -u OLLAMA_API_KEY TMPDIR="${TMPDIR:?private scratch required}" python3 -B /work/tools/migration/validate_scene.py "$scene" "$evidence/observer.log" "$evidence/inputs.log" "$evidence/validation.json" || true
     exit 3
 fi
 printf 'scene=%s window=%s display=%s\n' "$scene" "$window" "$DISPLAY" >"$evidence/inputs.log"
 xdotool windowactivate --sync "$window"
 sleep 2
-import -window root "$evidence/initial.png"
-xdotool mousemove --window "$window" 400 300 click 1
+if [[ "$scene" != Truck ]]; then
+    import -window root "$evidence/initial.png"
+    xdotool mousemove --window "$window" 400 300 click 1
+fi
 case "$scene" in
     Tracking)
         printf 't~2s key c: show contacts\n' >>"$evidence/inputs.log"
@@ -73,23 +86,21 @@ case "$scene" in
         xdotool keyup s
         ;;
     Truck)
-        printf 't~2s keydown Right 7s, keyup Right; key s 1s: brake\n' >>"$evidence/inputs.log"
-        xdotool keydown Right
-        sleep 7
-        xdotool keyup Right
-        import -window root "$evidence/drive.png"
-        xdotool keydown s
-        sleep 1
-        xdotool keyup s
+        printf 'keydown Right 7s, keyup Right; key s 1s: brake; public blank-strip camera drag\n' >>"$evidence/inputs.log"
+        env -u OLLAMA_API_KEY TMPDIR="${TMPDIR:?private scratch required}" python3 -B \
+            /work/tools/migration/truck_camera.py "$window" "$evidence"
         ;;
 esac
-sleep 1
-import -window root "$evidence/after-input.png"
+if [[ "$scene" != Truck ]]; then
+    sleep 1
+    import -window root "$evidence/after-input.png"
+fi
 observer_status=0
 wait "$observer_pid" || observer_status=$?
 observer_pid=''
 validation_status=0
-python3 /work/tools/migration/validate_scene.py "$scene" "$evidence/observer.log" "$evidence/inputs.log" "$evidence/validation.json" || validation_status=$?
+env -u OLLAMA_API_KEY TMPDIR="${TMPDIR:?private scratch required}" python3 -B \
+    /work/tools/migration/validate_scene.py "$scene" "$evidence/observer.log" "$evidence/inputs.log" "$evidence/validation.json" || validation_status=$?
 if (( observer_status != 0 || validation_status != 0 )); then
     exit 1
 fi

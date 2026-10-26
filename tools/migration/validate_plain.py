@@ -6,9 +6,11 @@ import struct
 import sys
 from pathlib import Path
 
+from truck_timeline import FRAMES as TRUCK_FRAMES, validate as validate_truck_timeline
+
 
 SCENES = {"Tracking", "Pyramid", "Crank", "Billiards", "Truck"}
-EXPECTED = {"Tracking": 10, "Pyramid": 10, "Crank": 9, "Billiards": 9, "Truck": 10}
+EXPECTED = {"Tracking": 10, "Pyramid": 10, "Crank": 9, "Billiards": 9, "Truck": 19}
 INPUT_MARKERS = {
     "Tracking": ("key c",),
     "Pyramid": ("drag left mouse", "key r"),
@@ -71,13 +73,19 @@ def validate(scene, directory):
         frames["interaction"] = frame
         check("interaction_frame", frame is not None and frame["width"] == 1024 and frame["height"] == 768)
     if scene == "Truck":
-        frame = read_png(directory / "drive.png")
-        frames["drive"] = frame
-        check("drive_frame", frame is not None and frame["width"] == 1024 and frame["height"] == 768)
+        for name in TRUCK_FRAMES:
+            if name in frames:
+                continue
+            frame = read_png(directory / f"{name}.png")
+            frames[name] = frame
+            check(f"{name}_frame", frame is not None and frame["width"] == 1024 and frame["height"] == 768)
+        timeline_ok, timeline_evidence = validate_truck_timeline(directory)
+        check("truck_timeline", timeline_ok, timeline_evidence)
     failed = sum(item["status"] == "failed" for item in checks)
     return {"scene": scene, "mode": "plain-original-main", "expected": len(checks), "executed": len(checks),
             "failed": failed, "unexecuted": 0, "passed": len(checks) - failed, "checks": checks,
-            "frames": frames, "visual_physics_review": "reported separately; frame presence is not physics evidence"}
+            "frames": frames, "visual_review_status": "UNREVIEWED",
+            "visual_physics_review": "reported separately; frame presence is not physics evidence"}
 
 
 def main():

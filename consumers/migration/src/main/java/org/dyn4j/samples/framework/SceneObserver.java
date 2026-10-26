@@ -39,6 +39,7 @@ public final class SceneObserver {
     private static long steps;
     private static double stepDt;
     private static int resets;
+    private static int maxJointCount;
     private static SimulationBody initialBody;
 
     private static final ContactListenerAdapter<SimulationBody> contacts = new ContactListenerAdapter<SimulationBody>() {
@@ -116,6 +117,7 @@ public final class SceneObserver {
         final long nanos;
         final int bodyCount;
         final int jointCount;
+        final int maxJointCount;
         final int resets;
         final String ccdMode;
         final long begins;
@@ -128,11 +130,11 @@ public final class SceneObserver {
         final double stepDt;
         final List<BodyState> bodies;
         final List<JointState> joints;
-        Snapshot(String scene, long threadId, long nanos, int bodyCount, int jointCount, int resets,
+        Snapshot(String scene, long threadId, long nanos, int bodyCount, int jointCount, int maxJointCount, int resets,
                  String ccdMode, long begins, long persists, long ends, long toiCalls, long toiHits,
                  long toiListenerHits, long steps, double stepDt, List<BodyState> bodies, List<JointState> joints) {
             this.scene = scene; this.threadId = threadId; this.nanos = nanos; this.bodyCount = bodyCount;
-            this.jointCount = jointCount; this.resets = resets; this.ccdMode = ccdMode;
+            this.jointCount = jointCount; this.maxJointCount = maxJointCount; this.resets = resets; this.ccdMode = ccdMode;
             this.begins = begins; this.persists = persists; this.ends = ends; this.toiCalls = toiCalls;
             this.toiHits = toiHits; this.toiListenerHits = toiListenerHits;
             this.steps = steps; this.stepDt = stepDt;
@@ -143,7 +145,8 @@ public final class SceneObserver {
             StringBuilder out = new StringBuilder(512 + bodies.size() * 90);
             out.append("{\"scene\":\"").append(scene).append("\",\"threadId\":").append(threadId)
                 .append(",\"nanos\":").append(nanos).append(",\"bodyCount\":").append(bodyCount)
-                .append(",\"jointCount\":").append(jointCount).append(",\"resets\":").append(resets)
+                .append(",\"jointCount\":").append(jointCount).append(",\"maxJointCount\":").append(maxJointCount)
+                .append(",\"resets\":").append(resets)
                 .append(",\"ccdMode\":\"").append(ccdMode).append("\",\"begin\":").append(begins)
                 .append(",\"persist\":").append(persists).append(",\"end\":").append(ends)
                 .append(",\"toiCalls\":").append(toiCalls).append(",\"toiHits\":").append(toiHits)
@@ -178,6 +181,7 @@ public final class SceneObserver {
         if (!onSimulationThread()) return;
         try {
             World<SimulationBody> world = frame.world;
+            maxJointCount = Math.max(maxJointCount, world.getJointCount());
             if (!(world.getTimeOfImpactDetector() instanceof CountingDetector)) {
                 world.setTimeOfImpactDetector(new CountingDetector(world.getTimeOfImpactDetector()));
             }
@@ -207,7 +211,7 @@ public final class SceneObserver {
                     joints.add(new JointState(i, joint.getClass().getSimpleName(), 0.0, 0.0));
                 }
             }
-            Snapshot snapshot = new Snapshot(scene, Thread.currentThread().getId(), now, bodies.size(), joints.size(), resets,
+            Snapshot snapshot = new Snapshot(scene, Thread.currentThread().getId(), now, bodies.size(), joints.size(), maxJointCount, resets,
                     world.getSettings().getContinuousDetectionMode().name(), begins, persists, ends,
                     toiCalls, toiHits, toiListenerHits, steps, stepDt, bodies, joints);
             if (!snapshots.offer(snapshot)) failure = new IllegalStateException("Snapshot queue full");

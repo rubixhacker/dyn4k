@@ -156,6 +156,16 @@ A recorded run compiled and executed this fenced assignment example against stag
 
 ## Migration examples
 
+### Review the unchanged Truck sample
+
+The headful migration journey uses the pinned, unchanged `Truck.java` in two separate launches for each provider. The plain launch runs its original `main`. The observed launch records game-loop state. Both hold Right for seven seconds, then hold `s` for one second. In the sample, `s` sets both wheel motor speeds to zero. It does not stop the truck immediately.
+
+The [Truck camera controller](../../tools/migration/truck_camera.py) uses left-button drags in the upper, empty part of the canvas. It pans before the first frame, follows the vehicle during the drive, and adjusts the view during the brake. It does not change the sample, physics state, or render output. Its monotonic log records actual key command boundaries, camera moves, frame capture times, durations, and PNG hashes. A separate release thread schedules each keyup from the completed keydown, so a slow screenshot or drag cannot silently extend the hold. The [timeline validator](../../tools/migration/truck_timeline.py) rejects missing, late, or reordered frames and holds outside its measured bounds.
+
+Review `initial.png`, `drive-0.png` through `drive-6.png`, `drive.png`, `brake-mid.png`, and `after-input.png` for each plain and observed run. The whole chassis, both wheels, suspension area, and cargo must be visible in every required frame. Compare the sequence with the ground and ramp to see movement. Use the observed motor and chassis records to check the brake input and speed change. The observer records the highest joint count seen on its game loop; a count above two rejects a camera drag that picked a body. The plain run has no such state probe, so its safe pointer path and rendered frames need separate review.
+
+Frame integrity is not visual acceptance. Sampled frames cannot prove visibility between captures. The observer's `System.nanoTime` and the controller's host monotonic clock are reported as separate domains. Motor transitions are bracketed by adjacent observer samples; no cross-clock subtraction or synchronized baseline/candidate trajectory is claimed. Keep the original sample hash, exact candidate commit, staged artifact hashes, image identity, callback and CCD counts, and manual frame judgment with the run evidence.
+
 ### Shapes, bodies, and units
 
 Create shapes with their geometry constructors. Add them as fixtures to a body. A length is in metres, an angle is in radians, and time is in seconds. Use a fixed step for repeatable application behavior. The library does not choose your world scale or frame scheduler.

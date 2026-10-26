@@ -240,10 +240,11 @@ def build_observer(plain_classes, observed_classes, resolved, instrumentation, j
     return report["exit_code"] if report["status"] == "PASSED" else (report["exit_code"] or 1)
 
 
-def podman_scene(scene, mode, samples, resolved, classes, output, jdk, image):
+def podman_scene(scene, mode, samples, resolved, classes, output, jdk, image, cpuset=None, timeout=180):
     output.mkdir(parents=True)
     evidence = output / "evidence"
     evidence.mkdir()
+    (evidence / "tmp").mkdir(mode=0o700)
     jars = sorted(resolved.glob("*.jar"))
     dependency_cp = ":".join("/work/lib/" + jar.name for jar in jars)
     script = "run-plain-scene.sh" if mode == "plain" else "run-scene.sh"
@@ -259,12 +260,17 @@ def podman_scene(scene, mode, samples, resolved, classes, output, jdk, image):
         "-v", f"{jdk.resolve()}:/jdk:ro",
         "-e", f"DEPENDENCY_CP={dependency_cp}",
         "-e", "PLAIN_EVIDENCE_DIR=/work/evidence",
-        image, "bash", f"/work/tools/migration/{script}", scene,
+        "-e", "TMPDIR=/work/evidence/tmp",
     ]
+    if cpuset:
+        command.extend(["-e", f"MIGRATION_CPUSET={cpuset}", image, "taskset", "-c", cpuset])
+    else:
+        command.append(image)
+    command.extend(["bash", f"/work/tools/migration/{script}", scene])
     if mode == "observed":
         command.append("18" if scene == "Truck" else "12")
     (output / "invocation.json").write_text(json.dumps({"command": command}, indent=2) + "\n")
-    exit_code = subprocess_log(command, output / "container.log", timeout=120)
+    exit_code = subprocess_log(command, output / "container.log", timeout=timeout)
     validation_path = evidence / scene / ("plain-validation.json" if mode == "plain" else "validation.json")
     try:
         validation = json.loads(validation_path.read_text())
@@ -277,7 +283,7 @@ def podman_scene(scene, mode, samples, resolved, classes, output, jdk, image):
             "validation": validation, "evidence": str(evidence / scene)}
 
 
-def run_all(samples, resolved_root, repository, instrumentation, output, javac, java, jdk, image, timeout):
+def run_all(samples, resolved_root, repository, instrumentation, output, javac, java, jdk, image, timeout, cpuset=None):
     commit = require_clean_candidate()
     source = inspect_samples(samples)
     if output.exists() and any(output.iterdir()):
@@ -333,12 +339,13 @@ def run_all(samples, resolved_root, repository, instrumentation, output, javac, 
                                          resolved, instrumentation, javac, java, provider_output / "observer-build.log", timeout)
         for scene in SCENES:
             plain = podman_scene(scene, "plain", samples, resolved, provider_output / "compile/classes",
-                                 provider_output / scene / "plain", jdk, image)
+                                 provider_output / scene / "plain", jdk, image, cpuset, timeout)
             observed = (podman_scene(scene, "observed", samples, resolved, observed_classes,
-                                     provider_output / scene / "observed", jdk, image)
+                                     provider_output / scene / "observed", jdk, image, cpuset, timeout)
                         if observer_status == 0 else {"status": "FAILED", "reason": "observer build failed"})
             cases.append({"provider": provider, "scene": scene,
                           "status": "PASSED" if plain["status"] == observed["status"] == "PASSED" else "FAILED",
+                          "rendered_acceptance": "UNREVIEWED" if scene == "Truck" else "NOT_APPLICABLE",
                           "plain": plain, "observed": observed})
     try:
         require_clean_candidate(commit)
@@ -358,7 +365,8 @@ def run_all(samples, resolved_root, repository, instrumentation, output, javac, 
         "java_source_count": final_source["java_source_count"],
         "manifest_sha256": final_source["manifest_sha256"],
     }, indent=2) + "\n")
-    report = {"candidate_commit": commit, "candidate_worktree_clean": True,
+    report = {"candidate_commit": commit, "candidate_worktree_clean": True, "container_cpuset_cpus": cpuset,
+              "truck_rendered_acceptance": "UNREVIEWED",
               "headful_image": image, "headful_image_id": image_id,
               "source_revision": source["revision"], "source_manifest_sha256": source["manifest_sha256"],
               "expected_cases": 10, "passed_cases": sum(case["status"] == "PASSED" for case in cases),
@@ -401,6 +409,7 @@ def main():
     run.add_argument("--jdk", type=Path, required=True)
     run.add_argument("--headful-image", default="localhost/dyn4k-migration:journeys")
     run.add_argument("--timeout-seconds", type=float, default=180)
+    run.add_argument("--cpuset-cpus")
     args = parser.parse_args()
     try:
         if hasattr(args, "timeout_seconds") and args.timeout_seconds <= 0:
@@ -422,7 +431,7 @@ def main():
         elif args.command == "run-all":
             report = run_all(args.samples, args.resolved_root, args.repository,
                              args.instrumentation, args.output, args.javac, args.java,
-                             args.jdk, args.headful_image, args.timeout_seconds)
+                             args.jdk, args.headful_image, args.timeout_seconds, args.cpuset_cpus)
             print(json.dumps({key: report[key] for key in ("expected_cases", "passed_cases", "failed_cases", "unavailable_cases")}, sort_keys=True))
             return 0 if report["passed_cases"] == report["expected_cases"] else 1
         else:

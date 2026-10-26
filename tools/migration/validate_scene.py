@@ -5,6 +5,8 @@ import re
 import sys
 from pathlib import Path
 
+from truck_timeline import validate as validate_truck_timeline
+
 
 SCENES = {"Tracking": 9, "Pyramid": 121, "Crank": 4, "Billiards": 21, "Truck": 35}
 
@@ -13,7 +15,26 @@ def body(sample, index):
     return sample["bodies"][index]
 
 
-def checks_for(scene, log_text, input_text, samples, parse_errors):
+def truck_motor_bounds(samples):
+    try:
+        active = [any(joint["motorSpeed"] != 0 for joint in sample["joints"])
+                  for sample in samples]
+        first_drive = next(index for index in range(1, len(samples)) if active[index] and not active[index - 1])
+        first_brake = next(index for index in range(first_drive + 1, len(samples)) if not active[index] and active[index - 1])
+        def state(index):
+            sample = samples[index]
+            return {"nanos": sample["nanos"], "steps": sample["steps"],
+                    "chassis_x": body(sample, 2)["x"], "chassis_vx": body(sample, 2)["vx"]}
+        return {"clock_domain": "observer JVM System.nanoTime; not subtracted from host camera clock",
+                "drive_transition": [state(first_drive - 1), state(first_drive)],
+                "brake_transition": [state(first_brake - 1), state(first_brake)],
+                "max_snapshot_gap_ns": max(b["nanos"] - a["nanos"] for a, b in zip(samples, samples[1:])),
+                "brake_index": first_brake}
+    except (StopIteration, KeyError, IndexError, TypeError, ValueError):
+        return None
+
+
+def checks_for(scene, log_text, input_text, samples, parse_errors, evidence_dir=None):
     checks = []
 
     def check(name, result, evidence=""):
@@ -98,6 +119,21 @@ def checks_for(scene, log_text, input_text, samples, parse_errors):
         when_samples("ccd_enabled", lambda: all(item["ccdMode"] != "NONE" for item in samples))
         check("cue_input", all(marker in input_text for marker in ("keydown plus", "keydown s", "keyup s")))
     elif scene == "Truck":
+        timeline_ok, timeline_evidence = validate_truck_timeline(evidence_dir) if evidence_dir else (False, "timeline directory missing")
+        check("truck_timeline", timeline_ok, timeline_evidence)
+        when_samples("no_camera_pick_joint", lambda: all(item.get("maxJointCount") == 2 for item in samples))
+        bounds = truck_motor_bounds(samples)
+        check("truck_motor_phase_bounds", bounds is not None and all(
+            0 < window[1]["nanos"] - window[0]["nanos"] <= 300_000_000
+            for window in (bounds["drive_transition"], bounds["brake_transition"])) if bounds else False)
+        def brake_window_slowed():
+            if bounds is None:
+                return False
+            start = samples[bounds["brake_index"]]
+            later = next((item for item in samples[bounds["brake_index"] + 1:]
+                          if 900_000_000 <= item["nanos"] - start["nanos"] <= 1_200_000_000), None)
+            return later is not None and abs(body(later, 2)["vx"]) < abs(body(start, 2)["vx"])
+        when_samples("brake_window_speed_reduced", brake_window_slowed)
         when_samples("wheel_joints", lambda: all(item["jointCount"] == 2 and all(joint["type"] == "WheelJoint" for joint in item["joints"]) for item in samples))
         when_samples("drive_motor", lambda: any(any(joint["motorSpeed"] != 0 for joint in item["joints"]) for item in samples))
         when_samples("brake_motor", lambda: any(any(joint["motorSpeed"] != 0 for joint in item["joints"]) for item in samples) and all(joint["motorSpeed"] == 0 for joint in samples[-1]["joints"]))
@@ -125,7 +161,7 @@ def main():
                 samples.append(json.loads(line[len("OBS_JSON "):]))
             except (ValueError, TypeError) as error:
                 parse_errors.append(f"line {number}: {error}")
-    checks = checks_for(scene, log_text, input_text, samples, parse_errors)
+    checks = checks_for(scene, log_text, input_text, samples, parse_errors, Path(input_path).parent)
     result = {
         "scene": scene,
         "expected_checks": len(checks),
@@ -136,7 +172,10 @@ def main():
         "samples": len(samples),
         "checks": checks,
         "parse_errors": parse_errors,
+        "visual_review_status": "UNREVIEWED",
     }
+    if scene == "Truck":
+        result["truck_motor_bounds"] = truck_motor_bounds(samples)
     Path(result_path).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     print(f"VALIDATION scene={scene} expected={result['expected_checks']} executed={result['executed_checks']} failed={result['failed_checks']} unexecuted={result['unexecuted_checks']} samples={len(samples)}")
     return 0 if result["failed_checks"] == 0 and result["unexecuted_checks"] == 0 else 1

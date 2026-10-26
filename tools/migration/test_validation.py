@@ -60,6 +60,24 @@ class SceneEvidenceTest(unittest.TestCase):
         failed = {check["id"] for check in report["checks"] if check["status"] == "failed"}
         self.assertIn("steps_progressed", failed)
 
+    def test_truck_logical_observations_cannot_replace_input_timeline(self):
+        bodies = [{"i": i, "x": float(i), "y": 0.0, "vx": 0.0, "vy": 0.0, "rest": False}
+                  for i in range(35)]
+        joints = [{"i": i, "type": "WheelJoint", "motorSpeed": 1.0,
+                   "translation": 0.0} for i in range(2)]
+        records = [{"scene": "Truck", "threadId": 2, "nanos": index + 1,
+                    "bodyCount": 35, "jointCount": 2, "resets": 0, "ccdMode": "NONE",
+                    "begin": 0, "persist": 0, "end": 0, "toiCalls": 0,
+                    "toiHits": 0, "toiListenerHits": 0, "steps": index + 1,
+                    "stepDt": 1 / 60, "bodies": bodies, "joints": joints}
+                   for index in range(2)]
+        log = "OBSERVER_SHUTDOWN joined=true disposed=true\n" + "\n".join(
+            "OBS_JSON " + json.dumps(record) for record in records)
+        result, report = self.validate("Truck", log, "scene=Truck\nkeydown Right\nkey s\n")
+        self.assertNotEqual(0, result.returncode)
+        failed = {item["id"] for item in report["checks"] if item["status"] == "failed"}
+        self.assertIn("truck_timeline", failed)
+
 
 if __name__ == "__main__":
     unittest.main()
