@@ -262,6 +262,29 @@ class DiagnosticContractTest(unittest.TestCase):
                 diagnostic._stage_identity({"stage.log": b"BUILD SUCCESSFUL\n"},
                                            metadata)
 
+    def test_stage_replay_requires_both_executed_build_commands(self):
+        commands, launch = diagnostic._stage_commands()
+        metadata = {"stage_commands": commands, "stage_command": launch,
+                    "artifact_identity": "sealed", "runtime_identity": "sealed"}
+        files = {"stage.log": (
+            b"> Task :dyn4k-core:publishJvmPublicationToStagingRepository\n"
+            b"BUILD SUCCESSFUL\n> Task :jvmTestClasses\nBUILD SUCCESSFUL\n"),
+            "stage-process-traces.zip": b"retained trace"}
+        events = [(index, 100 + index, None,
+                   f'execve({json.dumps(command[0])}, '
+                   f'{json.dumps(command)}, 0) = 0')
+                  for index, command in enumerate(commands)]
+        with (mock.patch.object(diagnostic, "captured_file_identity",
+                                return_value="sealed"),
+              mock.patch.object(diagnostic, "_raw_events",
+                                return_value=({}, events))):
+            diagnostic._stage_identity(files, metadata)
+            with mock.patch.object(diagnostic, "_raw_events",
+                                   return_value=({}, events[:1])):
+                with self.assertRaisesRegex(DiagnosticRejected,
+                                            "diagnostic staged command execution differs"):
+                    diagnostic._stage_identity(files, metadata)
+
     def test_root_allocation_is_separate_from_sampled_rss_limit(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
             path = Path(directory) / "allocation.json"
