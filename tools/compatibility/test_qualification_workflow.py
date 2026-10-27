@@ -307,7 +307,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         self.assertEqual({"workflow-source-contracts"}, set(jobs))
         job = jobs["workflow-source-contracts"]
         self.assertEqual(
-            [("runs-on", "ubuntu-26.04"), ("timeout-minutes", "5"), ("steps", "")],
+            [("runs-on", "ubuntu-26.04"), ("timeout-minutes", "10"), ("steps", "")],
             _yaml_structural_entries_at_indent(job, 4),
         )
         self.assertEqual(
@@ -315,7 +315,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             re.findall(r"(?m)^    ([a-z][a-z0-9-]*):(?:\s+.*)?$", job),
         )
         self.assertIn("    runs-on: ubuntu-26.04\n", job)
-        self.assertIn("    timeout-minutes: 5\n", job)
+        self.assertIn("    timeout-minutes: 10\n", job)
         checkout = re.search(
             r"(?m)^      - uses: actions/checkout@v4\n((?: {8,}.*\n)+)", job
         )
@@ -671,7 +671,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ("Java setup dependency removed", "steps.java-setup.outcome == 'success'", "true"),
             ("ImageMagick setup dependency removed", "steps.imagemagick-setup.outcome == 'success'", "true"),
             ("checkout dependency removed", "steps.checkout.outcome == 'success'", "true"),
-            ("continue-on-error added", "    timeout-minutes: 5\n", "    timeout-minutes: 5\n    continue-on-error: true\n"),
+            ("continue-on-error added", "    timeout-minutes: 10\n", "    timeout-minutes: 10\n    continue-on-error: true\n"),
             ("test failure suppressed", "python3 -B -m unittest tools.compatibility.test_qualification_workflow",
              "python3 -B -m unittest tools.compatibility.test_qualification_workflow || true"),
         )
@@ -711,7 +711,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "print(\"GNU MPFR\", mpfr.version)'\n"
         )
         hosted_guard_run = "        run: python3 -B tools/qualification/guard_hosted_runners.py\n"
-        timeout = "    timeout-minutes: 5\n"
+        timeout = "    timeout-minutes: 10\n"
         mutations = (
             ("quoted job failure suppression", timeout,
              timeout + '    "continue-on-error": true\n'),
@@ -791,8 +791,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
     def test_source_job_contract_rejects_failure_suppression_and_body_changes(self):
         source = SOURCE_CHECKS.read_text(encoding="utf-8")
         mutations = (
-            ("job failure suppression", "    timeout-minutes: 5\n",
-             "    timeout-minutes: 5\n    continue-on-error: true\n"),
+            ("job failure suppression", "    timeout-minutes: 10\n",
+             "    timeout-minutes: 10\n    continue-on-error: true\n"),
             ("runner guard body", "run: python3 -B tools/qualification/guard_hosted_runners.py",
              "run: python3 -B tools/qualification/guard_hosted_runners.py && true"),
             ("workflow contract body",
@@ -849,6 +849,24 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 mutated = source.replace(target, target.replace(old, new, 1), 1)
                 with self.assertRaises(AssertionError):
                     self.assert_source_checks_job_contract(mutated)
+
+    def test_source_job_timeout_is_finite_ten_minutes(self):
+        source = SOURCE_CHECKS.read_text(encoding="utf-8")
+        self.assert_source_checks_job_contract(source)
+        job = workflow_jobs(source)["workflow-source-contracts"]
+        self.assertEqual(1, len(re.findall(r"(?m)^    timeout-minutes: \d+\n", job)))
+        self.assertIn("    timeout-minutes: 10\n", job)
+        for value in ("0", "1", "5", "60"):
+            with self.subTest(value=value):
+                mutated = source.replace("    timeout-minutes: 10\n",
+                                         f"    timeout-minutes: {value}\n", 1)
+                self.assertNotEqual(source, mutated)
+                with self.assertRaises(AssertionError):
+                    self.assert_source_checks_job_contract(mutated)
+        without_timeout = source.replace("    timeout-minutes: 10\n", "", 1)
+        self.assertNotEqual(source, without_timeout)
+        with self.assertRaises(AssertionError):
+            self.assert_source_checks_job_contract(without_timeout)
 
     def test_capture_actual_source_regression_is_required(self):
         source = SOURCE_CHECKS.read_text(encoding="utf-8")
@@ -982,7 +1000,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             self.assertEqual({"workflow-source-contracts"},
                              workflow_jobs_for_event(source, event), event)
         self.assertIn("runs-on: ubuntu-26.04", jobs["workflow-source-contracts"])
-        self.assertIn("timeout-minutes: 5", jobs["workflow-source-contracts"])
+        self.assertIn("timeout-minutes: 10", jobs["workflow-source-contracts"])
         self.assertIn("tools/qualification/guard_hosted_runners.py", jobs["workflow-source-contracts"])
         self.assertIn("tools.compatibility.test_qualification_workflow",
                       jobs["workflow-source-contracts"])

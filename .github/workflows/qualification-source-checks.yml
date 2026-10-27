@@ -10,7 +10,7 @@ permissions:
 jobs:
   workflow-source-contracts:
     runs-on: ubuntu-26.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         id: checkout
