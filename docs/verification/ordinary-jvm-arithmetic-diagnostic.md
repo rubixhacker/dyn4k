@@ -49,9 +49,12 @@ The build uses two compiler jobs and one 600-second deadline across extraction,
 patching, configuration, and compilation. It selects and records the compiler
 path and hash. Replay accepts only the selected compiler path. It opens that
 file without following a final symlink and hashes at most 64 MiB from a regular
-file descriptor. A changed file identity or an incomplete read rejects the
-archive before the rebuild. The rebuild must record the same compiler path and
-hash. The build retains raw command output and a structured record on failure
+file descriptor. Before the read, it rejects a file whose size, modification
+time, or change time differs from the pre-open check. It also rejects a file
+that changes after the read and an incomplete read. A replacement that
+preserves size, modification time, and change time escapes the pre-read
+check. It rejects the archive before the rebuild. The rebuild must record the
+same compiler path and hash. The build retains raw command output and a structured record on failure
 or timeout.
 
 The `owned-snapshot/1` binding records a child birth while ptrace holds its

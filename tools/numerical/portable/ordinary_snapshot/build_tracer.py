@@ -47,9 +47,14 @@ def compiler_identity(retained_path=None):
                          os.O_NOFOLLOW)
         try:
             opened = os.fstat(handle)
+            # Reject a changed size, mtime, or ctime before any read.
+            # A reused inode keeps device and inode equal.
+            # Device and inode alone do not detect a replaced file.
             if (not stat.S_ISREG(opened.st_mode) or
-                    (opened.st_dev, opened.st_ino) !=
-                    (before.st_dev, before.st_ino) or
+                    (opened.st_dev, opened.st_ino, opened.st_size,
+                     opened.st_mtime_ns, opened.st_ctime_ns) !=
+                    (before.st_dev, before.st_ino, before.st_size,
+                     before.st_mtime_ns, before.st_ctime_ns) or
                     opened.st_size > _COMPILER_MAX_BYTES):
                 raise ValueError("compiler file differs")
             value = hashlib.sha256()
@@ -61,8 +66,10 @@ def compiler_identity(retained_path=None):
                 value.update(block)
             after = os.fstat(handle)
             if (length != opened.st_size or
-                    (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) !=
-                    (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)):
+                    (after.st_dev, after.st_ino, after.st_size,
+                     after.st_mtime_ns, after.st_ctime_ns) !=
+                    (opened.st_dev, opened.st_ino, opened.st_size,
+                     opened.st_mtime_ns, opened.st_ctime_ns)):
                 raise ValueError("compiler file differs")
         finally:
             os.close(handle)

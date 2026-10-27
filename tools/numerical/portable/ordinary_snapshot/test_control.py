@@ -27,6 +27,20 @@ from ordinary_arithmetic_diagnostic import _pidfd_exited, _proc_identity, check_
 import ordinary_arithmetic_diagnostic as diagnostic
 
 
+class PreOpenStat:
+    def __init__(self, original, swapped):
+        self.st_mode = original.st_mode
+        self.st_ino = swapped.st_ino
+        self.st_dev = swapped.st_dev
+        self.st_nlink = original.st_nlink
+        self.st_uid = original.st_uid
+        self.st_gid = original.st_gid
+        self.st_size = original.st_size
+        self.st_atime_ns = original.st_atime_ns
+        self.st_mtime_ns = original.st_mtime_ns
+        self.st_ctime_ns = original.st_ctime_ns
+
+
 class CompilerIdentityTest(unittest.TestCase):
     def test_rejects_untrusted_path_before_open(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
@@ -86,6 +100,109 @@ class CompilerIdentityTest(unittest.TestCase):
                                    side_effect=AssertionError("read replacement")):
                 with self.assertRaisesRegex(ValueError, "compiler file differs"):
                     builder.compiler_identity(str(compiler))
+
+    def _reuse_inode_stat(self, compiler, original, swapped):
+        real_stat = builder.os.stat
+
+        def reuse_inode(path, follow_symlinks=True):
+            # Emulate a filesystem that reuses the inode: the pre-open stat
+            # keeps the original size and times with the replacement
+            # device and inode.
+            if Path(path) == compiler:
+                return PreOpenStat(original, swapped)
+            return real_stat(path, follow_symlinks=follow_symlinks)
+
+        return reuse_inode
+
+    def _replace_then_open(self, replacement, compiler, fds):
+        opened = builder.os.open
+
+        def replace_then_open(path, flags):
+            os.replace(replacement, compiler)
+            fd = opened(path, flags)
+            fds.append(fd)
+            return fd
+
+        return replace_then_open
+
+    def test_inode_reuse_size_change_is_not_read(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            compiler = Path(directory) / "gcc"
+            compiler.write_bytes(b"compiler")
+            original = os.stat(compiler, follow_symlinks=False)
+            replacement = Path(directory) / "replacement"
+            replacement.write_bytes(b"private replacement")
+            os.utime(replacement, ns=(original.st_mtime_ns + 5_000_000_000,
+                                     original.st_ctime_ns + 5_000_000_000))
+            swapped = os.stat(replacement, follow_symlinks=False)
+            fds = []
+            with mock.patch.object(builder.shutil, "which", return_value=str(compiler)), \
+                 mock.patch.object(builder.os, "stat",
+                                   side_effect=self._reuse_inode_stat(
+                                       compiler, original, swapped)), \
+                 mock.patch.object(builder.os, "open",
+                                   side_effect=self._replace_then_open(
+                                       replacement, compiler, fds)), \
+                 mock.patch.object(builder.os, "read",
+                                   side_effect=AssertionError("read replacement")), \
+                 mock.patch.object(builder.os, "close") as close:
+                with self.assertRaisesRegex(ValueError, "compiler file differs"):
+                    builder.compiler_identity(str(compiler))
+                self.assertEqual(len(fds), 1)
+                close.assert_called_once_with(fds[0])
+
+    def test_inode_reuse_same_size_mtime_change_is_not_read(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            compiler = Path(directory) / "gcc"
+            compiler.write_bytes(b"compiler")
+            original = os.stat(compiler, follow_symlinks=False)
+            replacement = Path(directory) / "replacement"
+            replacement.write_bytes(b"Compiler")
+            os.utime(replacement, ns=(original.st_mtime_ns + 5_000_000_000,
+                                     original.st_mtime_ns + 5_000_000_000))
+            swapped = os.stat(replacement, follow_symlinks=False)
+            fds = []
+            with mock.patch.object(builder.shutil, "which", return_value=str(compiler)), \
+                 mock.patch.object(builder.os, "stat",
+                                   side_effect=self._reuse_inode_stat(
+                                       compiler, original, swapped)), \
+                 mock.patch.object(builder.os, "open",
+                                   side_effect=self._replace_then_open(
+                                       replacement, compiler, fds)), \
+                 mock.patch.object(builder.os, "read",
+                                   side_effect=AssertionError("read replacement")), \
+                 mock.patch.object(builder.os, "close") as close:
+                with self.assertRaisesRegex(ValueError, "compiler file differs"):
+                    builder.compiler_identity(str(compiler))
+                self.assertEqual(len(fds), 1)
+                close.assert_called_once_with(fds[0])
+
+    def test_inode_reuse_same_size_same_mtime_change_is_not_read(self):
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+            compiler = Path(directory) / "gcc"
+            compiler.write_bytes(b"compiler")
+            original = os.stat(compiler, follow_symlinks=False)
+            time.sleep(0.01)
+            replacement = Path(directory) / "replacement"
+            replacement.write_bytes(b"Compiler")
+            os.utime(replacement, ns=(original.st_mtime_ns, original.st_mtime_ns))
+            swapped = os.stat(replacement, follow_symlinks=False)
+            self.assertNotEqual(swapped.st_ctime_ns, original.st_ctime_ns)
+            fds = []
+            with mock.patch.object(builder.shutil, "which", return_value=str(compiler)), \
+                 mock.patch.object(builder.os, "stat",
+                                   side_effect=self._reuse_inode_stat(
+                                       compiler, original, swapped)), \
+                 mock.patch.object(builder.os, "open",
+                                   side_effect=self._replace_then_open(
+                                       replacement, compiler, fds)), \
+                 mock.patch.object(builder.os, "read",
+                                   side_effect=AssertionError("read replacement")), \
+                 mock.patch.object(builder.os, "close") as close:
+                with self.assertRaisesRegex(ValueError, "compiler file differs"):
+                    builder.compiler_identity(str(compiler))
+                self.assertEqual(len(fds), 1)
+                close.assert_called_once_with(fds[0])
 
     def test_raced_symlink_does_not_open_target(self):
         with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
