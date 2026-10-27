@@ -63,10 +63,12 @@ acknowledging the birth. The record contains creator TID and TGID, child TID
 and TGID, kernel PPID, live start tick, boot-clock observation, actual
 first-stop status, and shared-address-space state. A `vfork` child is marked
 as shared before exec. A process clone event carries an unknown shared-space
-state until raw clone flags are checked. The tracer transfers a pidfd for
-each new process group. A snapshot freezes every traced thread, drains births
-and exits, records the exact held roster, and reads one RSS value per live
-TGID. It resumes each saved ptrace operation and signal. One five-second
+state until raw clone flags are checked. A thread clone shares its thread
+group address space. The child stop can arrive before the creator clone event. The birth therefore
+resolves that state from the child identity. The arrival order does not change
+it. The tracer transfers a pidfd for each new process group.
+A snapshot freezes every traced thread, drains births and exits, records the
+exact held roster, and reads one RSS value per live TGID. It resumes each saved ptrace operation and signal. One five-second
 deadline covers FREEZE, the held read, and RESUME. The tracer root is included
 in RSS.
 An unknown executable stays in the `other` role. Missing RSS, an unproved

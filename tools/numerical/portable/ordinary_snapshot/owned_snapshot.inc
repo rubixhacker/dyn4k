@@ -176,6 +176,8 @@ owned_pidfd(int pid)
 static void owned_command(const char *packet);
 static void owned_release_birth_holds(void);
 static void owned_child_stop(int child_tid, int status);
+static unsigned int owned_birth_shared_vm(unsigned int event,
+					  int child_group, int child_tid);
 
 static void
 owned_send(const char *packet, int handle)
@@ -234,6 +236,10 @@ owned_join(struct owned_birth *birth)
 		return;
 	if (owned_inject_event_failure)
 		owned_fail("EVENT_SEND");
+	/* The guard above requires the event and the child stop.
+	 * The birth then resolves the state from the child identity. */
+	birth->shared_vm = owned_birth_shared_vm(birth->event,
+						 birth->tgid, birth->tid);
 	char payload[256];
 	int size = snprintf(payload, sizeof(payload),
 		"%lu %d %d %d %d %u %llu %lld %d %llu %u %u",
@@ -248,6 +254,20 @@ owned_join(struct owned_birth *birth)
 	birth->acknowledged = true;
 	if (!owned_freezing)
 		owned_release_birth_holds();
+}
+
+/*
+ * Return the shared-address-space state for a birth event.
+ * A thread clone shares its thread group address space.
+ */
+static unsigned int
+owned_birth_shared_vm(unsigned int event, int child_group, int child_tid)
+{
+	if (event == PTRACE_EVENT_VFORK)
+		return 1;
+	if (event == PTRACE_EVENT_CLONE)
+		return child_group != child_tid ? 1 : 2;
+	return 0;
 }
 
 static void
@@ -268,8 +288,6 @@ owned_birth_event(int creator_tid, unsigned int event, unsigned long child)
 	birth->creator_tgid = creator_tgid;
 	birth->event = event;
 	owned_inject_drain_birth = false;
-	birth->shared_vm = event == PTRACE_EVENT_VFORK ? 1 :
-			   event == PTRACE_EVENT_CLONE ? 2 : 0;
 	birth->ordinal = 1;
 	for (size_t i = 0; i < owned_birth_count; ++i)
 		if (&owned_births[i] != birth && owned_births[i].event_seen &&
@@ -294,8 +312,6 @@ owned_child_stop(int child_tid, int status)
 		owned_fail("BOOT_CLOCK");
 	birth->boot_ns = (unsigned long long) boot.tv_sec * 1000000000ULL + boot.tv_nsec;
 	birth->first_stop_status = (unsigned int) status;
-	if (birth->tgid != child_tid)
-		birth->shared_vm = 1;
 	birth->stop_seen = true;
 	struct owned_tid *row = owned_tid_row(child_tid, true);
 	row->tgid = birth->tgid;

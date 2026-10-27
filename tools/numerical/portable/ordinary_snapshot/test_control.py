@@ -1520,6 +1520,59 @@ class NativeSnapshotControlTest(unittest.TestCase):
                         attempt.capture(final_stdout, final_stderr, process.returncode)
                     owned.close()
 
+    def test_thread_clone_birth_reports_shared_state(self):
+        # The birth resolves the shared-address-space state from the child
+        # identity.
+        binary = os.environ.get("DYN4K_PRIVATE_STRACE")
+        if not binary:
+            self.skipTest("private tracer path is not provided")
+        with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as build_dir:
+            fixture = Path(build_dir) / "toy"
+            subprocess.run(["gcc", "-O2", "-pthread",
+                            str(Path(__file__).with_name("toy.c")), "-o",
+                            str(fixture)], check=True, timeout=20)
+            for attempt_index in range(20):
+                with self.subTest(attempt=attempt_index), NativeAttempt(
+                        f"thread-clone-birth-{attempt_index}") as attempt:
+                    scratch = attempt.scratch
+                    owned = SnapshotOwnedProcesses(scratch, scratch,
+                                                   _proc_identity, _pidfd_exited,
+                                                   check_retained)
+                    environment = owned.prepare("stage", os.environ)
+                    trace = scratch / "trace"
+                    process = subprocess.Popen(
+                        [binary, "-f", "-ff", "-ttt", "-e", "trace=process",
+                         "-o", str(trace), str(fixture), "nested"],
+                        env=environment, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE)
+                    try:
+                        owned.launch("stage", process, trace)
+                        deadline = time.monotonic() + 3
+                        failure = None
+                        while (process.poll() is None and
+                               time.monotonic() < deadline):
+                            try:
+                                owned.pump({"stage"})
+                            except Exception as error:
+                                failure = error
+                                break
+                            time.sleep(0.005)
+                        stdout, stderr = process.communicate(timeout=3)
+                        self.assertIsNone(failure,
+                                          getattr(failure, "detail", None))
+                        self.assertEqual(process.returncode, 0, stderr)
+                        threads = [(tid, row) for tid, row in
+                                   owned.births["stage"].items()
+                                   if row["event"] == 3 and row["tgid"] != tid]
+                        self.assertEqual(len(threads), 1)
+                        self.assertEqual(threads[0][1]["shared_vm"], 1)
+                        attempt.capture(stdout, stderr, process.returncode)
+                    finally:
+                        if process.poll() is None:
+                            process.kill()
+                        process.communicate(timeout=3)
+                        owned.close()
+
     def test_held_process_has_exact_live_identity_and_resumes(self):
         binary = os.environ.get("DYN4K_PRIVATE_STRACE")
         if not binary:
@@ -1675,6 +1728,43 @@ class NativeSnapshotControlTest(unittest.TestCase):
                     sentinel.kill()
                 sentinel.wait(timeout=3)
                 owned.close()
+
+
+class BirthSharedStateTest(unittest.TestCase):
+    # A thread clone must report shared_vm 1.
+    def _birth(self, shared_vm, child=1001, group=1000, event=3):
+        directory = tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"])
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        boot_ns = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+
+        def read_identity(pid):
+            return {"pid": pid, "parent_pid": 900, "group_pid": group,
+                    "session_pid": group, "start_ticks": 11, "affinity": []}
+
+        owned = SnapshotOwnedProcesses(root, root, read_identity,
+                                       lambda handle: False, check_retained)
+        owned.channels["stage"] = mock.Mock()
+        owned.sequences["stage"] = 0
+        owned.roots["stage"] = (group, root / "trace")
+        owned.bound[group] = {"phase": "stage", "handle": 99,
+                              "identity": {"start_ticks": 11}}
+        owned.threads["stage"] = {group: {"tgid": group, "start_ticks": 11}}
+        owned.births["stage"] = {}
+        parts = ["BIRTH", "1", "1", str(group), str(group), str(child),
+                 str(group), str(event), "11", "100", "900", str(boot_ns),
+                 "127", str(shared_vm)]
+        return owned, parts
+
+    def test_thread_clone_reports_shared_state(self):
+        owned, parts = self._birth(1)
+        self.assertEqual(owned._apply("stage", parts, None), "BIRTH")
+
+    def test_thread_clone_with_process_value_is_rejected(self):
+        owned, parts = self._birth(2)
+        with self.assertRaises(SnapshotIncomplete) as failure:
+            owned._apply("stage", parts, None)
+        self.assertEqual(failure.exception.detail["reason"], "BIRTH_IDENTITY")
 
 
 if __name__ == "__main__":
