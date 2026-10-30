@@ -358,10 +358,10 @@ jobs:
       - name: Package Linux publication evidence
         if: always()
         run: >-
-          python3 tools/qualification/publication.py package
-          --candidate-sha "$GITHUB_SHA"
-          --audit "$RUNNER_TEMP/artifact-audit.json"
-          --output "$RUNNER_TEMP/ubuntu-publication"
+          ./gradlew -p tools/harness :qualification:packagePublication --console=plain -q
+          --args="package --candidate-sha $GITHUB_SHA
+          --audit $RUNNER_TEMP/artifact-audit.json
+          --output $RUNNER_TEMP/ubuntu-publication"
       - name: Record every required runtime lane
         if: always()
         run: >-
@@ -536,10 +536,10 @@ jobs:
       - name: Package hosted publication evidence
         if: always()
         run: >-
-          python tools/qualification/publication.py package
-          --candidate-sha "${{ github.sha }}"
-          --audit "${{ runner.temp }}/artifact-audit.json"
-          --output "${{ runner.temp }}/hosted-publication"
+          ./gradlew -p tools/harness :qualification:packagePublication --console=plain -q
+          --args="package --candidate-sha ${{ github.sha }}
+          --audit ${{ runner.temp }}/artifact-audit.json
+          --output ${{ runner.temp }}/hosted-publication"
       - name: Upload hosted publication bytes
         if: always()
         uses: actions/upload-artifact@v4

@@ -51,8 +51,8 @@ The port is not finished. At 2026-10-30 the tree still held **323 Python files, 
 | `tools/diagnostic` | 2,238 | not started (Windows collision controls) |
 | `scripts`, `docs/guide`, `consumers` | 1,293 | not started |
 
-52 `python3` invocations remain across `qualification.yml` (27), `qualification-source-checks.yml` (13)
-and `full-staged-native-host.yml` (12). A step may only move to Kotlin once its module is ported and
+70 Python invocations remain in the workflows (49 of them `python3`, 21 bare `python`), across
+`qualification.yml`, `qualification-source-checks.yml` and `full-staged-native-host.yml`. A step may only move to Kotlin once its module is ported and
 `tools/compatibility/test_qualification_workflow.py` asserts the new command.
 
 ### The vector generators must be deleted last, and they count against the total
@@ -82,7 +82,7 @@ deleted alone. Measured on 2026-10-30:
 | `collection.py` | 1,503 | **deleted** 2026-10-30, with `test_collection.py` and `test_cross_run_collection.py` |
 | `test_publication.py` | 1,516 | imported as a fixture builder by `test_artifact.py:41` and `test_full_hosted.py:22/1388/1558/2227`; `qualification-source-checks.yml:143`; `test_qualification_workflow.py:499/882` string-match that workflow line |
 | `artifact.py` | 621 | `full_hosted.py:25` (`run`), `qualify.py:1614` and `:1701`, `independent_gates.py:3300`, `test_artifact.py:13`, `qualification.yml:374`, `:636`, `:1074` |
-| `publication.py` | 87 | `test_publication.py:16`, `qualification.yml:361` and `:539` |
+| `publication.py` | 87 | **workflow steps switched** 2026-10-30 to `:qualification:packagePublication`; still imported by `test_publication.py:16` |
 
 ### Parity gap: descriptor anchoring
 
