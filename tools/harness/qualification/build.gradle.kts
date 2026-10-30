@@ -75,6 +75,13 @@ tasks.register<JavaExec>("hostedProbe") {
     )
 }
 
+tasks.register<JavaExec>("qualify") {
+    entryPoint(
+        "io.github.rubixhacker.harness.qualification.QualificationCli",
+        "Runs one qualification action; pass matrix, check-providers, probe, audit-staging, execute, or record with its options.",
+    )
+}
+
 tasks.register<JavaExec>("collectQualification") {
     entryPoint(
         "io.github.rubixhacker.harness.qualification.CollectionCli",

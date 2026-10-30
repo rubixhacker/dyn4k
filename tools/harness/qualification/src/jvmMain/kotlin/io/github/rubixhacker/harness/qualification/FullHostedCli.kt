@@ -3,6 +3,7 @@ package io.github.rubixhacker.harness.qualification
 import io.github.rubixhacker.harness.contract.StrictJson
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -113,10 +114,17 @@ object FullHostedCli {
         if (target == null || candidateSha == null || output == null) {
             return usage("--target, --candidate-sha, and --output are required for execution")
         }
-        return usage(
-            "execution is not ported: run full_hosted.py --target $target --candidate-sha " +
-                "$candidateSha --output $output, or use --verify on its receipt",
+        val root = repository ?: Path.of("").toAbsolutePath()
+        val result = FullHostedRun.run(root, candidateSha, target, output)
+        println(
+            PyJson.renderDefault(
+                buildJsonObject {
+                    put("status", result["status"] ?: JsonNull)
+                    put("reason", result["reason"] ?: JsonNull)
+                },
+            ),
         )
+        return if (Py.str(result["status"]) == "FULL_COMMON_PASSED") 0 else 1
     }
 
     private fun failure(error: Exception): Int {

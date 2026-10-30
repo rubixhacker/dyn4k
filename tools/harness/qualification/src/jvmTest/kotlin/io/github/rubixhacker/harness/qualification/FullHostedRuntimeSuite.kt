@@ -1356,8 +1356,10 @@ val FullHostedRuntimeContract by testSuite {
             )
             assertEquals(2, FullHostedCli.run(arrayOf("--package", "--output", "$output")))
             assertEquals(2, FullHostedCli.run(arrayOf("--verify")))
+            // Execution is ported now: a candidate that is not the checkout writes a FAILED
+            // receipt and exits 1 instead of reporting an unported mode.
             assertEquals(
-                2,
+                1,
                 FullHostedCli.run(
                     arrayOf(
                         "--target", "mingwX64", "--candidate-sha", "a".repeat(40),
