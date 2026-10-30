@@ -14,7 +14,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 
-private const val LOCK_FAILURE =
+internal const val LOCK_FAILURE =
     "FAILURE: Build failed with an exception.\n" +
         "\n" +
         "* What went wrong:\n" +
@@ -120,7 +120,7 @@ internal class SafariFixture(val root: Path = Files.createTempDirectory("safari-
     }
 }
 
-private fun processRecord(
+internal fun processRecord(
     command: List<String>,
     exitCode: Int,
     extras: Map<String, JsonElement> = emptyMap(),
@@ -141,7 +141,7 @@ private fun defaultLockCommand(repository: Path): List<String> = listOf(
     ":kotlinStoreYarnLock",
 )
 
-private fun withFixture(block: (SafariFixture) -> Unit) {
+internal fun withFixture(block: (SafariFixture) -> Unit) {
     val fixture = SafariFixture()
     try {
         block(fixture)
@@ -1225,7 +1225,7 @@ val SafariPackageGraphSuite by testSuite {
     }
 }
 
-private fun streamingFlags(stdout: Long, stderr: Long): Map<String, JsonElement> = mapOf(
+internal fun streamingFlags(stdout: Long, stderr: Long): Map<String, JsonElement> = mapOf(
     "stdout_bytes_seen" to JsonPrimitive(stdout),
     "stderr_bytes_seen" to JsonPrimitive(stderr),
     "stdout_truncated" to JsonPrimitive(false),

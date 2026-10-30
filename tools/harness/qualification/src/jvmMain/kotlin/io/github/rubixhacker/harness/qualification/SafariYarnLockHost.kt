@@ -9,6 +9,7 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.TimeUnit
 import io.github.rubixhacker.harness.contract.StrictJson
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -49,10 +50,21 @@ object SafariYarnLockHost {
         return path
     }
 
-    /** `source_bytes`: one bounded, identity-pinned diagnostic source. */
-    fun sourceBytes(repository: Path, relative: String): ByteArray {
+    /**
+     * `source_bytes`: one bounded, identity-pinned diagnostic source.
+     *
+     * [windows] selects the reference's `LockedDirectory` branch; [pathSeam] replaces the
+     * `source_path` call the reference's own suite patches. Production passes neither.
+     */
+    fun sourceBytes(
+        repository: Path,
+        relative: String,
+        windows: SafariLockedDirectoryFactory? = null,
+        pathSeam: ((Path, String) -> Path)? = null,
+    ): ByteArray {
         val root = repository.toRealPath()
-        val path = sourcePath(repository, relative)
+        val path = (pathSeam ?: ::sourcePath)(repository, relative)
+        if (windows != null) return windowsSourceBytes(windows, root, path, relative)
         val before = Files.readAttributes(path, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
         if (!before.isRegularFile) {
             throw IllegalArgumentException("non-regular diagnostic source: $relative")
@@ -72,6 +84,51 @@ object SafariYarnLockHost {
             throw IllegalArgumentException("source path identity changed: $relative")
         }
         return data
+    }
+
+    /** The Windows branch of `source_bytes`: the same bounds over a locked handle. */
+    private fun windowsSourceBytes(
+        windows: SafariLockedDirectoryFactory,
+        root: Path,
+        path: Path,
+        relative: String,
+    ): ByteArray {
+        val parent = Path.of(relative).parent ?: Path.of("")
+        val directory = windows.create(root, parent)
+        return directory.use { held ->
+            val descriptor = held.openFile(Path.of(relative).fileName.toString())
+            try {
+                val before = descriptor.stat()
+                if (before.size > SafariYarnLockRules.MAX_FILE_BYTES) {
+                    throw IllegalArgumentException("oversized diagnostic source: $relative")
+                }
+                val chunks = java.io.ByteArrayOutputStream()
+                var read = 0L
+                while (read < before.size) {
+                    val chunk = descriptor.read(
+                        minOf(64L * 1024, before.size - read).toInt(),
+                    )
+                    if (chunk.isEmpty()) {
+                        throw IllegalArgumentException("incomplete diagnostic source: $relative")
+                    }
+                    chunks.write(chunk)
+                    read += chunk.size
+                }
+                if (descriptor.read(1).isNotEmpty()) {
+                    throw IllegalArgumentException("source path identity changed: $relative")
+                }
+                val data = chunks.toByteArray()
+                val after = descriptor.stat()
+                if (before.identity() != after.identity() ||
+                    SafariReporterHost.resolvePath(path) != root.resolve(relative)
+                ) {
+                    throw IllegalArgumentException("source path identity changed: $relative")
+                }
+                data
+            } finally {
+                descriptor.close()
+            }
+        }
     }
 
     /** `source_digest`: the SHA-256 of one diagnostic source. */
@@ -97,13 +154,20 @@ object SafariYarnLockHost {
     }
 
     /** `copy_file`: archive one source input and record its identity. */
-    fun copyFile(repository: Path, relative: String, output: Path, prefix: String): JsonObject {
-        val source = sourcePath(repository, relative)
-        val data = sourceBytes(repository, relative)
+    fun copyFile(
+        repository: Path,
+        relative: String,
+        output: Path,
+        prefix: String,
+        windows: SafariLockedDirectoryFactory? = null,
+        pathSeam: ((Path, String) -> Path)? = null,
+    ): JsonObject {
+        val source = (pathSeam ?: ::sourcePath)(repository, relative)
+        val data = sourceBytes(repository, relative, windows, pathSeam)
         val destination = output.resolve(prefix).resolve(relative)
         destination.parent?.let { Files.createDirectories(it) }
         Files.write(destination, data)
-        val sourceReal = source.toRealPath()
+        val sourceReal = SafariReporterHost.resolvePath(source)
         return buildJsonObject {
             put("path", JsonPrimitive(output.relativize(destination).toString().replace('\\', '/')))
             put("sha256", JsonPrimitive(io.github.rubixhacker.harness.contract.Sha256.of(data)))
@@ -153,11 +217,16 @@ object SafariYarnLockHost {
         command: List<String>? = null,
         deadlineSeconds: Int = SafariYarnLockRules.MAX_PROCESS_SECONDS,
         windows: Boolean = DefaultHostEnvironment.isWindows(),
+        group: SafariPosixGroup = DefaultSafariPosixGroup,
+        drain: SafariPosixDrain? = null,
+        openSink: (Path) -> Sink = { Sink(it) },
+        maxDrainSeconds: Double = SafariYarnLockRules.MAX_DRAIN_SECONDS.toDouble(),
     ): JsonObject {
         if (windows) {
             throw UnsupportedOperationException(
                 "Safari lock task is not supported on this host: the Windows job-object runner " +
-                    "(_run_lock_task_windows, CreateFileW/job objects) is not ported",
+                    "(_run_lock_task_windows, CreateFileW/job objects) has no JVM equivalent; " +
+                    "it runs only through SafariWindowsProcess's injected kernel",
             )
         }
         val resolved = command ?: listOf(
@@ -167,54 +236,54 @@ object SafariYarnLockHost {
             "--rerun-tasks",
             ":kotlinStoreYarnLock",
         )
-        duringLaunchGuard()
-        val started = FullHostedRuntime.nowNs()
-        val builder = ProcessBuilder(resolved).directory(repository.toFile())
-        val process = builder.start()
         output.resolve("stdout.txt").parent?.let { Files.createDirectories(it) }
-        val stdoutSink = Sink(output.resolve("stdout.txt"))
-        val stderrSink = Sink(output.resolve("stderr.txt"))
-        val stdoutThread = Thread { stdoutSink.drain(process.inputStream) }
-        val stderrThread = Thread { stderrSink.drain(process.errorStream) }
-        stdoutThread.start()
-        stderrThread.start()
-        var timedOut = false
-        val deadline = System.nanoTime() + deadlineSeconds.toLong() * 1_000_000_000L
-        while (process.isAlive && System.nanoTime() < deadline) {
-            Thread.sleep(20)
+        val stdoutSink = openSink(output.resolve("stdout.txt"))
+        val stderrSink = try {
+            openSink(output.resolve("stderr.txt"))
+        } catch (error: Throwable) {
+            stdoutSink.close()
+            throw error
         }
-        if (process.isAlive) {
-            timedOut = true
-            process.destroyForcibly()
-        }
-        process.waitFor(SafariYarnLockRules.MAX_DRAIN_SECONDS.toLong(), TimeUnit.SECONDS)
-        stdoutThread.join(SafariYarnLockRules.MAX_DRAIN_SECONDS.toLong() * 1000)
-        stderrThread.join(SafariYarnLockRules.MAX_DRAIN_SECONDS.toLong() * 1000)
-        val incomplete = stdoutThread.isAlive || stderrThread.isAlive
-        stdoutSink.close()
-        stderrSink.close()
-        val finished = FullHostedRuntime.nowNs()
-        return buildJsonObject {
-            put("command", kotlinx.serialization.json.JsonArray(resolved.map { JsonPrimitive(it) }))
-            put("pid", JsonPrimitive(process.pid()))
-            put("exit_code", JsonPrimitive(if (process.isAlive) null else process.exitValue()).let {
-                if (process.isAlive) kotlinx.serialization.json.JsonNull else it
-            })
-            put("started_ns", JsonPrimitive(started))
-            put("finished_ns", JsonPrimitive(finished))
-            put("deadline_seconds", JsonPrimitive(deadlineSeconds))
-            put("timed_out", JsonPrimitive(timedOut))
-            put("stream_incomplete", JsonPrimitive(incomplete))
-            put("stdout_bytes_seen", JsonPrimitive(stdoutSink.seen))
-            put("stderr_bytes_seen", JsonPrimitive(stderrSink.seen))
-            put(
-                "stdout_truncated",
-                JsonPrimitive(stdoutSink.seen > SafariYarnLockRules.MAX_FILE_BYTES),
-            )
-            put(
-                "stderr_truncated",
-                JsonPrimitive(stderrSink.seen > SafariYarnLockRules.MAX_FILE_BYTES),
-            )
+        try {
+            duringLaunchGuard()
+            val started = FullHostedRuntime.nowNs()
+            val process = group.launch(resolved, repository)
+            try {
+                val result = (drain ?: DefaultSafariPosixDrain).drain(
+                    process,
+                    resolved,
+                    stdoutSink,
+                    stderrSink,
+                    started,
+                    deadlineSeconds,
+                    maxDrainSeconds,
+                )
+                var alive = false
+                try {
+                    group.probe(process)
+                    alive = true
+                } catch (error: SafariNoSuchProcess) {
+                    // The process group is gone; that is the clean outcome.
+                }
+                if (alive) result["stream_incomplete"] = JsonPrimitive(true)
+                result["finished_ns"] = JsonPrimitive(FullHostedRuntime.nowNs())
+                return JsonObject(result)
+            } finally {
+                try {
+                    group.kill(process)
+                } catch (error: SafariNoSuchProcess) {
+                    // Already gone.
+                }
+                if (!process.waitFor(maxDrainSeconds)) {
+                    process.destroyForcibly()
+                    process.waitFor(maxDrainSeconds)
+                }
+                runCatching { process.stdout.close() }
+                runCatching { process.stderr.close() }
+            }
+        } finally {
+            stdoutSink.close()
+            stderrSink.close()
         }
     }
 
@@ -226,15 +295,28 @@ object SafariYarnLockHost {
     }
 
     /** One bounded, truncating stream sink. */
-    internal class Sink(private val path: Path) {
+    class Sink(
+        private val path: Path,
+        private val limit: Long = SafariYarnLockRules.MAX_FILE_BYTES.toLong(),
+    ) {
         var seen: Long = 0
             private set
+        private var written: Long = 0
         private val out = Files.newOutputStream(
             path,
             StandardOpenOption.CREATE,
             StandardOpenOption.TRUNCATE_EXISTING,
             StandardOpenOption.WRITE,
         )
+
+        fun append(chunk: ByteArray, count: Int) {
+            seen += count
+            val writable = minOf(count.toLong(), maxOf(0L, limit - written)).toInt()
+            if (writable > 0) {
+                out.write(chunk, 0, writable)
+                written += writable
+            }
+        }
 
         fun drain(stream: java.io.InputStream) {
             val buffer = ByteArray(64 * 1024)
@@ -245,16 +327,9 @@ object SafariYarnLockHost {
                     return
                 }
                 if (read <= 0) return
-                seen += read
-                val writable = minOf(read.toLong(), SafariYarnLockRules.MAX_FILE_BYTES.toLong() - written).toInt()
-                if (writable > 0) {
-                    out.write(buffer, 0, writable)
-                    written += writable
-                }
+                append(buffer, read)
             }
         }
-
-        private var written: Long = 0
 
         fun close() {
             runCatching { out.close() }
@@ -415,5 +490,181 @@ internal fun capturePackageGraph(
             }
         }
         receipt["package_graph_errors"] = JsonArray(errors.map { JsonPrimitive(it) })
+    }
+}
+
+/** `ProcessLookupError`: the process group is gone. */
+class SafariNoSuchProcess : Exception()
+
+/** A launched child, as `_run_lock_task_posix` drives it. */
+interface SafariGroupedProcess {
+    val pid: Long
+    val stdout: java.io.InputStream
+    val stderr: java.io.InputStream
+    fun isAlive(): Boolean
+    fun exitCode(): Int?
+    fun destroyForcibly()
+    /** `process.wait(timeout=...)`; `false` means `TimeoutExpired`. */
+    fun waitFor(timeoutSeconds: Double): Boolean
+}
+
+/** `subprocess.Popen(..., start_new_session=True)`, `os.killpg(pid, 0)`, `os.killpg(pid, SIGKILL)`. */
+interface SafariPosixGroup {
+    fun launch(command: List<String>, repository: Path): SafariGroupedProcess
+
+    /** `os.killpg(process.pid, 0)`; throws [SafariNoSuchProcess] when the group is empty. */
+    fun probe(process: SafariGroupedProcess)
+
+    /** `os.killpg(process.pid, signal.SIGKILL)`. */
+    fun kill(process: SafariGroupedProcess)
+}
+
+/**
+ * The production group: a new session, a descendant probe, and a forced kill.
+ *
+ * `killpg` has no Java API; the port probes and kills the process's live descendants instead of its
+ * process id's group. A `start_new_session` child's group is normally exactly its descendant tree,
+ * so the probe answers the same question for the processes this diagnostic starts.
+ */
+object DefaultSafariPosixGroup : SafariPosixGroup {
+    /** `setsid` gives the child its own session, the way `start_new_session=True` does. */
+    private val setsid: String? = findExecutable("setsid")
+
+    /** `kill -s 0 -- -<pid>` asks the kernel whether the process group still has a member. */
+    private val kill: String? = findExecutable("kill")
+
+    private fun usesSetsid(): Boolean = setsid != null
+
+    override fun launch(command: List<String>, repository: Path): SafariGroupedProcess {
+        val prefix = setsid?.let { listOf(it) } ?: emptyList()
+        val process = ProcessBuilder(prefix + command).directory(repository.toFile()).start()
+        return JvmGroupedProcess(process)
+    }
+
+    override fun probe(process: SafariGroupedProcess) {
+        if (usesSetsid() && signal("0", process.pid) == 0) return
+        if (!usesSetsid() && liveDescendants(process)) return
+        throw SafariNoSuchProcess()
+    }
+
+    override fun kill(process: SafariGroupedProcess) {
+        if (usesSetsid()) signal("KILL", process.pid)
+        val jvm = (process as? JvmGroupedProcess)?.process
+        if (jvm == null) {
+            process.destroyForcibly()
+            return
+        }
+        jvm.toHandle().descendants().forEach { handle -> runCatching { handle.destroyForcibly() } }
+        if (jvm.isAlive) jvm.destroyForcibly()
+    }
+
+    private fun signal(name: String, pid: Long): Int? {
+        val binary = kill ?: return null
+        return try {
+            val signal = ProcessBuilder(binary, "-s", name, "--", "-$pid")
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .start()
+            if (signal.waitFor(5, TimeUnit.SECONDS)) signal.exitValue() else null
+        } catch (error: java.io.IOException) {
+            null
+        }
+    }
+
+    private fun liveDescendants(process: SafariGroupedProcess): Boolean {
+        val jvm = (process as? JvmGroupedProcess)?.process ?: return process.isAlive()
+        return jvm.toHandle().descendants().anyMatch { it.isAlive }
+    }
+
+    private fun findExecutable(name: String): String? {
+        val candidates = listOf(
+            System.getenv("PATH")?.split(java.io.File.pathSeparator) ?: emptyList(),
+            listOf("/usr/bin", "/bin", "/usr/local/bin"),
+        ).flatten()
+        for (directory in candidates) {
+            if (directory.isEmpty()) continue
+            val path = Path.of(directory).resolve(name)
+            if (Files.isRegularFile(path) && Files.isExecutable(path)) return path.toString()
+        }
+        return null
+    }
+
+    internal class JvmGroupedProcess(val process: java.lang.Process) : SafariGroupedProcess {
+        override val pid: Long = process.pid()
+        override val stdout: java.io.InputStream = process.inputStream
+        override val stderr: java.io.InputStream = process.errorStream
+
+        override fun isAlive(): Boolean = process.isAlive
+
+        override fun exitCode(): Int? = if (process.isAlive) null else process.exitValue()
+
+        override fun destroyForcibly() {
+            process.destroyForcibly()
+        }
+
+        override fun waitFor(timeoutSeconds: Double): Boolean =
+            process.waitFor((timeoutSeconds * 1000).toLong(), TimeUnit.MILLISECONDS)
+    }
+}
+
+/** `_drain_lock_task_posix` as a seam: the selector setup the reference suite can make fail. */
+fun interface SafariPosixDrain {
+    fun drain(
+        process: SafariGroupedProcess,
+        command: List<String>,
+        stdoutSink: SafariYarnLockHost.Sink,
+        stderrSink: SafariYarnLockHost.Sink,
+        started: Long,
+        deadlineSeconds: Int,
+        maxDrainSeconds: Double,
+    ): LinkedHashMap<String, JsonElement>
+}
+
+/** The thread-based drain: bounded reads, a deadline, and truncation accounting. */
+object DefaultSafariPosixDrain : SafariPosixDrain {
+    override fun drain(
+        process: SafariGroupedProcess,
+        command: List<String>,
+        stdoutSink: SafariYarnLockHost.Sink,
+        stderrSink: SafariYarnLockHost.Sink,
+        started: Long,
+        deadlineSeconds: Int,
+        maxDrainSeconds: Double,
+    ): LinkedHashMap<String, JsonElement> {
+        val stdoutThread = Thread { stdoutSink.drain(process.stdout) }
+        val stderrThread = Thread { stderrSink.drain(process.stderr) }
+        stdoutThread.start()
+        stderrThread.start()
+        var timedOut = false
+        val deadline = System.nanoTime() + deadlineSeconds.toLong() * 1_000_000_000L
+        while (process.isAlive() && System.nanoTime() < deadline) {
+            Thread.sleep(20)
+        }
+        if (process.isAlive()) {
+            timedOut = true
+            process.destroyForcibly()
+        }
+        process.waitFor(maxDrainSeconds)
+        stdoutThread.join((maxDrainSeconds * 1000).toLong())
+        stderrThread.join((maxDrainSeconds * 1000).toLong())
+        val incomplete = stdoutThread.isAlive || stderrThread.isAlive
+        val result = LinkedHashMap<String, JsonElement>()
+        result["command"] = JsonArray(command.map { JsonPrimitive(it) })
+        result["pid"] = JsonPrimitive(process.pid)
+        result["exit_code"] = process.exitCode()?.let { JsonPrimitive(it) } ?: JsonNull
+        result["started_ns"] = JsonPrimitive(started)
+        result["finished_ns"] = JsonPrimitive(FullHostedRuntime.nowNs())
+        result["deadline_seconds"] = JsonPrimitive(deadlineSeconds)
+        result["timed_out"] = JsonPrimitive(timedOut)
+        result["stream_incomplete"] = JsonPrimitive(incomplete)
+        result["stdout_bytes_seen"] = JsonPrimitive(stdoutSink.seen)
+        result["stderr_bytes_seen"] = JsonPrimitive(stderrSink.seen)
+        result["stdout_truncated"] = JsonPrimitive(
+            stdoutSink.seen > SafariYarnLockRules.MAX_FILE_BYTES,
+        )
+        result["stderr_truncated"] = JsonPrimitive(
+            stderrSink.seen > SafariYarnLockRules.MAX_FILE_BYTES,
+        )
+        return result
     }
 }

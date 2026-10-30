@@ -7,6 +7,7 @@ Kotlin contract must reproduce, at the git revision recorded in the file.
 
     python3 tools/harness/qualification/parity/generate_safari_yarn_vectors.py
 """
+import hashlib
 import json
 import subprocess
 import sys
@@ -130,6 +131,13 @@ def main():
         add("        " + kotlin(configuration) + " to listOf("
             + ", ".join(kotlin(a) for a in s.full_hosted_command(
                 Path("/repo"), "/tmp/qualification.init.gradle", configuration, "a" * 32)) + "),")
+    add("    )")
+    add()
+    add("    val INIT_SCRIPT_SHA256 = listOf(")
+    for configuration in ("development", "production"):
+        digest = hashlib.sha256(
+            s.full_hosted.init_script("jsSafari", configuration).encode()).hexdigest()
+        add("        " + kotlin(configuration) + " to " + kotlin(digest) + ",")
     add("    )")
     add()
     add("    val HOSTED_EXPECTED_FILES = listOf(")

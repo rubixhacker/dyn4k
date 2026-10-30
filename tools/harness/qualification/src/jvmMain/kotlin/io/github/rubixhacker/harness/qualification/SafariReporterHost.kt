@@ -423,6 +423,10 @@ object SafariReporterHost {
         candidateSha: String,
         projects: List<String>,
         outputInput: Path,
+        windows: Boolean = DefaultHostEnvironment.isWindows(),
+        windowsDirectories: SafariLockedDirectoryFactory = SafariLockedDirectoryFactory { root, relative ->
+            LockedDirectory(root, relative)
+        },
         body: (StagedSafari) -> Unit,
     ): JsonObject {
         val repository = resolvePath(repositoryInput)
@@ -437,8 +441,28 @@ object SafariReporterHost {
             throw IllegalArgumentException("invalid Safari reporter projects")
         }
         val state = StageState(Sha256.of(content))
-        if (DefaultHostEnvironment.isWindows()) {
-            stageWindows(repository, projects, content, output, state)
+        if (windows) {
+            try {
+                stageWindows(
+                    repository,
+                    projects,
+                    content,
+                    output,
+                    state,
+                    windowsDirectories,
+                ) { body(StagedSafari(state)) }
+            } catch (error: IOException) {
+                if (state.status != "CLEAN") {
+                    throw SafariStageFailure(state.snapshot(), stageFailureMessage(state))
+                }
+                throw error
+            } catch (error: IllegalArgumentException) {
+                if (state.status != "CLEAN") {
+                    throw SafariStageFailure(state.snapshot(), stageFailureMessage(state))
+                }
+                throw error
+            }
+            return state.snapshot()
         }
         val created = mutableListOf<Created>()
         try {
@@ -463,11 +487,13 @@ object SafariReporterHost {
     }
 
     /**
-     * `safari_reporter._stage_windows`: the Windows locked-directory stage.
+     * `safari_reporter._stage_windows`: the locked-directory stage.
      *
-     * Not ported: the reference depends on `CreateFileW` share modes and directory handles that
-     * can be deleted while open, which has no faithful JVM equivalent here. Staging on a Windows
-     * host fails closed instead of degrading to a weaker cleanup.
+     * Every directory component is held open, the staged file is removed through the held handle,
+     * and the staging directory is unlinked while its handle is open. [directories] is the
+     * `safari_windows_file.LockedDirectory` the reference imports; production supplies the
+     * fail-closed kernel above, and the reference suite supplies the fake it installs over
+     * `ctypes.WinDLL`.
      */
     internal fun stageWindows(
         repository: Path,
@@ -475,10 +501,244 @@ object SafariReporterHost {
         content: ByteArray,
         output: Path,
         state: StageState,
-    ): Nothing = throw UnsupportedOperationException(
-        "Safari reporter staging is not supported on this host: the Windows locked-directory " +
-            "stage (safari_windows_file.LockedDirectory) is not ported",
+        directories: SafariLockedDirectoryFactory,
+        body: () -> Unit,
+    ) {
+        val created = mutableListOf<WindowsCreated>()
+        try {
+            for (project in projects) {
+                val relative = Path.of(canonicalPath(project))
+                val root = directories.create(repository, relative)
+                try {
+                    Files.createDirectory(root.path.resolve("karma.config.d"))
+                } catch (error: Throwable) {
+                    root.close()
+                    throw error
+                }
+                created.add(WindowsCreated(relative, root, null))
+                val directory = try {
+                    root.child("karma.config.d", removable = true)
+                } catch (error: Throwable) {
+                    throw error
+                }
+                created[created.size - 1] = WindowsCreated(relative, root, directory)
+                Files.newOutputStream(
+                    root.path.resolve("karma.config.d").resolve(SafariReporter.STAGED_NAME),
+                    StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.WRITE,
+                ).use { it.write(content) }
+                state.projects[relative.toString()] = "STAGED"
+            }
+            body()
+        } finally {
+            for (item in created.asReversed()) {
+                cleanupWindows(item, content, output, state)
+            }
+        }
+    }
+
+    private class WindowsCreated(
+        val relative: Path,
+        val root: SafariLockedDirectory,
+        val directory: SafariLockedDirectory?,
     )
+
+    private fun cleanupWindows(
+        item: WindowsCreated,
+        content: ByteArray,
+        output: Path,
+        state: StageState,
+    ) {
+        val key = item.relative.toString()
+        val directory = item.directory
+        if (directory == null) {
+            state.status = "CHANGED"
+            state.projects[key] = "LEFTOVER"
+            state.forensic.add(
+                record(
+                    item.relative.resolve("karma.config.d").toString(),
+                    "staging directory handle unavailable",
+                ),
+            )
+            item.root.close()
+            return
+        }
+        try {
+            val unchanged = try {
+                val descriptor = directory.openFile(SafariReporter.STAGED_NAME)
+                try {
+                    val observed = descriptor.stat()
+                    observed.size == content.size.toLong() &&
+                        descriptor.read(content.size + 1).contentEquals(content)
+                } finally {
+                    descriptor.close()
+                }
+            } catch (error: IOException) {
+                false
+            } catch (error: IllegalArgumentException) {
+                false
+            }
+            if (!unchanged) {
+                state.status = "CHANGED"
+                state.projects[key] = "CHANGED"
+                state.forensic.add(
+                    forensicWindows(
+                        directory,
+                        SafariReporter.STAGED_NAME,
+                        output,
+                        item.relative.resolve(SafariReporter.STAGED_NAME),
+                    ),
+                )
+            } else {
+                state.projects[key] = "CLEAN"
+            }
+            val staged = directory.path.resolve(SafariReporter.STAGED_NAME)
+            try {
+                Files.deleteIfExists(staged)
+            } catch (error: IOException) {
+                state.status = "CHANGED"
+                state.projects[key] = "LEFTOVER"
+                state.forensic.add(record(item.relative.resolve(SafariReporter.STAGED_NAME).toString(), error.message ?: ""))
+            }
+            val leftovers = try {
+                scanWindows(directory.path)
+            } catch (error: IOException) {
+                state.status = "CHANGED"
+                state.projects[key] = "LEFTOVER"
+                state.forensic.add(record(item.relative.resolve("karma.config.d").toString(), error.message ?: ""))
+                emptyList()
+            }
+            if (leftovers.isNotEmpty()) {
+                state.status = "CHANGED"
+                state.projects[key] = "LEFTOVER"
+                state.leftovers[key] = leftovers.take(16)
+                if (leftovers.size > 16) state.leftoversTruncated.add(key)
+                for (name in leftovers.take(16)) {
+                    state.forensic.add(
+                        forensicWindows(directory, name, output, item.relative.resolve(name)),
+                    )
+                }
+            }
+        } finally {
+            if (state.leftovers[key].isNullOrEmpty()) {
+                try {
+                    directory.removeEmpty()
+                } catch (error: IOException) {
+                    state.status = "CHANGED"
+                    state.projects[key] = "LEFTOVER"
+                    state.forensic.add(
+                        record(
+                            item.relative.resolve("karma.config.d").toString(),
+                            (error.message ?: "").take(512),
+                        ),
+                    )
+                } catch (error: IllegalArgumentException) {
+                    state.status = "CHANGED"
+                    state.projects[key] = "LEFTOVER"
+                    state.forensic.add(
+                        record(
+                            item.relative.resolve("karma.config.d").toString(),
+                            (error.message ?: "").take(512),
+                        ),
+                    )
+                }
+            }
+            directory.close()
+            val residue = try {
+                Files.readAttributes(
+                    item.root.path.resolve("karma.config.d"),
+                    BasicFileAttributes::class.java,
+                    LinkOption.NOFOLLOW_LINKS,
+                )
+                true
+            } catch (error: NoSuchFileException) {
+                false
+            } catch (error: IOException) {
+                true
+            }
+            if (residue) {
+                state.status = "CHANGED"
+                state.projects[key] = "LEFTOVER"
+                state.forensic.add(
+                    record(
+                        item.relative.resolve("karma.config.d").toString(),
+                        "staging directory remains after cleanup",
+                    ),
+                )
+            }
+            item.root.close()
+        }
+    }
+
+    /** `safari_reporter._forensic_windows`: what a changed staged file held, outside the checkout. */
+    private fun forensicWindows(
+        directory: SafariLockedDirectory,
+        name: String,
+        output: Path,
+        relative: Path,
+    ): JsonObject {
+        val record = LinkedHashMap<String, JsonElement>()
+        record["path"] = JsonPrimitive(relative.toString())
+        record["original_size"] = JsonNull
+        record["retained_size"] = JsonPrimitive(0)
+        try {
+            val descriptor = directory.openFile(name)
+            val before: SafariHandleStat
+            val data: ByteArray
+            try {
+                before = descriptor.stat()
+                record["original_size"] = JsonPrimitive(before.size)
+                val retained = minOf(before.size, MAX_FRAGMENT_BYTES.toLong()).toInt()
+                data = descriptor.read(retained)
+                val after = descriptor.stat()
+                if (data.size != retained || before.identity() != after.identity()) {
+                    throw IllegalArgumentException("staged reporter changed during forensic capture")
+                }
+            } finally {
+                descriptor.close()
+            }
+            val destination = output.resolve("forensic/safari-reporter").resolve(relative)
+            destination.parent?.let { Files.createDirectories(it) }
+            Files.newOutputStream(
+                destination,
+                StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.WRITE,
+            ).use { it.write(data) }
+            record["archive_path"] = JsonPrimitive(posixRelative(output, destination))
+            record["retained_size"] = JsonPrimitive(data.size)
+            record["sha256"] = JsonPrimitive(Sha256.of(data))
+            record["truncated"] = JsonPrimitive(before.size > MAX_FRAGMENT_BYTES)
+        } catch (error: IOException) {
+            record["error"] = JsonPrimitive(error.message ?: "")
+        } catch (error: IllegalArgumentException) {
+            record["error"] = JsonPrimitive(error.message ?: "")
+        }
+        return JsonObject(record)
+    }
+
+    /** `itertools.islice(os.scandir(directory.path), 17)`, sorted by name. */
+    private fun scanWindows(directory: Path): List<String> {
+        val names = mutableListOf<String>()
+        val stream = try {
+            Files.newDirectoryStream(directory)
+        } catch (error: NoSuchFileException) {
+            throw SafariFileError("[Errno 2] No such file or directory: '$directory'")
+        }
+        stream.use {
+            for (entry in it) {
+                if (names.size >= 17) break
+                names.add(entry.fileName.toString())
+            }
+        }
+        return names.sorted()
+    }
+
+    /** `StageFailure.__init__`: name the first recorded residue path. */
+    private fun stageFailureMessage(state: StageState): String {
+        val failed = state.forensic.firstOrNull { it.containsKey("error") }
+            ?.let { Py.str(it["path"]) ?: "" } ?: "karma.config.d"
+        return "Safari reporter staging residue: " + failed.take(256)
+    }
 
     private fun cleanup(
         item: Created,
@@ -498,19 +758,19 @@ object SafariReporterHost {
         }
         // The reference keeps a descriptor on the staging directory, so a rename of that
         // directory does not redirect its reads. A path can be redirected, so the directory with
-        // the held identity is located by scanning the parent; when it cannot be found, the path
-        // itself is used and the mismatch is already reported as a changed ancestor.
+        // the held identity is located by scanning the parent; when it cannot be found, every read
+        // through the held descriptor would fail with ENOENT, and the path is not touched at all.
         val heldDirectory = if (directorySame) {
             item.directory
         } else {
-            locateHeld(item.directory.parent ?: item.root, item.directoryIdentity) ?: item.directory
+            locateHeld(item.directory.parent ?: item.root, item.directoryIdentity)
         }
         if (!rootSame || !directorySame) {
             state.status = "CHANGED"
             state.projects[projectKey] = "DIRECTORY_CHANGED"
             state.forensic.add(record(stageRelative.toString(), "staging ancestor identity changed"))
         }
-        val unchanged = try {
+        val unchanged = heldDirectory != null && try {
             stagedUnchanged(heldDirectory, content)
         } catch (error: IOException) {
             false
@@ -519,27 +779,44 @@ object SafariReporterHost {
             state.status = "CHANGED"
             if (rootSame && directorySame) state.projects[projectKey] = "CHANGED"
             state.forensic.add(
-                forensic(heldDirectory, STAGED_NAME, output, item.relative.resolve(STAGED_NAME)),
+                if (heldDirectory != null) {
+                    forensic(heldDirectory, STAGED_NAME, output, item.relative.resolve(STAGED_NAME))
+                } else {
+                    record(
+                        item.relative.resolve(STAGED_NAME).toString(),
+                        "[Errno 2] No such file or directory: '$STAGED_NAME'",
+                    )
+                },
             )
         } else if (rootSame && directorySame) {
             state.projects[projectKey] = "CLEAN"
         }
-        try {
-            unlinkNoFollow(heldDirectory.resolve(STAGED_NAME))
-        } catch (error: IOException) {
-            state.status = "CHANGED"
-            state.projects[projectKey] = "LEFTOVER"
-            state.forensic.add(
-                record(item.relative.resolve(STAGED_NAME).toString(), error.message ?: ""),
-            )
+        if (heldDirectory != null) {
+            try {
+                unlinkNoFollow(heldDirectory.resolve(STAGED_NAME))
+            } catch (error: IOException) {
+                state.status = "CHANGED"
+                state.projects[projectKey] = "LEFTOVER"
+                state.forensic.add(
+                    record(item.relative.resolve(STAGED_NAME).toString(), error.message ?: ""),
+                )
+            }
         }
-        val leftovers = try {
-            scanDirectory(heldDirectory)
-        } catch (error: IOException) {
-            state.status = "CHANGED"
-            state.projects[projectKey] = "LEFTOVER"
-            state.forensic.add(record(stageRelative.toString(), error.message ?: ""))
-            return
+        // The reference scans the held descriptor. When the directory was unlinked, the descriptor
+        // still names the empty inode the cleanup itself emptied, so the scan is empty and the path
+        // is never followed; a JVM path cannot read an unlinked directory, so its scan is empty by
+        // construction rather than by listing.
+        val leftovers = if (heldDirectory == null) {
+            emptyList()
+        } else {
+            try {
+                scanDirectory(heldDirectory)
+            } catch (error: IOException) {
+                state.status = "CHANGED"
+                state.projects[projectKey] = "LEFTOVER"
+                state.forensic.add(record(stageRelative.toString(), error.message ?: ""))
+                emptyList()
+            }
         }
         if (leftovers.isNotEmpty()) {
             state.status = "CHANGED"
@@ -547,6 +824,7 @@ object SafariReporterHost {
             state.leftovers[projectKey] = leftovers.take(16)
             if (leftovers.size > 16) state.leftoversTruncated.add(projectKey)
             for (name in leftovers.take(16)) {
+                if (heldDirectory == null) continue
                 state.forensic.add(
                     forensic(heldDirectory, name, output, item.relative.resolve(name)),
                 )

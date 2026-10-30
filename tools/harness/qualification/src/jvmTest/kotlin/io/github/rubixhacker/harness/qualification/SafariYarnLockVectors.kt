@@ -2,7 +2,7 @@
 package io.github.rubixhacker.harness.qualification
 
 internal object SafariYarnLockVectors {
-    const val REVISION = "187e465a1e562c7a79562edc5a5e068eb26ddfa9"
+    const val REVISION = "426aa651eadc4ecf5fcaec592d8e729d2193cb57"
     const val TRACKED_LOCK = "kotlin-js-store/yarn.lock"
     const val GENERATED_LOCK = "build/js/yarn.lock"
     val SOURCE_INPUTS = listOf("build.gradle.kts", "settings.gradle.kts", "gradle/wrapper/gradle-wrapper.properties")
@@ -44,6 +44,11 @@ internal object SafariYarnLockVectors {
     val FULL_HOSTED_COMMANDS = listOf(
         "development" to listOf("/repo/gradlew", "--no-daemon", "--console=plain", "--rerun-tasks", "--init-script", "/tmp/qualification.init.gradle", ":dyn4k-core:jsBrowserTest", ":dyn4k:jsBrowserTest", "-PqualificationInvocationId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
         "production" to listOf("/repo/gradlew", "--no-daemon", "--console=plain", "--rerun-tasks", "--init-script", "/tmp/qualification.init.gradle", ":dyn4k-core:jsBrowserTest", ":dyn4k:jsBrowserTest", "-PqualificationInvocationId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "-PqualificationProduction=true"),
+    )
+
+    val INIT_SCRIPT_SHA256 = listOf(
+        "development" to "89b4d3d55fe205be2810aad578b039ca3a1ddab421e70691e28a423ed9259a64",
+        "production" to "10788c388a223264f55ea0092a0af1bb8c5986ac23759433aa10dab035802954",
     )
 
     val HOSTED_EXPECTED_FILES = listOf(

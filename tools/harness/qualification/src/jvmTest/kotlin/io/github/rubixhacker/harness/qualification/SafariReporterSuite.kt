@@ -592,11 +592,12 @@ val SafariReporterSuite by testSuite {
                 ByteArray(0),
                 Path.of("out"),
                 state,
-            )
+                SafariLockedDirectoryFactory { root, relative -> LockedDirectory(root, relative) },
+            ) {}
         }
-        assertTrue(stageError.message!!.contains("is not ported"), stageError.message!!)
+        assertTrue(stageError.message!!.contains("has no JVM equivalent"), stageError.message!!)
         assertTrue(
-            stageError.message!!.contains("safari_windows_file.LockedDirectory"),
+            stageError.message!!.contains("injected kernel"),
             stageError.message!!,
         )
         val readError = assertFailsWith<UnsupportedOperationException> {

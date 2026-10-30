@@ -29,8 +29,16 @@ import kotlinx.serialization.json.put
  */
 private class WrapperRun(val returncode: Int, val stdout: ByteArray, val stderr: ByteArray)
 
-private fun runWrapper(command: List<String>, context: Path?): WrapperRun {
+private fun runWrapper(
+    command: List<String>,
+    context: Path?,
+    pathPrefix: Path? = null,
+): WrapperRun {
     val environment = LinkedHashMap(System.getenv())
+    if (pathPrefix != null) {
+        environment["PATH"] = pathPrefix.toString() +
+            java.io.File.pathSeparator + (environment["PATH"] ?: "")
+    }
     if (context == null) {
         environment.remove("DYN4K_SAFARI_LAUNCH_CONTEXT")
     } else {
@@ -455,6 +463,123 @@ val SafariLaunchWrapper by testSuite {
             deleteTree(root)
         }
     }
+    test("the wrapper uses Git Bash when the bare bash cannot run the script") {
+        val root = Files.createTempDirectory("safari-gitbash")
+        try {
+            val gitBin = root.resolve("Git/bin")
+            Files.createDirectories(gitBin)
+            val gitCommand = gitBin.resolve("git.exe")
+            Files.writeString(gitCommand, "fixture")
+            val gitBash = fixtureBash(
+                root,
+                "Git/bin/bash.exe",
+                "#!/bin/sh\nexec /bin/bash \"$@\"\n",
+            )
+            val wrongBin = root.resolve("System32")
+            Files.createDirectories(wrongBin)
+            Files.writeString(wrongBin.resolve("git.exe"), "fixture")
+            val wrongBash = fixtureBash(
+                root,
+                "System32/bash",
+                "#!/bin/sh\nprintf '%*s' 504 ' '\nexit 1\n",
+            )
+            assertTrue(Files.isExecutable(wrongBash))
+            val fakeOpen = fixtureBash(root, "fake-open", "#!/bin/bash\nexit 23\n")
+            val redirect = redirectOf(root)
+            val controlled = controlledLauncher(root, "controlled-launch.sh", fakeOpen, emptyMap())
+            val context = root.resolve("launch-context")
+            val wrong = runWrapper(
+                listOf(wrongBash.toString(), controlled.toString(), redirect.toString()),
+                context,
+                wrongBin,
+            )
+            assertEquals(1, wrong.returncode)
+            assertEquals(504, wrong.stdout.size)
+            assertFalse(Files.exists(context))
+            assertEquals(gitBash, SafariGitBash.gitBashFromGit(gitCommand))
+            val gitCmd = root.resolve("Git/cmd/git.exe")
+            Files.createDirectories(gitCmd.parent)
+            Files.writeString(gitCmd, "fixture")
+            assertEquals(gitBash, SafariGitBash.gitBashFromGit(gitCmd))
+            assertTrue(
+                "Git for Windows" in (
+                    kotlin.test.assertFailsWith<IllegalArgumentException> {
+                        SafariGitBash.gitBashFromGit(wrongBin.resolve("git.exe"))
+                    }.message ?: ""
+                    ),
+            )
+            val correct = runWrapper(
+                listOf(gitBash.toString(), controlled.toString(), redirect.toString()),
+                context,
+                wrongBin,
+            )
+            assertEquals(23, correct.returncode, wrapperFailureContext(correct, context))
+            val detail = StrictJson.load(wrapperFailureContext(correct, context)) as JsonObject
+            assertEquals(1L, Py.int((detail["files"] as JsonObject)["launch"]!!))
+            assertEquals(1, contextFiles(context, "process-", ".txt").size)
+            assertEquals(1, contextFiles(context, "launch-outcome-", ".txt").size)
+            Files.delete(gitBash)
+            assertTrue(
+                "executable is missing" in (
+                    kotlin.test.assertFailsWith<java.nio.file.NoSuchFileException> {
+                        SafariGitBash.gitBashFromGit(gitCommand)
+                    }.message ?: ""
+                    ),
+            )
+        } finally {
+            deleteTree(root)
+        }
+    }
+
+    test("Git Bash from a mingw Git uses the same installation") {
+        val root = Files.createTempDirectory("safari-gitbash-mingw")
+        try {
+            val installation = root.resolve("Git")
+            val bash = installation.resolve("bin/bash.exe")
+            Files.createDirectories(bash.parent)
+            Files.writeString(bash, "Git Bash fixture")
+            val other = root.resolve("Other/bin")
+            Files.createDirectories(other)
+            val otherBash = other.resolve("bash.exe")
+            Files.writeString(otherBash, "unrelated Bash")
+            for (architecture in listOf("mingw64", "mingw32", "ucrt64")) {
+                val git = installation.resolve(architecture).resolve("bin/git.exe")
+                Files.createDirectories(git.parent)
+                Files.writeString(git, "Git for Windows fixture")
+                assertEquals(bash, SafariGitBash.gitBashFromGit(git), architecture)
+            }
+            Files.delete(bash)
+            Files.createSymbolicLink(bash, otherBash)
+            assertTrue(
+                "leaves Git installation" in (
+                    kotlin.test.assertFailsWith<IllegalArgumentException> {
+                        SafariGitBash.gitBashFromGit(installation.resolve("mingw64/bin/git.exe"))
+                    }.message ?: ""
+                    ),
+            )
+            Files.delete(bash)
+            assertTrue(
+                "executable is missing" in (
+                    kotlin.test.assertFailsWith<java.nio.file.NoSuchFileException> {
+                        SafariGitBash.gitBashFromGit(installation.resolve("mingw64/bin/git.exe"))
+                    }.message ?: ""
+                    ),
+            )
+            val unexpected = installation.resolve("usr/bin/git.exe")
+            Files.createDirectories(unexpected.parent)
+            Files.writeString(unexpected, "unexpected layout")
+            assertTrue(
+                "Git for Windows" in (
+                    kotlin.test.assertFailsWith<IllegalArgumentException> {
+                        SafariGitBash.gitBashFromGit(unexpected)
+                    }.message ?: ""
+                    ),
+            )
+        } finally {
+            deleteTree(root)
+        }
+    }
+
 }
 
 private fun deleteTree(root: Path) {
