@@ -4,7 +4,7 @@ This harness records what ran against one staged candidate. A build or a host pr
 
 ## Hosted runner cost guard
 
-Run `python3 -B tools/qualification/guard_hosted_runners.py` from the repository root before every source push or manual `gh workflow run`. The command checks every active `.github/workflows/*.yml` and `*.yaml` file. It allows explicit Linux or Windows hosted labels and the self-hosted `mac-mini` label. It rejects GitHub-hosted macOS labels and unrecognized runner expressions. The coordinator must rerun it after integrating workflow changes.
+Run `./gradlew -p tools/harness :qualification:guardHostedRunners` from the repository root before every source push or manual `gh workflow run`. The command checks every active `.github/workflows/*.yml` and `*.yaml` file. It allows explicit Linux or Windows hosted labels and the self-hosted `mac-mini` label. It rejects GitHub-hosted macOS labels and unrecognized runner expressions. The coordinator must rerun it after integrating workflow changes.
 
 `qualification.yml` starts only through `workflow_dispatch`. Its inputs retain full qualification, Windows diagnostics, and cross-run collection routes. Push and pull request events run `qualification-source-checks.yml` on Ubuntu; that workflow runs the hosted-runner guard and focused workflow contract tests.
 

@@ -26,13 +26,10 @@ jobs:
             21
       - name: Reject hosted macOS routes
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
-        run: python3 -B tools/qualification/guard_hosted_runners.py
+        run: ./gradlew -p tools/harness :qualification:guardHostedRunners --console=plain -q
       - name: Test qualification workflow contracts
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 -B -m unittest tools.compatibility.test_qualification_workflow
-      - name: Test hosted runner guard
-        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
-        run: PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners
       - name: Test declaration ledger contracts
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: env -u OLLAMA_API_KEY -u DYN4K_BASELINE_SOURCE -u DYN4K_BASELINE_JAR -u DYN4K_BASELINE_SOURCES_JAR PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/compatibility python3 -B -m unittest -v test_ledger

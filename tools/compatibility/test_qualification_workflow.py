@@ -402,11 +402,9 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 ("uses: actions/checkout@v4", None),
                 ("uses: actions/setup-java@v4", None),
                 ("name: Reject hosted macOS routes",
-                 "python3 -B tools/qualification/guard_hosted_runners.py"),
+                 "./gradlew -p tools/harness :qualification:guardHostedRunners --console=plain -q"),
                 ("name: Test qualification workflow contracts",
                  "python3 -B -m unittest tools.compatibility.test_qualification_workflow"),
-                ("name: Test hosted runner guard",
-                 "PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners"),
                 ("name: Test declaration ledger contracts",
                  "env -u OLLAMA_API_KEY -u DYN4K_BASELINE_SOURCE "
                  "-u DYN4K_BASELINE_JAR -u DYN4K_BASELINE_SOURCES_JAR "
@@ -710,7 +708,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             "'from rotation_oracle import _MPFR; mpfr = _MPFR(); "
             "print(\"GNU MPFR\", mpfr.version)'\n"
         )
-        hosted_guard_run = "        run: python3 -B tools/qualification/guard_hosted_runners.py\n"
+        hosted_guard_run = ("        run: ./gradlew -p tools/harness "
+                            ":qualification:guardHostedRunners --console=plain -q\n")
         timeout = "    timeout-minutes: 10\n"
         mutations = (
             ("quoted job failure suppression", timeout,
@@ -793,14 +792,12 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         mutations = (
             ("job failure suppression", "    timeout-minutes: 10\n",
              "    timeout-minutes: 10\n    continue-on-error: true\n"),
-            ("runner guard body", "run: python3 -B tools/qualification/guard_hosted_runners.py",
-             "run: python3 -B tools/qualification/guard_hosted_runners.py && true"),
+            ("runner guard body",
+             "run: ./gradlew -p tools/harness :qualification:guardHostedRunners --console=plain -q",
+             "run: ./gradlew -p tools/harness :qualification:guardHostedRunners --console=plain -q && true"),
             ("workflow contract body",
              "run: python3 -B -m unittest tools.compatibility.test_qualification_workflow",
              "run: python3 -B -m unittest tools.compatibility.test_qualification_workflow -q"),
-            ("hosted runner test body",
-             "run: PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners",
-             "run: PYTHONPATH=tools/qualification python3 -B -m unittest test_guard_hosted_runners -q"),
             ("runner label", "runs-on: ubuntu-26.04", "runs-on: ubuntu-latest"),
             ("history depth", "fetch-depth: 0", "fetch-depth: 1"),
             ("archive unset", "-u DYN4K_WHEEL_ORIGIN ", ""),
@@ -1001,10 +998,10 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                              workflow_jobs_for_event(source, event), event)
         self.assertIn("runs-on: ubuntu-26.04", jobs["workflow-source-contracts"])
         self.assertIn("timeout-minutes: 10", jobs["workflow-source-contracts"])
-        self.assertIn("tools/qualification/guard_hosted_runners.py", jobs["workflow-source-contracts"])
+        self.assertIn("./gradlew -p tools/harness :qualification:guardHostedRunners",
+                      jobs["workflow-source-contracts"])
         self.assertIn("tools.compatibility.test_qualification_workflow",
                       jobs["workflow-source-contracts"])
-        self.assertIn("test_guard_hosted_runners", jobs["workflow-source-contracts"])
         self.assertNotIn("mac-mini", jobs["workflow-source-contracts"])
 
         workflows = sorted(WORKFLOW.parent.glob("*.yml")) + sorted(WORKFLOW.parent.glob("*.yaml"))
@@ -1027,7 +1024,6 @@ class QualificationWorkflowContractTest(unittest.TestCase):
              "      - uses: actions/setup-java@v4",
              "      - name: Reject hosted macOS routes",
              "      - name: Test qualification workflow contracts",
-             "      - name: Test hosted runner guard",
              "      - name: Test declaration ledger contracts",
              "      - name: Verify pinned GNU MPFR runtime",
              "      - name: Test portable Java banner controls",
