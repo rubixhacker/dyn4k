@@ -19,7 +19,7 @@ from unittest import mock
 
 import full_hosted
 import qualify
-import test_publication
+import publication_fixture
 from test_safari_yarn_lock import git_oid, replace_loose_object, write_loose_object
 
 
@@ -1385,7 +1385,7 @@ class FullHostedTests(unittest.TestCase):
         repository = self.root / "checkout"
         repository.mkdir()
         target = "tvosSimulatorArm64"
-        staging = test_publication.PublicationAuditTests().stage(repository, (target,))
+        staging = publication_fixture.PublicationFixture().stage(repository, (target,))
         self.align_synthetic_docs(repository, target)
         for module in qualify.MODULES:
             (repository / module / "src/commonMain/kotlin/api/Type.kt").write_bytes(
@@ -1555,7 +1555,7 @@ class FullHostedTests(unittest.TestCase):
             kind = destination.name
             configuration = destination.parent.name
             if kind == "stage":
-                test_publication.PublicationAuditTests().stage(repository, (target,))
+                publication_fixture.PublicationFixture().stage(repository, (target,))
                 leading_digest = self.make_staged_binary_sha1_leading_zero(repository, target)
                 self.assertEqual(40, len(leading_digest))
                 self.assertTrue(leading_digest.startswith("0") and
@@ -2224,7 +2224,7 @@ class FullHostedTests(unittest.TestCase):
                                            return_value=self.candidate_repository)
         checkout_patch.start()
         self.addCleanup(checkout_patch.stop)
-        test_publication.PublicationAuditTests().stage(self.candidate_repository,
+        publication_fixture.PublicationFixture().stage(self.candidate_repository,
                                                        (artifact_target,))
         self.align_synthetic_docs(self.candidate_repository, artifact_target)
         for relative in full_hosted.INPUTS:

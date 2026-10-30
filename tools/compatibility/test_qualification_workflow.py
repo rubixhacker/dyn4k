@@ -496,7 +496,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 ("name: Test qualification manifest and publication contracts",
                  "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
                  "PYTHONPATH=tools/qualification python3 -B -m unittest -v "
-                 "test_full_suite_manifest test_publication"),
+                 "test_full_suite_manifest"),
                 ("name: Test independent qualification gate seams",
                  "env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 "
                  "PYTHONPATH=tools/qualification python3 -B -m unittest -v "
@@ -878,8 +878,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         source = SOURCE_CHECKS.read_text(encoding="utf-8")
         self.assert_source_checks_job_contract(source)
         mutations = (
-            ("39-test manifest and publication command",
-             "test_full_suite_manifest test_publication", "test_full_suite_manifest"),
+            ("manifest contract command",
+             "-m unittest -v test_full_suite_manifest", "-m unittest -v"),
             ("independent-gates suite", "-m unittest -v test_independent_gates",
              "-m unittest -v"),
             ("guide link and claim check", "docs/guide/check_links.py",

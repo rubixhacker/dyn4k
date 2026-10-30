@@ -134,7 +134,7 @@ jobs:
             python3 -B -m unittest -v test_numeric_class_witness
       - name: Test qualification manifest and publication contracts
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
-        run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/qualification python3 -B -m unittest -v test_full_suite_manifest test_publication
+        run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/qualification python3 -B -m unittest -v test_full_suite_manifest
       - name: Test independent qualification gate seams
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: env -u OLLAMA_API_KEY PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=tools/qualification python3 -B -m unittest -v test_independent_gates

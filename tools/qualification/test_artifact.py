@@ -13,7 +13,7 @@ from unittest.mock import patch
 import artifact
 import full_hosted
 import qualify
-import test_publication
+import publication_fixture
 
 
 class RawArtifactTests(unittest.TestCase):
@@ -38,7 +38,7 @@ class RawArtifactTests(unittest.TestCase):
         groups = {group["id"]: group for group in manifest["groups"]}
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)
-            staging = test_publication.PublicationAuditTests().stage(
+            staging = publication_fixture.PublicationFixture().stage(
                 repository, (target, "jvm", "linuxX64", "js", "wasmJs", "wasmWasi", "android"))
             hashes = {module: qualify.digest(staging / qualify.target_binary_path(module, target))
                       for module in qualify.MODULES}
