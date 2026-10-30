@@ -586,6 +586,84 @@ val CollectionContract by testSuite {
         }
     }
 
+    test("the central collection rejects a commented or no-op download and upload") {
+        val workflow = Files.readString(
+            repositoryRoot().resolve(".github/workflows/qualification.yml"),
+        )
+        val jobs = workflowJobs(workflow)
+        val central = jobs.getValue("central-qualification-collection")
+        val steps = centralCollectionSteps(workflow)
+        for ((name, line) in listOf(
+            "Download every retained producer artifact" to "        uses: actions/download-artifact@v4\n",
+            "Upload central raw collection and failed routes" to "        uses: actions/upload-artifact@v4\n",
+        )) {
+            val block = steps.first { it.startsWith("      - name: $name\n") }
+            val prefix = "      - name: $name\n" +
+                (if (name.startsWith("Download")) "        id: raw_download\n" else "") +
+                "        if: always()\n"
+            val retained = if (name.startsWith("Upload")) {
+                "        # qualification-central-\${{ github.sha }}\n"
+            } else {
+                ""
+            }
+            for ((variant, replacement) in listOf(
+                "commented" to prefix + "        # " + line.trim() + "\n" +
+                    "        run: echo skipped\n" + retained,
+                "no-op" to prefix + "        run: echo skipped # " + line.trim() + "\n" + retained,
+            )) {
+                val altered = workflow.replace(
+                    central,
+                    central.replace(block, replacement),
+                )
+                assertFailsWith<AssertionError>("$name/$variant") {
+                    assertCentralCollectionContract(altered)
+                }
+            }
+        }
+    }
+
+    test("the source-checks workflow runs the cheap checks on push and pull request") {
+        val path = repositoryRoot().resolve(".github/workflows/qualification-source-checks.yml")
+        assertFailsWith<AssertionError> { assertSourceChecksContract("") }
+        val workflow = Files.readString(path)
+        assertSourceChecksContract(workflow)
+        assertEquals(listOf("push", "pull_request"), workflowEventBlocks(workflow).keys.toList())
+        assertEquals(
+            setOf("workflow-source-contracts"),
+            workflowJobs(workflow).keys,
+        )
+        val job = workflowJobs(workflow).getValue("workflow-source-contracts")
+        assertTrue("    runs-on: ubuntu-26.04\n" in job)
+        assertTrue("    timeout-minutes: 10\n" in job)
+        assertTrue(
+            "        run: ./gradlew -p tools/harness :qualification:guardHostedRunners " +
+                "--console=plain -q\n" in job,
+        )
+    }
+
+    test("the source-checks workflow rejects a comment-only or misplaced invocation") {
+        val workflow = Files.readString(
+            repositoryRoot().resolve(".github/workflows/qualification-source-checks.yml"),
+        )
+        val commentOnly = workflow.split("    steps:\n", limit = 2)[0] +
+            "    steps:\n      - run: echo no checks\n" +
+            "        # guardHostedRunners test_qualification_workflow " +
+            "test_collection python3 -B -m unittest\n"
+        for (altered in listOf(
+            commentOnly,
+            workflow.replace("  workflow-source-contracts:\n", "  unrelated-job:\n"),
+            workflow.replace(
+                "        run: ./gradlew -p tools/harness " +
+                    ":qualification:guardHostedRunners --console=plain -q",
+                "        run: echo no checks\n" +
+                    "        # ./gradlew -p tools/harness " +
+                    ":qualification:guardHostedRunners --console=plain -q",
+            ),
+        )) {
+            assertFailsWith<AssertionError> { assertSourceChecksContract(altered) }
+        }
+    }
+
     test("the workflow download survives a replay setup failure") {
         val workflow = Files.readString(
             repositoryRoot().resolve(".github/workflows/qualification.yml"),
@@ -827,6 +905,30 @@ private fun centralCollectionCommands(step: String): List<String> {
         throw AssertionError("central collection shell continuation is incomplete")
     }
     return commands
+}
+
+/**
+ * The specific source-checks assertions of `test_qualification_workflow.py` that
+ * `test_collection.py` delegates to: the trigger set, the single job, its runner and timeout, and
+ * the uncommented guard invocation.
+ */
+private fun assertSourceChecksContract(workflow: String) {
+    if (workflow.isEmpty()) throw AssertionError("source checks workflow is missing")
+    val events = workflowEventBlocks(workflow)
+    if (events.keys.toList() != listOf("push", "pull_request")) {
+        throw AssertionError("source checks must run on push and pull request")
+    }
+    val jobs = workflowJobs(workflow)
+    if (jobs.keys != setOf("workflow-source-contracts")) {
+        throw AssertionError("source checks job is missing or renamed")
+    }
+    val job = jobs.getValue("workflow-source-contracts")
+    if ("    runs-on: ubuntu-26.04\n" !in job || "    timeout-minutes: 10\n" !in job) {
+        throw AssertionError("source checks runner or timeout differs")
+    }
+    val guard = "        run: ./gradlew -p tools/harness " +
+        ":qualification:guardHostedRunners --console=plain -q\n"
+    if (guard !in job) throw AssertionError("guard invocation is missing or commented")
 }
 
 /** The subset of the workflow contract the mutation cases exercise. */

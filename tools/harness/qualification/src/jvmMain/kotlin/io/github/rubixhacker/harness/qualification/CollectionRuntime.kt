@@ -39,6 +39,58 @@ import org.apache.commons.compress.archivers.zip.ZipFile
  * with `NOFOLLOW_LINKS` and the identity is re-read before and after the operation; the Windows
  * reparse-point handle paths are not ported and fail closed. See the port report for each gap.
  */
+/**
+ * The operations `collection.py` lets its tests interpose on.
+ *
+ * An open class rather than an interface, so a subclass that overrides only `directoryNames` still
+ * reaches its own enumeration through the inherited `inventory`.
+ */
+open class CollectionIo {
+    /** `_directory_names`: the names one directory enumeration returns. */
+    open fun directoryNames(anchor: Path): List<String> =
+        Files.newDirectoryStream(anchor).use { stream ->
+            stream.map { it.fileName.toString() }.toList()
+        }
+
+    /** `digest`: the bytes of one anchored regular file. */
+    open fun digest(path: Path, limit: Long?): String = CollectionRuntime.hashFile(path, limit)
+
+    /** `_copy_regular`: freeze one regular file with a byte bound. */
+    open fun copyRegular(
+        source: Path,
+        destination: Path,
+        limit: Long,
+        preflight: Boolean,
+    ): Long = CollectionRuntime.copyFile(source, destination, limit, preflight)
+
+    /** `_file_inventory`: one directory's files and digests, through this instance's enumeration. */
+    open fun inventory(root: Path): JsonObject = CollectionRuntime.inventoryTree(root, this)
+
+    /** `subprocess.run` of the signed adapter. */
+    open fun runAdapter(command: List<String>, cwd: Path): AdapterRun {
+        val process = ProcessBuilder(command).directory(cwd.toFile()).start()
+        val stdout = process.inputStream.use { it.readBytes() }
+        val stderr = process.errorStream.use { it.readBytes() }
+        return AdapterRun(process.waitFor(), stdout, stderr)
+    }
+
+    /** `MAX_SOURCE_BYTES`: the pinned source byte cap. */
+    open val maxSourceBytes: Long get() = 10L * 1024 * 1024 * 1024
+
+    /** `MAX_EXPANDED_BYTES`: the pinned expanded byte cap. */
+    open val maxExpandedBytes: Long get() = 20L * 1024 * 1024 * 1024
+
+    /** `MAX_MEMBERS`: the pinned member count cap. */
+    open val maxMembers: Int get() = 200_000
+
+    companion object {
+        val default: CollectionIo = CollectionIo()
+    }
+}
+
+/** One finished adapter run: its exit status and both streams. */
+class AdapterRun(val exitCode: Int, val stdout: ByteArray, val stderr: ByteArray)
+
 object CollectionRuntime {
     private const val MAX_SOURCE_BYTES = 10L * 1024 * 1024 * 1024
     private const val MAX_EXPANDED_BYTES = 20L * 1024 * 1024 * 1024
@@ -46,6 +98,14 @@ object CollectionRuntime {
 
     /** `digest`: the bytes of one regular file, with a byte bound and identity pin. */
     fun digest(
+        path: Path,
+        limit: Long? = null,
+        expected: Pair<Any?, Any?>? = null,
+        io: CollectionIo = CollectionIo.default,
+    ): String = io.digest(path, limit)
+
+    /** The real byte digest of one anchored regular file. */
+    internal fun hashFile(
         path: Path,
         limit: Long? = null,
         expected: Pair<Any?, Any?>? = null,
@@ -95,11 +155,11 @@ object CollectionRuntime {
     }
 
     /** `files_in`: every raw artifact file and its digest. */
-    fun filesIn(root: Path): JsonObject {
+    fun filesIn(root: Path, io: CollectionIo = CollectionIo.default): JsonObject {
         if (Files.isSymbolicLink(root) || !Files.isDirectory(root)) {
             throw IllegalArgumentException("artifact root is missing or symbolic")
         }
-        val inventory = fileInventory(root)
+        val inventory = io.inventory(root)
         val files = LinkedHashMap<String, JsonElement>()
         for ((name, record) in inventory) {
             files[name] = (record as JsonObject)["sha256"] ?: JsonNull
@@ -108,7 +168,10 @@ object CollectionRuntime {
     }
 
     /** `_file_inventory`: one directory's files, size and digest, sorted by path. */
-    fun fileInventory(root: Path): JsonObject {
+    fun fileInventory(root: Path, io: CollectionIo = CollectionIo.default): JsonObject = io.inventory(root)
+
+    /** The real directory inventory. */
+    internal fun inventoryTree(root: Path, io: CollectionIo): JsonObject {
         val info = attributes(root)
         if (info.isSymbolicLink || !info.isDirectory) {
             throw IllegalArgumentException("source directory is missing or symbolic")
@@ -121,13 +184,10 @@ object CollectionRuntime {
             val names = mutableListOf<String>()
             val seen = mutableSetOf<String>()
             try {
-                Files.newDirectoryStream(anchor).use { stream ->
-                    for (entry in stream) {
-                        val name = entry.fileName.toString()
-                        names.add(name)
-                        if (!seen.add(name)) {
-                            throw IllegalArgumentException("duplicate source directory member")
-                        }
+                for (name in io.directoryNames(anchor)) {
+                    names.add(name)
+                    if (!seen.add(name)) {
+                        throw IllegalArgumentException("duplicate source directory member")
                     }
                 }
             } catch (error: NoSuchFileException) {
@@ -137,7 +197,7 @@ object CollectionRuntime {
                 val relative = if (prefix.isEmpty()) name else "$prefix/$name"
                 CollectionRules.filePathName(relative)
                 count++
-                if (count > MAX_MEMBERS) {
+                if (count > io.maxMembers) {
                     throw IllegalArgumentException("source directory exceeds transport bounds")
                 }
                 val child = anchor.resolve(name)
@@ -151,7 +211,7 @@ object CollectionRuntime {
                     throw IllegalArgumentException("nonregular source member")
                 } else {
                     total += childInfo.size()
-                    if (total > MAX_EXPANDED_BYTES) {
+                    if (total > io.maxExpandedBytes) {
                         throw IllegalArgumentException("source directory exceeds transport bounds")
                     }
                     val hashed = MessageDigest.getInstance("SHA-256")
@@ -162,7 +222,7 @@ object CollectionRuntime {
                             val countRead = stream.read(buffer)
                             if (countRead <= 0) break
                             read += countRead
-                            if (read > childInfo.size() || read > MAX_EXPANDED_BYTES) {
+                            if (read > childInfo.size() || read > io.maxExpandedBytes) {
                                 throw IllegalArgumentException(
                                     "source directory changed while inventoried",
                                 )
@@ -437,6 +497,7 @@ object CollectionRuntime {
         githubToken: String? = null,
         artifactsDir: Path? = null,
         inspect: ((String, Path, String, String, Path, Path, Path?) -> String)? = null,
+        io: CollectionIo = CollectionIo.default,
     ): JsonObject {
         val tree = sourceTree(repository, candidateSha)
         val manifest = IndependentGates.loadApprovedManifest(repository)
@@ -461,7 +522,7 @@ object CollectionRuntime {
             row["route"] = JsonNull
             row["status"] = JsonPrimitive("FAILED")
             try {
-                row["files"] = filesIn(root)
+                row["files"] = filesIn(root, io)
                 val route = CollectionRules.artifactRoute(name, candidateSha)
                 row["route"] = JsonPrimitive(route)
                 if (!seen.add(route)) {
@@ -503,6 +564,7 @@ object CollectionRuntime {
                     runId,
                     runAttempt,
                     githubToken,
+                    io,
                 )
             } catch (error: Exception) {
                 if (!isCaught(error)) throw error
@@ -601,6 +663,7 @@ object CollectionRuntime {
         candidateSha: String,
         artifacts: List<Pair<String, String>>,
         output: Path,
+        io: CollectionIo = CollectionIo.default,
     ): Boolean {
         val report = StrictJson.load(Fs.readText(output.resolve("collection.json"))) as? JsonObject
             ?: throw IllegalArgumentException("collection report is not an object")
@@ -620,7 +683,7 @@ object CollectionRuntime {
             val row = element as JsonObject
             val root = Path.of(artifacts[index].second)
             val files = row["files"]
-            if (files != null && files !is JsonNull && filesIn(root) != files) {
+            if (files != null && files !is JsonNull && filesIn(root, io) != files) {
                 throw IllegalArgumentException(
                     "collected raw artifact bytes differ: ${Py.str(row["name"])}",
                 )
@@ -641,7 +704,7 @@ object CollectionRuntime {
         val crossRun = report["cross_run"] as? JsonObject
         if (crossRun != null) {
             if ("sources" in crossRun) {
-                verifySourceSnapshot(output, candidateSha, Py.str(report["source_tree"])!!)
+                verifySourceSnapshot(output, candidateSha, Py.str(report["source_tree"])!!, io)
                 if (strictJson(output.resolve("cross-run-ledger.json")) != crossRun) {
                     throw IllegalArgumentException("cross-run source ledger differs from collection")
                 }
@@ -668,6 +731,7 @@ object CollectionRuntime {
         runId: Long? = null,
         runAttempt: Long? = null,
         githubToken: String? = null,
+        io: CollectionIo = CollectionIo.default,
     ): JsonObject {
         val originalIndex = anchoredRead(indexPath)
         val index = strictJsonBytes(originalIndex)
@@ -718,11 +782,11 @@ object CollectionRuntime {
                 if (Py.str(pin["format"]) == "directory") {
                     if (sourcePath == null) throw IllegalArgumentException("GitHub Actions source must be a ZIP")
                     val identity = pathIdentity(sourcePath)
-                    val before = fileInventory(sourcePath)
+                    val before = io.inventory(sourcePath)
                     val frozen = folder.resolve("original-directory")
-                    copyDirectory(sourcePath, frozen)
-                    val after = fileInventory(sourcePath)
-                    val copied = fileInventory(frozen)
+                    copyDirectory(sourcePath, frozen, io)
+                    val after = io.inventory(sourcePath)
+                    val copied = io.inventory(frozen)
                     row["raw_inventory"] = copied
                     if (identity != pathIdentity(sourcePath) || before != after || before != copied) {
                         throw IllegalArgumentException("source directory changed while copied")
@@ -747,26 +811,26 @@ object CollectionRuntime {
                         if (!Files.isRegularFile(sourcePath)) {
                             throw IllegalArgumentException("source archive is missing")
                         }
-                        if (Files.size(sourcePath) > MAX_SOURCE_BYTES) {
+                        if (Files.size(sourcePath) > io.maxSourceBytes) {
                             throw IllegalArgumentException("source archive exceeds byte bound")
                         }
                         val before = Triple(
                             pathIdentity(sourcePath),
                             Files.size(sourcePath),
-                            digest(sourcePath, MAX_SOURCE_BYTES),
+                            io.digest(sourcePath, MAX_SOURCE_BYTES),
                         )
-                        copyRegular(sourcePath, frozen)
+                        io.copyRegular(sourcePath, frozen, MAX_SOURCE_BYTES, true)
                         val after = Triple(
                             pathIdentity(sourcePath),
                             Files.size(sourcePath),
-                            digest(sourcePath, MAX_SOURCE_BYTES),
+                            io.digest(sourcePath, MAX_SOURCE_BYTES),
                         )
                         if (before != after) {
                             throw IllegalArgumentException("source archive changed while copied")
                         }
                     }
                     row["raw_size"] = JsonPrimitive(Files.size(frozen))
-                    row["raw_sha256"] = JsonPrimitive(digest(frozen, MAX_SOURCE_BYTES))
+                    row["raw_sha256"] = JsonPrimitive(io.digest(frozen, MAX_SOURCE_BYTES))
                     if (!Py.equalsInt(row["raw_size"], Py.int(pin["size"] ?: JsonPrimitive(0))) ||
                         Py.str(row["raw_sha256"]) != Py.str(pin["sha256"])
                     ) {
@@ -777,6 +841,7 @@ object CollectionRuntime {
                         frozen,
                         Py.str(pin["format"])!!,
                         normalized,
+                        io,
                     )
                 }
                 val bindings = (index["bindings"] as JsonArray).map { it as JsonObject }
@@ -808,12 +873,12 @@ object CollectionRuntime {
                 val partial = folder.resolve("original")
                 if (Files.isRegularFile(partial)) {
                     row["raw_size"] = JsonPrimitive(Files.size(partial))
-                    row["raw_sha256"] = JsonPrimitive(digest(partial, MAX_SOURCE_BYTES))
+                    row["raw_sha256"] = JsonPrimitive(io.digest(partial, MAX_SOURCE_BYTES))
                 }
                 val partialDirectory = folder.resolve("original-directory")
                 if (Files.isDirectory(partialDirectory)) {
                     try {
-                        row["raw_inventory"] = fileInventory(partialDirectory)
+                        row["raw_inventory"] = io.inventory(partialDirectory)
                     } catch (error2: IllegalArgumentException) {
                         deleteRecursively(partialDirectory)
                         row["raw_inventory"] = JsonNull
@@ -837,7 +902,12 @@ object CollectionRuntime {
     }
 
     /** `verify_source_snapshot`: the frozen cross-run index, ledger, and raw sources. */
-    fun verifySourceSnapshot(output: Path, candidateSha: String, tree: String): Boolean {
+    fun verifySourceSnapshot(
+        output: Path,
+        candidateSha: String,
+        tree: String,
+        io: CollectionIo = CollectionIo.default,
+    ): Boolean {
         if (Files.isSymbolicLink(output.resolve("source-index.json")) ||
             Files.isSymbolicLink(output.resolve("cross-run-ledger.json"))
         ) {
@@ -880,7 +950,7 @@ object CollectionRuntime {
                 if (children(folder) != expected) {
                     throw IllegalArgumentException("frozen source has missing or unrecorded files")
                 }
-                if (expected.isNotEmpty() && fileInventory(path) != recorded) {
+                if (expected.isNotEmpty() && io.inventory(path) != recorded) {
                     throw IllegalArgumentException("frozen source directory bytes differ")
                 }
                 if (Py.str(row["status"]) == "NOT_RUN" &&
@@ -900,7 +970,7 @@ object CollectionRuntime {
                 }
                 if (recorded && (Files.isSymbolicLink(path) || !Files.isRegularFile(path) ||
                         !Py.equalsInt(row["raw_size"], Files.size(path)) ||
-                        digest(path, MAX_SOURCE_BYTES) != Py.str(row["raw_sha256"]))
+                        io.digest(path, MAX_SOURCE_BYTES) != Py.str(row["raw_sha256"]))
                 ) {
                     throw IllegalArgumentException("frozen source archive bytes differ")
                 }
@@ -913,7 +983,7 @@ object CollectionRuntime {
                 val normalized = output.resolve("normalized").resolve(Py.str(source["id"])!!)
                 val normalizedInventory = row["normalized_inventory"]
                 if (normalizedInventory != null && normalizedInventory !is JsonNull &&
-                    fileInventory(normalized) != normalizedInventory
+                    io.inventory(normalized) != normalizedInventory
                 ) {
                     throw IllegalArgumentException("normalized source archive bytes differ")
                 }
@@ -938,8 +1008,9 @@ object CollectionRuntime {
         independentPerformanceKey: Path? = null,
         performanceKeySha256: String? = null,
         python: String = "python3",
+        io: CollectionIo = CollectionIo.default,
     ): JsonObject {
-        verifyCollection(repository, candidateSha, artifacts, output)
+        verifyCollection(repository, candidateSha, artifacts, output, io)
         val names = listOf(
             "archive-map.json", "audit.json", "audit.sig", "public.pem",
             "candidate-manifest.json", "staged-audit.json", "evidence.json",
@@ -971,14 +1042,14 @@ object CollectionRuntime {
         }
         val stable = output.resolve("external-inputs")
         Files.createDirectory(stable)
-        val originalHashes = names.associateWith { digest(auditInputs.resolve(it)) }
+        val originalHashes = names.associateWith { io.digest(auditInputs.resolve(it), null) }
         for (name in names) {
             Files.copy(
                 auditInputs.resolve(name),
                 stable.resolve(name),
                 StandardCopyOption.REPLACE_EXISTING,
             )
-            if (digest(stable.resolve(name)) != originalHashes[name]) {
+            if (io.digest(stable.resolve(name), null) != originalHashes[name]) {
                 throw IllegalArgumentException("external audit input changed while copied: $name")
             }
         }
@@ -991,10 +1062,10 @@ object CollectionRuntime {
                 "external signed archive map lacks exact 112-lane source binding",
             )
         }
-        val snapshot = snapshotExternalReferences(supplied, approved, stable)
+        val snapshot = snapshotExternalReferences(supplied, approved, stable, io)
         val snapshotMap = snapshot.first
         val snapshots = snapshot.second
-        val snapshotMapSha256 = digest(snapshotMap)
+        val snapshotMapSha256 = io.digest(snapshotMap, null)
         var performanceCopy: Path? = null
         if (independentPerformanceKey != null) {
             val key = safeSourcePath(independentPerformanceKey)
@@ -1004,9 +1075,9 @@ object CollectionRuntime {
                 throw IllegalArgumentException("performance key must come from outside producer inputs")
             }
             performanceCopy = stable.resolve("independent-performance-key.pem")
-            copyRegular(key, performanceCopy)
-            if (digest(key) != performanceKeySha256 ||
-                digest(performanceCopy) != performanceKeySha256
+            io.copyRegular(key, performanceCopy, MAX_SOURCE_BYTES, true)
+            if (io.digest(key, null) != performanceKeySha256 ||
+                io.digest(performanceCopy, null) != performanceKeySha256
             ) {
                 throw IllegalArgumentException("independent performance key bytes differ from external pin")
             }
@@ -1036,24 +1107,23 @@ object CollectionRuntime {
             command.add("--independent-performance-key")
             command.add(performanceCopy.toString())
         }
-        val builder = ProcessBuilder(command).directory(repository.toFile())
-        val process = builder.start()
-        val stdout = process.inputStream.use { it.readBytes() }
-        val stderr = process.errorStream.use { it.readBytes() }
-        val exit = process.waitFor()
+        val run = io.runAdapter(command, repository)
+        val stdout = run.stdout
+        val stderr = run.stderr
+        val exit = run.exitCode
         for (name in names) {
-            if (digest(auditInputs.resolve(name)) != originalHashes[name] ||
-                digest(stable.resolve(name)) != originalHashes[name]
+            if (io.digest(auditInputs.resolve(name), null) != originalHashes[name] ||
+                io.digest(stable.resolve(name), null) != originalHashes[name]
             ) {
                 throw IllegalArgumentException("external audit input changed during verification")
             }
         }
-        if (digest(snapshotMap) != snapshotMapSha256) {
+        if (io.digest(snapshotMap, null) != snapshotMapSha256) {
             throw IllegalArgumentException("frozen external archive map changed during verification")
         }
-        verifyCollection(repository, candidateSha, artifacts, output)
-        verifyExternalReferences(snapshots)
-        if (performanceCopy != null && digest(performanceCopy) != performanceKeySha256) {
+        verifyCollection(repository, candidateSha, artifacts, output, io)
+        verifyExternalReferences(snapshots, io)
+        if (performanceCopy != null && io.digest(performanceCopy, null) != performanceKeySha256) {
             throw IllegalArgumentException("frozen independent performance key bytes differ")
         }
         Files.write(output.resolve("signed-adapter.stdout"), stdout)
@@ -1092,10 +1162,11 @@ object CollectionRuntime {
     }
 
     /** `_snapshot_external_references`: freeze every externally referenced archive. */
-    private fun snapshotExternalReferences(
+    fun snapshotExternalReferences(
         archiveMap: JsonObject,
         approved: JsonObject,
         stable: Path,
+        io: CollectionIo = CollectionIo.default,
     ): Pair<Path, Map<String, JsonElement>> {
         val lanes = approved["lanes"] as? JsonObject ?: JsonObject(emptyMap())
         val mapLanes = archiveMap["lanes"] as? JsonObject
@@ -1140,10 +1211,10 @@ object CollectionRuntime {
                     val identity: JsonObject
                     if (Files.isDirectory(source)) {
                         val identityBefore = pathIdentity(source)
-                        val before = fileInventory(source)
-                        copyDirectory(source, frozen)
-                        val after = fileInventory(source)
-                        val copied = fileInventory(frozen)
+                        val before = io.inventory(source)
+                        copyDirectory(source, frozen, io)
+                        val after = io.inventory(source)
+                        val copied = io.inventory(frozen)
                         if (identityBefore != pathIdentity(source) || before != after ||
                             before != copied
                         ) {
@@ -1155,23 +1226,23 @@ object CollectionRuntime {
                             put("inventory_sha256", JsonPrimitive(CollectionRules.inventoryDigest(copied)))
                         }
                     } else if (Files.isRegularFile(source)) {
-                        if (Files.size(source) > MAX_SOURCE_BYTES) {
+                        if (Files.size(source) > io.maxSourceBytes) {
                             throw IllegalArgumentException("external archive exceeds byte bound")
                         }
                         val before = Triple(
                             pathIdentity(source),
                             Files.size(source),
-                            digest(source, MAX_SOURCE_BYTES),
+                            io.digest(source, MAX_SOURCE_BYTES),
                         )
-                        copyRegular(source, frozen)
+                        io.copyRegular(source, frozen, MAX_SOURCE_BYTES, true)
                         val after = Triple(
                             pathIdentity(source),
                             Files.size(source),
-                            digest(source, MAX_SOURCE_BYTES),
+                            io.digest(source, MAX_SOURCE_BYTES),
                         )
                         if (before != after ||
                             before.second != Files.size(frozen) ||
-                            before.third != digest(frozen, MAX_SOURCE_BYTES)
+                            before.third != io.digest(frozen, MAX_SOURCE_BYTES)
                         ) {
                             throw IllegalArgumentException("external archive changed while copied")
                         }
@@ -1201,7 +1272,10 @@ object CollectionRuntime {
     }
 
     /** `_verify_external_references`: the frozen external archives still hold their bytes. */
-    private fun verifyExternalReferences(snapshots: Map<String, JsonElement>) {
+    fun verifyExternalReferences(
+        snapshots: Map<String, JsonElement>,
+        io: CollectionIo = CollectionIo.default,
+    ) {
         for (element in snapshots.values) {
             val item = element as JsonObject
             val path = Path.of(Py.str(item["frozen"])!!)
@@ -1209,12 +1283,12 @@ object CollectionRuntime {
             if (Py.str(identity["kind"]) == "file") {
                 if (!Files.isRegularFile(path) || Files.isSymbolicLink(path) ||
                     !Py.equalsInt(identity["size"], Files.size(path)) ||
-                    digest(path) != Py.str(identity["sha256"])
+                    io.digest(path, null) != Py.str(identity["sha256"])
                 ) {
                     throw IllegalArgumentException("frozen external archive file bytes differ")
                 }
-            } else if (fileInventory(path) != identity["files"] ||
-                CollectionRules.inventoryDigest(fileInventory(path)) !=
+            } else if (io.inventory(path) != identity["files"] ||
+                CollectionRules.inventoryDigest(io.inventory(path)) !=
                 Py.str(identity["inventory_sha256"])
             ) {
                 throw IllegalArgumentException("frozen external archive directory bytes differ")
@@ -1227,14 +1301,19 @@ object CollectionRuntime {
     // ------------------------------------------------------------------------------------
 
     /** `_extract_transport`: unpack a ZIP or TAR producer transport and inventory the result. */
-    fun extractTransport(packed: Path, format: String, destination: Path): JsonObject {
+    fun extractTransport(
+        packed: Path,
+        format: String,
+        destination: Path,
+        io: CollectionIo = CollectionIo.default,
+    ): JsonObject {
         Files.createDirectory(destination)
         val seen = mutableSetOf<String>()
         var total = 0L
         if (format == "zip") {
             ZipFile.builder().setPath(packed).get().use { archive ->
                 val members = archive.entries.toList()
-                if (members.size > MAX_MEMBERS) {
+                if (members.size > io.maxMembers) {
                     throw IllegalArgumentException("ZIP member count exceeds bound")
                 }
                 for (member in members) {
@@ -1250,7 +1329,7 @@ object CollectionRuntime {
                         throw IllegalArgumentException("nonregular ZIP member")
                     }
                     total += member.size
-                    if (total > MAX_EXPANDED_BYTES) {
+                    if (total > io.maxExpandedBytes) {
                         throw IllegalArgumentException("ZIP expanded bytes exceed bound")
                     }
                     val target = destination.resolve(name)
@@ -1277,11 +1356,11 @@ object CollectionRuntime {
                         if (!seen.add(name)) {
                             throw IllegalArgumentException("duplicate archive member")
                         }
-                        if (seen.size > MAX_MEMBERS || !(member.isFile || member.isDirectory)) {
+                        if (seen.size > io.maxMembers || !(member.isFile || member.isDirectory)) {
                             throw IllegalArgumentException("nonregular or excessive TAR member")
                         }
                         total += member.size
-                        if (total > MAX_EXPANDED_BYTES) {
+                        if (total > io.maxExpandedBytes) {
                             throw IllegalArgumentException("TAR expanded bytes exceed bound")
                         }
                         val target = destination.resolve(name)
@@ -1300,11 +1379,21 @@ object CollectionRuntime {
                 }
             }
         }
-        return fileInventory(destination)
+        return io.inventory(destination)
     }
 
     /** `_copy_regular`: freeze one regular source file with a byte bound. */
     fun copyRegular(
+        source: Path,
+        destination: Path,
+        limit: Long = MAX_SOURCE_BYTES,
+        preflight: Boolean = true,
+        expected: Pair<Any?, Any?>? = null,
+        io: CollectionIo = CollectionIo.default,
+    ): Long = io.copyRegular(source, destination, limit, preflight)
+
+    /** The real bounded copy of one anchored regular file. */
+    internal fun copyFile(
         source: Path,
         destination: Path,
         limit: Long = MAX_SOURCE_BYTES,
@@ -1346,7 +1435,11 @@ object CollectionRuntime {
     }
 
     /** `_copy_directory`: freeze one source directory, byte for byte. */
-    fun copyDirectory(source: Path, destination: Path) {
+    fun copyDirectory(
+        source: Path,
+        destination: Path,
+        io: CollectionIo = CollectionIo.default,
+    ) {
         val info = attributes(source)
         if (info.isSymbolicLink || !info.isDirectory) {
             throw IllegalArgumentException("source directory is missing or symbolic")
@@ -1357,9 +1450,7 @@ object CollectionRuntime {
         var total = 0L
 
         fun visit(anchor: Path, frozen: Path, prefix: String) {
-            val names = Files.newDirectoryStream(anchor).use { stream ->
-                stream.map { it.fileName.toString() }.toList()
-            }
+            val names = io.directoryNames(anchor)
             val seen = mutableSetOf<String>()
             for (name in names) {
                 val relative = if (prefix.isEmpty()) name else "$prefix/$name"
@@ -1368,7 +1459,7 @@ object CollectionRuntime {
                     throw IllegalArgumentException("duplicate source directory member")
                 }
                 count++
-                if (count > MAX_MEMBERS) {
+                if (count > io.maxMembers) {
                     throw IllegalArgumentException("source directory exceeds transport bounds")
                 }
                 val child = anchor.resolve(name)
@@ -1384,11 +1475,11 @@ object CollectionRuntime {
                     throw IllegalArgumentException("nonregular source member")
                 } else {
                     try {
-                        total += copyRegular(
+                        total += io.copyRegular(
                             child,
                             target,
-                            MAX_EXPANDED_BYTES - total,
-                            preflight = false,
+                            io.maxExpandedBytes - total,
+                            false,
                         )
                     } catch (error: IllegalArgumentException) {
                         if ("exceeds byte bound" in (error.message ?: "")) {
@@ -1433,6 +1524,7 @@ object CollectionRuntime {
     /** `_strict_json_bytes`: strict JSON with duplicate keys and non-finite constants rejected. */
     fun strictJsonBytes(data: ByteArray): JsonObject {
         val text = data.toString(StandardCharsets.UTF_8)
+        rejectDuplicateKeys(text)
         val value = try {
             StrictJson.load(text)
         } catch (error: IllegalArgumentException) {
@@ -1442,6 +1534,67 @@ object CollectionRuntime {
             throw IllegalArgumentException("source index object keys are invalid")
         }
         return value
+    }
+
+    /** `independent_gates._strict_object`: one object may not declare a key twice. */
+    private fun rejectDuplicateKeys(text: String) {
+        var index = 0
+        val stack = ArrayDeque<MutableSet<String>>()
+        var expectKey = false
+        while (index < text.length) {
+            when (val char = text[index]) {
+                '"' -> {
+                    var end = index + 1
+                    val value = StringBuilder()
+                    while (end < text.length) {
+                        val current = text[end]
+                        if (current == '\\') {
+                            end += 2
+                            continue
+                        }
+                        if (current == '"') break
+                        value.append(current)
+                        end++
+                    }
+                    if (expectKey && stack.isNotEmpty()) {
+                        if (!stack.last().add(value.toString())) {
+                            throw IllegalArgumentException("duplicate JSON key: $value")
+                        }
+                    }
+                    expectKey = false
+                    index = end + 1
+                }
+                '{' -> {
+                    stack.addLast(mutableSetOf())
+                    expectKey = true
+                    index++
+                }
+                '}' -> {
+                    if (stack.isNotEmpty()) stack.removeLast()
+                    expectKey = false
+                    index++
+                }
+                '[' -> {
+                    stack.addLast(mutableSetOf())
+                    expectKey = false
+                    index++
+                }
+                ']' -> {
+                    if (stack.isNotEmpty()) stack.removeLast()
+                    expectKey = false
+                    index++
+                }
+                ',' -> {
+                    expectKey = stack.isNotEmpty()
+                    index++
+                }
+                ':' -> {
+                    expectKey = false
+                    index++
+                }
+                else -> index++
+            }
+        }
     }
 
     /** `_safe_source_path`: an absolute path that is not, and is not under, a symbolic link. */
@@ -1695,8 +1848,8 @@ object CollectionRuntime {
 
     /** The reference's caught failure set: `OSError, ValueError, TypeError, KeyError, ...`. */
     private fun isCaught(error: Exception): Boolean = when (error) {
-        is IllegalArgumentException, is IOException, is NoSuchElementException,
-        is ClassCastException, is InterruptedException -> true
+        is IllegalArgumentException, is IOException, is java.io.UncheckedIOException,
+        is NoSuchElementException, is ClassCastException, is InterruptedException -> true
         else -> false
     }
 }
