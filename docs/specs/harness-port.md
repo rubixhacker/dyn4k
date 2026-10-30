@@ -95,3 +95,41 @@ The order of operations is therefore:
 
 Step 3 is a review decision, not an implementation step. Until steps 2 to 4 complete, the frozen
 manifest describes the previous test sources and no lane may be reported as passing.
+
+### Measured cost of the conversion
+
+The full qualification discovery run was measured on both sides of the branch on 2026-10-30:
+
+| Tree | Command | Result |
+| --- | --- | --- |
+| `main` at `7a9679fb` | `python3 -m unittest discover -s tools/qualification -p 'test_*.py'` | 843 tests, 1 failure, 58 skipped |
+| `kotlin-testballoon-migration` | same | 831 tests, 53 failures, 159 errors, 58 skipped |
+
+The 12 missing tests are the deleted `test_guard_hosted_runners.py` suite, which
+`GuardHostedRunnersSuite` replaces. The 212 red tests are new and all trace to one cause: six files that
+the numerical qualification records pin as approved bytes were changed by the migration.
+
+| Pinned path | Why it changed |
+| --- | --- |
+| `tools/numerical/portable/build.gradle.kts` | the TestBalloon plugin and framework dependency were added |
+| `src/commonTest/kotlin/portable/PortableMatrixTest.kt` | converted to a TestBalloon suite |
+| `src/commonTest/kotlin/portable/ProspectiveArithmeticTest.kt` | converted |
+| `src/jvmTest/kotlin/portable/FocusedBooleanArithmeticSourceTest.kt` | converted |
+| `src/jvmTest/kotlin/portable/RevoluteLimitsFalseCaptureTest.kt` | converted |
+| `src/jvmTest/kotlin/portable/RotationPremiseFixtureTest.kt` | converted |
+
+They appear in `independent_gates.py` in `APPROVED_PROSPECTIVE_EXECUTABLE_CHECKERS`,
+`PROSPECTIVE_EXECUTABLE_CAPTURE_DEPENDENCIES`, `ARCHIVE_PRIVACY_CAPTURE_DEPENDENCIES`,
+`P2_ARCHIVE_PRIVACY_DEPENDENCIES` and `ORDINARY_DIAGNOSTIC_BUILD_CLEANUP_CAPTURE_DEPENDENCIES`, and in
+`APPROVED_MIGRATION`. Those maps record which bytes produced each retained numerical and JDI evidence
+archive.
+
+Re-pointing the ten pins at the new digests was tried and does **not** restore the suite: 72 tests still
+fail with `prospective policy/checker blob differs` and `JDK 21 JDI producer blob differs:
+tools/numerical/portable/build.gradle.kts`, because the evidence those gates verify was produced by the
+previous bytes. Restoring them requires a fresh capture with the pinned toolchain (`dyn4j-6.0.0.jar`,
+JDK 8, JDK 21, the JDI harness) and a new approval, not an edit to the pins.
+
+Consequently the branch is red in exactly one area until that capture happens. No lane may be reported
+as passing, and the pins must not be updated to make the suite green while the retained archives are
+still the old ones.
