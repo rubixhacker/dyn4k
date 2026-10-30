@@ -189,7 +189,25 @@ process observation.
 
 ## `warmup_probe.py`, `calibrate.py`, `ccd_route_trace.py`
 
-Ported in full, apart from `main`'s argparse wiring, which is a `:cli` concern.
+Ported in full, including runnable entry points:
+
+| Gradle task | Main | Python original |
+| --- | --- | --- |
+| `:performance:warmupProbe` | `WarmupProbeCli` | `warmup_probe.py` |
+| `:performance:calibrate` | `CalibrateCli` | `calibrate.py` |
+| `:performance:ccdRouteTrace` | `CcdRouteTraceCli` | `ccd_route_trace.py` |
+
+Each task takes `--args="..."`, runs from the repository root, and reproduces the Python
+argument set, the `argparse` failure order and text, exit code 2 for an argument error, exit 1
+for a raised `ValueError`/`RuntimeError` or a `SystemExit`, and the printed summary. The
+summaries and the `*.json` reports are byte-identical to the recorded Python output.
+
+`ccdRouteTrace` needs the staging helpers `capture` calls, so `candidate_runner.prepare`,
+`read_paths`, `check_route`, `verify_hashes`, `source_trees`, `git`, and
+`verify_candidate_archive.verify_identity` are ported as `jvmMain/CandidateStaging`. The
+candidate route is now launched as the staged JVM directly, and the two identity markers that
+`candidate_runner.py` printed before `execv` are prepended to the same stderr stream by
+`MeasureHost.runCandidateScenario`.
 
 | Module | Ported | Where |
 | --- | --- | --- |
@@ -209,6 +227,15 @@ What `MeasureHost` still cannot do, and why:
 | `jar_path` without a supplied file | it downloads over the network; the supplied path is exercised and the download branch is not. |
 | `host_identity`'s `release` | `/proc/sys/kernel/osrelease` on Linux, `os.version` elsewhere, because a JVM cannot call `uname`. |
 | `run_capture`'s RSS ceiling | reads `/proc/<pid>/statm` with a page size from `getconf PAGESIZE`; the branch is ported but only the wall-time branch is exercised. |
+
+Residual differences in the command line layer:
+
+| Difference | Why |
+| --- | --- |
+| the usage block is a fixed 80-column layout | `argparse` re-wraps to `COLUMNS`; the recorded text is the default width. |
+| `-h`/`--help` is not implemented | the task's contract covers parsing, validation, error text, exit codes, and summaries; help output is a separate formatting surface. |
+| a raised exception prints `ValueError: <msg>` or `RuntimeError: <msg>` | Python also prints traceback frames, which name interpreters and modules that no longer exist. |
+| `prepare` normalises the staging path lexically | `Path.resolve()` also follows symlinks. |
 
 ## `bounded_adapter.py`
 

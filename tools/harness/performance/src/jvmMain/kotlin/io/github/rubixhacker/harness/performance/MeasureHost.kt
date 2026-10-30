@@ -134,21 +134,28 @@ object MeasureHost {
         stderrPath: String? = null,
         timeoutSeconds: Double? = null,
         rssCeilingBytes: Long? = null,
+        stderrPrefix: ((Long) -> String)? = null,
     ): Pair<String, Long> {
         if (timeoutSeconds == null && rssCeilingBytes == null) {
-            val errorFile = stderrPath?.let { File(it) } ?: File.createTempFile("dyn4k-capture-", ".stderr")
+            val captured = File.createTempFile("dyn4k-capture-", ".stderr")
             val process = ProcessBuilder(command)
                 .redirectOutput(File(output))
-                .redirectError(errorFile)
+                .redirectError(captured)
                 .start()
             process.waitFor()
-            val errorOutput = errorFile.readText()
-            if (stderrPath == null) errorFile.delete()
+            // `candidate_runner.py` writes its two identity markers to stderr before it execs the
+            // candidate JVM, so the markers precede the harness's own warm-up markers.
+            var errorOutput = (stderrPrefix?.invoke(process.pid()) ?: "") + captured.readText()
+            captured.delete()
+            if (stderrPath != null) {
+                File(stderrPath).apply { parentFile?.mkdirs() }.writeText(errorOutput)
+            }
             if (process.exitValue() != 0) {
                 throw RunnerTerminated("runner failed (${process.exitValue()}): $errorOutput")
             }
             return errorOutput to process.pid()
         }
+        require(stderrPrefix == null) { "a bounded capture cannot prepend a stderr marker" }
 
         val stderrFile = stderrPath?.let { File(it) } ?: File(withSuffix(output, ".stderr"))
         var reason = "bounded_end"
@@ -236,6 +243,82 @@ object MeasureHost {
             timeoutSeconds = if (stress) 180.0 else null,
             rssCeilingBytes = if (stress) 3L * 1024 * 1024 * 1024 else null,
         )
+        return record(out, family, variant, size, hz, steps, mode, warmup, repeat, api, stress, processPid)
+    }
+
+    /**
+     * `measure.run_scenario` for a staged candidate route. `candidate_runner.py` used to be the
+     * launcher; this starts the candidate JVM directly and writes the same two identity markers
+     * the Python launcher wrote before `execv`.
+     */
+    fun runCandidateScenario(
+        java: String,
+        classpath: String,
+        entrypoint: String,
+        out: String,
+        family: String,
+        variant: String,
+        size: String,
+        hz: Int,
+        steps: Int,
+        mode: String,
+        warmup: Int,
+        repeat: Int,
+        route: String,
+        stress: Boolean = false,
+    ): JsonObject {
+        val name = "$family.$variant.$size.${hz}hz.$route.$mode.r$repeat"
+        val raw = File(out, "$name.csv")
+        val warmupRaw = File(out, "$name.warmup.csv")
+        val marker = when (route) {
+            "direct_kotlin" -> 1
+            "compatibility" -> 2
+            else -> throw IllegalArgumentException("unknown candidate route: $route")
+        }
+        val command = listOf(
+            java,
+            *CandidateRunner.flags.toTypedArray(),
+            "-cp",
+            classpath,
+            entrypoint,
+            family,
+            variant,
+            size,
+            hz.toString(),
+            steps.toString(),
+            mode,
+            warmup.toString(),
+        )
+        val (_, processPid) = runCapture(
+            command = command,
+            output = raw.absolutePath,
+            stderrPath = warmupRaw.absolutePath,
+            timeoutSeconds = if (stress) 180.0 else null,
+            rssCeilingBytes = if (stress) 3L * 1024 * 1024 * 1024 else null,
+            stderrPrefix = { pid -> "#process_pid=$pid\n#route_marker=$marker\n" },
+        )
+        return record(out, family, variant, size, hz, steps, mode, warmup, repeat, route, stress, processPid)
+    }
+
+    /** Everything after the capture: metadata separation, validation, and the result record. */
+    private fun record(
+        out: String,
+        family: String,
+        variant: String,
+        size: String,
+        hz: Int,
+        steps: Int,
+        mode: String,
+        warmup: Int,
+        repeat: Int,
+        api: String,
+        stress: Boolean,
+        processPid: Long,
+    ): JsonObject {
+        val name = "$family.$variant.$size.${hz}hz.$api.$mode.r$repeat"
+        val raw = File(out, "$name.csv")
+        val warmupRaw = File(out, "$name.warmup.csv")
+        val stderrRaw = File(out, "$name.stderr.raw")
 
         stderrRaw.writeBytes(warmupRaw.readBytes())
 
