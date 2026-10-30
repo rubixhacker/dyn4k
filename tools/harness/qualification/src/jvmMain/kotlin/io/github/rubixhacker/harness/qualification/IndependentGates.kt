@@ -21,9 +21,9 @@ import org.w3c.dom.Node
  * `independent_gates.py`, first slice: the shared receipt primitives and the staged publication,
  * staged consumer, duplicate provider, and external unavailability gates.
  *
- * The numerical, physical, prospective, migration, performance, independent-review, and signed
- * consumer verifiers are not ported yet; `evaluate_gate` dispatches to all of them, so it arrives
- * with the last of them.
+ * The numerical, physical, migration, performance, independent-review, and signed consumer
+ * verifiers are not ported yet; `evaluate_gate` dispatches to all of them, so it arrives with the
+ * last of them. The prospective binding closure lives in [GatesProspective].
  */
 object IndependentGates {
     const val APPROVED_MANIFEST_SHA256 = "9aa2f50dd3c38129a70f4ed042f2b7ae5a90d4234def40d70520aad13f36b3fc"
@@ -113,6 +113,9 @@ object IndependentGates {
         }
         return path
     }
+
+    /** `_file_path_name`: the reference's archive member name contract, without a file read. */
+    fun filePathName(relative: String?) = checkPathName(relative)
 
     /** `_file_path_name`. */
     private fun checkPathName(relative: String?) {
@@ -221,12 +224,13 @@ object IndependentGates {
         approvedPaths: Map<String, String>,
         label: String,
         localApproved: Map<String, String>? = null,
+        gate: GateSource = GateGit,
     ): Map<String, String> {
         val local = localApproved ?: approvedPaths
         for ((relative, approved) in approvedPaths) {
-            val localFile = repository.resolve(relative)
-            val committed = gitShow(repository, candidateSha, relative)
-            if (CorpusFiles.digest(localFile) != local[relative] ||
+            val localBytes = gate.read(gate.sourceRoot().resolve(relative))
+            val committed = gate.show(repository, candidateSha, relative)
+            if (CorpusFiles.digest(localBytes) != local[relative] ||
                 CorpusFiles.digest(committed) != approved
             ) {
                 throw IllegalArgumentException("$label blob differs: $relative")

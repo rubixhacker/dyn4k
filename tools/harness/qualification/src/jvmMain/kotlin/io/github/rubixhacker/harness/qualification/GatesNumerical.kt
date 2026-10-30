@@ -20,12 +20,12 @@ class IncompleteEvidence(message: String) : Exception(message)
  * disposition tables, and the prospective (P2) scope and summary contracts.
  *
  * The verifiers that *execute* the numerical engines (`verify_nominal_physical_case`,
- * `verify_joint_physical_cases`, `_replay_target_arithmetic`, `_target_arithmetic_evidence`,
- * `_verify_p2_host`, `verify_pending_prospective_bridge`, `verify_prospective_case_subgates`,
- * `_prospective_checker_binding`, `_numerical_modules`, `_joint_quality_module`,
- * `_nominal_module`, `_rotation_oracle_module`, `_p2_producer_binding`) load
- * the Python analyzers under `tools/numerical` at run time; they cannot be ported until those
- * analyzers are Kotlin.
+ * `verify_joint_physical_cases`, `_verify_p2_host`, `verify_pending_prospective_bridge`,
+ * `verify_prospective_case_subgates`, `_numerical_modules`, `_joint_quality_module`,
+ * `_nominal_module`) load the Python analyzers under `tools/numerical` at run time; they cannot be
+ * ported until those analyzers are Kotlin. The checker and producer bindings that select those
+ * analyzers' approved bytes, and the rotation-oracle audit of one target payload, are ported in
+ * [GatesProspective].
  */
 object GatesNumerical {
     const val HISTORICAL_FIXTURE_SHA256 =

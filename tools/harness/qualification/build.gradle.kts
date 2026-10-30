@@ -67,3 +67,10 @@ tasks.register<JavaExec>("executePlan") {
         "Runs a lane execution plan and records the evidence; pass --candidate-sha, --plan, --output.",
     )
 }
+
+tasks.register<JavaExec>("hostedProbe") {
+    entryPoint(
+        "io.github.rubixhacker.harness.qualification.HostedCli",
+        "Probes one hosted target and writes its evidence; pass run --candidate-sha, --target, --output.",
+    )
+}
