@@ -25,7 +25,7 @@ Kotlin), **pending** (not started), **blocked** (needs a coordination step).
 | `tools/qualification/guard_hosted_runners.py` | `tools/harness/qualification/.../GuardHostedRunners.kt` | ported | 12 cases; CLI task `:qualification:guardHostedRunners`; output matches Python on the repository |
 | `qualify.digest(path)` | `tools/harness/host/.../FileDigest.kt` | ported | streaming SHA-256; 2 cases |
 | `qualify.require_clean_checkout` | `tools/harness/host/.../CleanCheckout.kt` | ported | 5 cases: clean, wrong SHA, dirty tracked file, untracked input, generated output ignored |
-| `tools/compatibility/*` | `tools/harness/compatibility` | in progress (delegated) | |
+| `tools/compatibility/*` analysis logic (world_ci, governing_seams, governing_disposition, candidate_coverage, method_coverage, java_corpus, execution_probe) | `tools/harness/compatibility` | ported | 25 TestBalloon tests; vectors recorded at revision `df640f26`; process/JDK/git parts remain in Python |
 | `tools/performance/*` | `tools/harness/performance` | in progress (delegated) | |
 | `tools/numerical/*` | `tools/harness/numerical` | pending | |
 | `tools/qualification/*` other modules | `tools/harness/qualification` | pending | |
