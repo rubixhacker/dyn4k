@@ -55,6 +55,19 @@ The port is not finished. At 2026-10-30 the tree still held **323 Python files, 
 and `full-staged-native-host.yml` (12). A step may only move to Kotlin once its module is ported and
 `tools/compatibility/test_qualification_workflow.py` asserts the new command.
 
+### The vector generators must be deleted last, and they count against the total
+
+Every port records parity evidence by running the Python reference, so each port adds a Python generator
+under `tools/harness/<module>/parity/`. At 2026-10-30 those were **11 files and 6,641 lines**, which is
+why the Python total rose from 170,307 to 171,811 lines while four modules were being ported.
+
+A generator can only be deleted once the Python module it imports is deleted, because it imports that
+module directly. `tools/harness/performance/parity/generate_leaf_vectors.py` was the first to go: its
+inputs, `warmup_probe.py` and `calibrate.py`, had been deleted, so it could no longer run. The same
+applies to every other generator in turn. The final state must therefore have no generators left either;
+until then they are deliberate, and the recorded constants carry the revision and generator name that
+produced them.
+
 Harness total at the last full run: 1122 tests, 0 failures, across `:core`, `:host`,
 `:compatibility`, `:performance`, `:qualification`, `:numerical`, `:android`, `:migration` and
 `:baseline`.
