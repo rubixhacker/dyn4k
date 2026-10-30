@@ -145,7 +145,7 @@ internal fun hostedTarNames(archive: Path): Set<String> {
     return names
 }
 
-internal fun hostedGit(repository: Path, vararg arguments: String): Any {
+internal fun hostedGit(repository: Path, vararg arguments: String): String {
     val process = ProcessBuilder(listOf("git", "-C", repository.toString()) + arguments)
         .redirectErrorStream(true)
         .start()

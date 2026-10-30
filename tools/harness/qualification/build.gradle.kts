@@ -75,6 +75,13 @@ tasks.register<JavaExec>("hostedProbe") {
     )
 }
 
+tasks.register<JavaExec>("stageArtifact") {
+    entryPoint(
+        "io.github.rubixhacker.harness.qualification.ArtifactCli",
+        "Packages or verifies bounded XML evidence bundles; pass hosted, ubuntu, or verify with its options.",
+    )
+}
+
 tasks.register<JavaExec>("fullHosted") {
     entryPoint(
         "io.github.rubixhacker.harness.qualification.FullHostedCli",
