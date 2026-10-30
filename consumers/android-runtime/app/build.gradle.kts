@@ -1,5 +1,6 @@
 plugins {
     id("com.android.application")
+    id("de.infix.testBalloon")
 }
 
 android {
@@ -46,7 +47,8 @@ dependencies {
     androidTestImplementation("org.jetbrains.kotlin:kotlin-stdlib:2.4.20")
     "androidTestCandidateImplementation"(files(providers.gradleProperty("portableSuiteJar").get()))
     "androidTestCandidateImplementation"(files(rootProject.layout.projectDirectory.file("full/build/generated/full-consumers.jar")))
-    "androidTestCandidateImplementation"("org.jetbrains.kotlin:kotlin-test-junit:2.4.20")
+    "androidTestCandidateImplementation"(kotlin("test"))
+    "androidTestCandidateImplementation"("de.infix.testBalloon:testBalloon-framework-core:1.2.0")
 }
 
 val repositoryRoot = rootProject.projectDir.resolve("../..").canonicalFile

@@ -1,15 +1,19 @@
 package qualification
 
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.rubixhacker.dyn4k.Transform
 import io.github.rubixhacker.dyn4k.Vector2
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
 import org.dyn4j.Reference
 
-class StagedGeometryTest {
-    @Test
-    fun namedConstructorsResolveFromPublishedCommonAndPlatformVariants() {
+val StagedGeometryTest by testSuite {
+    test("namedConstructorsResolveFromPublishedCommonAndPlatformVariants") { StagedGeometryTestFixture().run { namedConstructorsResolveFromPublishedCommonAndPlatformVariants() } }
+    test("stagedRootCoordinatesResolveAndTransformSharedObjects") { StagedGeometryTestFixture().run { stagedRootCoordinatesResolveAndTransformSharedObjects() } }
+}
+
+private class StagedGeometryTestFixture  {
+fun namedConstructorsResolveFromPublishedCommonAndPlatformVariants() {
         val direct = org.dyn4j.geometry.Vector2(x = 1.0, y = 2.0)
         val alias = Vector2(x = 3.0, y = 4.0)
         val same: org.dyn4j.geometry.Vector2 = alias
@@ -23,8 +27,7 @@ class StagedGeometryTest {
         assertEquals(4.0, same.y)
     }
 
-    @Test
-    fun stagedRootCoordinatesResolveAndTransformSharedObjects() {
+fun stagedRootCoordinatesResolveAndTransformSharedObjects() {
         val point = Vector2(3.0, 4.0)
         val same: org.dyn4j.geometry.Vector2 = point
         assertSame(point, same)

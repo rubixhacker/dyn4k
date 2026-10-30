@@ -954,9 +954,24 @@ for numerator, denominator in ((1, 3), (1, 2), (0, 1), (-7, 8), (314159265358979
     decimal_samples.append({"numerator": numerator, "denominator": denominator,
                             "shown": _quality.shown(_fractions.Fraction(numerator, denominator))})
 
+weld_pulley_divergence = [
+    {"group": "over-limit stored rotation", "python_status": "PHYSICAL_FAILED",
+     "port_status": "verified"},
+    {"group": "represented one-degree rotation", "python_status": "PHYSICAL_PASSED",
+     "port_status": "verified"},
+    {"group": "stored rotation quadrants and signed zero",
+     "python_status": "PHYSICAL_FAILED, PHYSICAL_PASSED",
+     "port_status": "INVALID on a quadrant row; the atan enclosure does not converge within 256 terms"},
+    {"group": "identity, alias and callback mutations", "python_status": "INVALID",
+     "port_status": "verified"},
+    {"group": "frozen baseline with an out-of-limit state", "python_status": "PHYSICAL_FAILED",
+     "port_status": "INVALID: the mutated frozen state is rejected before scoring"},
+]
+
 emit("CompareVectors.kt", "COMPARE_VECTORS", {
     "revision": REVISION,
     "compare": compare_vectors,
     "decimal_sample": decimal_samples,
     "weld_pulley": quality_cases,
+    "weld_pulley_divergence": weld_pulley_divergence,
 })

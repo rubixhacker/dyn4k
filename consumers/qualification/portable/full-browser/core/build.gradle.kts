@@ -5,7 +5,7 @@ import org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest
 import java.nio.file.Files
 import java.security.MessageDigest
 
-plugins { kotlin("multiplatform") }
+plugins { kotlin("multiplatform"); id("de.infix.testBalloon") }
 
 val checkout = file(providers.gradleProperty("qualificationCheckout").get())
 val staging = file(providers.gradleProperty("qualificationRepository").get())
@@ -48,6 +48,7 @@ kotlin {
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
+                implementation("de.infix.testBalloon:testBalloon-framework-core:1.2.0")
                 implementation("io.github.rubixhacker:dyn4k-core:$version")
                 implementation("io.github.rubixhacker:dyn4k:$version")
             }

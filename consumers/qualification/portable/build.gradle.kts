@@ -6,6 +6,7 @@ import java.security.MessageDigest
 plugins {
     kotlin("multiplatform") version "2.4.20"
     id("com.android.kotlin.multiplatform.library") version "9.3.1"
+    id("de.infix.testBalloon") version "1.2.0"
 }
 
 repositories {
@@ -54,7 +55,10 @@ kotlin {
         commonMain.dependencies {
             api("io.github.rubixhacker:dyn4k:0.1.0-alpha.1")
         }
-        commonTest.dependencies { implementation(kotlin("test")) }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+            implementation("de.infix.testBalloon:testBalloon-framework-core:1.2.0")
+        }
         providers.gradleProperty("qualificationSuiteCheckout").orNull?.let { checkout ->
             val source = providers.gradleProperty("qualificationSuiteSource").get()
             require(source.startsWith("org/") && source.endsWith(".kt") && ".." !in source)

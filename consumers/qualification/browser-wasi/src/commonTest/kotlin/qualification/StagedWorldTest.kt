@@ -1,7 +1,7 @@
 package qualification
 
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.rubixhacker.dyn4k.Body
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -12,9 +12,12 @@ import org.dyn4j.world.ContactCollisionData
 import org.dyn4j.world.World
 import org.dyn4j.world.listener.ContactListenerAdapter
 
-class StagedWorldTest {
-    @Test
-    fun stagedModulesShareBodiesAndDeliverCollisionCallbacks() {
+val StagedWorldTest by testSuite {
+    test("stagedModulesShareBodiesAndDeliverCollisionCallbacks") { StagedWorldTestFixture().run { stagedModulesShareBodiesAndDeliverCollisionCallbacks() } }
+}
+
+private class StagedWorldTestFixture  {
+fun stagedModulesShareBodiesAndDeliverCollisionCallbacks() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val moving = Body()

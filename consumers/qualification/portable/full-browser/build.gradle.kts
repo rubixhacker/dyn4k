@@ -2,6 +2,7 @@ import groovy.json.JsonOutput
 import java.security.MessageDigest
 
 plugins {
+    id("de.infix.testBalloon") version "1.2.0" apply false
     kotlin("multiplatform") version "2.4.20" apply false
 }
 

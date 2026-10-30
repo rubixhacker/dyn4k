@@ -12,6 +12,7 @@ import org.gradle.api.tasks.compile.JavaCompile
 
 plugins {
     kotlin("jvm") version "2.4.20" apply false
+    id("de.infix.testBalloon") version "1.2.0" apply false
 }
 
 val checkout = file(providers.gradleProperty("qualificationCheckout").get())

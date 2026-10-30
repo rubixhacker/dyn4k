@@ -1,13 +1,17 @@
 package io.github.rubixhacker.dyn4k.runtime
 
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.rubixhacker.dyn4k.Vector2
 import org.dyn4j.Reference
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertSame
-import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertSame
 
-class StagedKotlinConsumerTest {
-    @Test fun sharedMutableIdentity() {
+val StagedKotlinConsumerTest by testSuite {
+    test("sharedMutableIdentity") { StagedKotlinConsumerTestFixture().run { sharedMutableIdentity() } }
+}
+
+private class StagedKotlinConsumerTestFixture {
+fun sharedMutableIdentity() {
         val point = Vector2(3.0, 4.0)
         val core: org.dyn4j.geometry.Vector2 = point
         val reference = Reference(core)

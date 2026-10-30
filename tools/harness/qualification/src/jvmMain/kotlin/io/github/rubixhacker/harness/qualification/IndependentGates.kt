@@ -127,6 +127,24 @@ object IndependentGates {
         }
     }
 
+    /** `_strict_json_line`: one strict JSON line of a browser launch record. */
+    fun strictJsonLine(raw: String): JsonElement {
+        val value = try {
+            StrictObjectJson.parse(raw)
+        } catch (error: ObservationError) {
+            // Python's decoder accepts these constants and the hook rejects them by name.
+            val constant = listOf("-Infinity", "Infinity", "NaN").firstOrNull { it in raw }
+            if (constant != null) {
+                throw IllegalArgumentException("non-finite browser launch value: $constant")
+            }
+            throw error
+        }
+        if (!StrictJson.isFinite(value)) {
+            throw IllegalArgumentException("non-finite browser launch value")
+        }
+        return value
+    }
+
     /** `_archive_paths`: every scanned archive file. */
     fun archivePaths(root: Path): Set<String> = ArchiveScan.scan(root).keys
 

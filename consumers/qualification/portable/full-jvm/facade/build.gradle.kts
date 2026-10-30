@@ -4,6 +4,7 @@ import org.gradle.api.tasks.compile.JavaCompile
 
 plugins {
     kotlin("jvm")
+    id("de.infix.testBalloon")
 }
 
 val checkout = file(providers.gradleProperty("qualificationCheckout").get())
@@ -22,6 +23,7 @@ dependencies {
     testImplementation("io.github.rubixhacker:dyn4k:0.1.0-alpha.1")
     testImplementation("io.github.rubixhacker:dyn4k-core:0.1.0-alpha.1")
     testImplementation(kotlin("test"))
+    testImplementation("de.infix.testBalloon:testBalloon-framework-core:1.2.0")
 }
 
 sourceSets.test {
@@ -42,7 +44,6 @@ tasks.named<JavaCompile>("compileTestJava") {
 }
 
 tasks.test {
-    useJUnit()
     javaLauncher.set(javaToolchains.launcherFor {
         languageVersion.set(JavaLanguageVersion.of(runtimeMajor))
     })

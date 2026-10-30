@@ -268,6 +268,29 @@ val IndependentGateContract by testSuite {
         }
     }
 
+    test("a browser launch line is strict JSON and finite") {
+        val parsed = IndependentGates.strictJsonLine("""{"pid":1,"value":0.5}""")
+        assertEquals(1L, Py.int((parsed as JsonObject)["pid"]))
+        assertEquals(
+            "duplicate JSON key: pid",
+            assertFailsWith<ObservationError> {
+                IndependentGates.strictJsonLine("""{"pid":1,"pid":2}""")
+            }.message,
+        )
+        assertEquals(
+            "non-finite browser launch value: NaN",
+            assertFailsWith<IllegalArgumentException> {
+                IndependentGates.strictJsonLine("""{"value":NaN}""")
+            }.message,
+        )
+        assertEquals(
+            "non-finite browser launch value: -Infinity",
+            assertFailsWith<IllegalArgumentException> {
+                IndependentGates.strictJsonLine("""{"value":-Infinity}""")
+            }.message,
+        )
+    }
+
     test("the approved manifest is pinned by revision and digest") {
         val repository = repositoryRoot()
         val manifest = IndependentGates.loadApprovedManifest(repository)

@@ -1,11 +1,15 @@
 package qualification
 
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.rubixhacker.dyn4k.Rotation
 import io.github.rubixhacker.dyn4k.Transform
-import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class StagedFoundationExtraMethodsTest {
+val StagedFoundationExtraMethodsTest by testSuite {
+    test("publishedAliasesRetainKotlinHelpersAndGetterOverrides") { StagedFoundationExtraMethodsTestFixture().run { publishedAliasesRetainKotlinHelpersAndGetterOverrides() } }
+}
+
+private class StagedFoundationExtraMethodsTestFixture  {
     private class RotationExtension : Rotation() {
         init { cost = 0.0; sint = 1.0 }
 
@@ -20,8 +24,7 @@ class StagedFoundationExtraMethodsTest {
         override fun getSint() = 29.0
     }
 
-    @Test
-    fun publishedAliasesRetainKotlinHelpersAndGetterOverrides() {
+fun publishedAliasesRetainKotlinHelpersAndGetterOverrides() {
         val rotation: Rotation = RotationExtension()
         val transform: Transform = TransformExtension()
 

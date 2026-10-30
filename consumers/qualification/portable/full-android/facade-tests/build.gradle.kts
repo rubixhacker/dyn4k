@@ -19,7 +19,8 @@ sourceSets.main {
 dependencies {
     compileOnly(files(coreClasses, facadeClasses))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.4.20")
-    implementation("org.jetbrains.kotlin:kotlin-test-junit:2.4.20")
+    implementation(kotlin("test"))
+    implementation("de.infix.testBalloon:testBalloon-framework-core:1.2.0")
     implementation("junit:junit:4.13.2")
 }
 

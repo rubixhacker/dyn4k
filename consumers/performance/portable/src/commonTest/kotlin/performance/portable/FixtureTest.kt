@@ -1,12 +1,17 @@
 package performance.portable
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class FixtureTest {
-    @Test
-    fun everyFrozenSmallVariantBuildsOnBothApis() {
+val FixtureTest by testSuite {
+    test("everyFrozenSmallVariantBuildsOnBothApis") { FixtureTestFixture().run { everyFrozenSmallVariantBuildsOnBothApis() } }
+    test("directAndCompatibilityUseTheSameSeparatedWorkload") { FixtureTestFixture().run { directAndCompatibilityUseTheSameSeparatedWorkload() } }
+    test("lifecycleReplacementKeepsBodyAndJointCounts") { FixtureTestFixture().run { lifecycleReplacementKeepsBodyAndJointCounts() } }
+}
+
+private class FixtureTestFixture  {
+fun everyFrozenSmallVariantBuildsOnBothApis() {
         val jointVariants = listOf(
             "angle_free", "angle_limits", "angle_ratio",
             "distance_limits", "distance_rigid", "distance_spring", "distance_spring_damper",
@@ -34,8 +39,7 @@ class FixtureTest {
         }
     }
 
-    @Test
-    fun directAndCompatibilityUseTheSameSeparatedWorkload() {
+fun directAndCompatibilityUseTheSameSeparatedWorkload() {
         val direct = Fixture("separated", "default", 100, 30, "direct_kotlin")
         val shim = Fixture("separated", "default", 100, 30, "compatibility")
         for (step in 0..30) {
@@ -51,8 +55,7 @@ class FixtureTest {
         assertTrue(direct.activity().first > 0)
     }
 
-    @Test
-    fun lifecycleReplacementKeepsBodyAndJointCounts() {
+fun lifecycleReplacementKeepsBodyAndJointCounts() {
         for (api in listOf("direct_kotlin", "compatibility")) {
             val fixture = Fixture("lifecycle", "replace", 100, 30, api)
             val bodies = fixture.world.getBodyCount()

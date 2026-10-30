@@ -1,11 +1,15 @@
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.rubixhacker.dyn4k.AABB
 import io.github.rubixhacker.dyn4k.Ellipse
 import io.github.rubixhacker.dyn4k.Interval
 import io.github.rubixhacker.dyn4k.Ray
 import io.github.rubixhacker.dyn4k.Vector2
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+
+val GeometryExtensionTest by testSuite {
+    test("publicGeometryOverridesDispatchThroughBaseTypes") { GeometryExtensionTestFixture().run { publicGeometryOverridesDispatchThroughBaseTypes() } }
+}
 
 private class CustomEllipse : Ellipse(2.0, 1.0) {
     override fun getWidth(): Double = 9.0
@@ -26,9 +30,8 @@ private class CustomRay : Ray(Vector2(1.0, 0.0)) {
     override fun getStart(): Vector2 = Vector2(3.0, 4.0)
 }
 
-class GeometryExtensionTest {
-    @Test
-    fun publicGeometryOverridesDispatchThroughBaseTypes() {
+private class GeometryExtensionTestFixture  {
+fun publicGeometryOverridesDispatchThroughBaseTypes() {
         val ellipseExtension = CustomEllipse()
         val ellipse: Ellipse = ellipseExtension
         val bounds: AABB = CustomBounds()

@@ -145,7 +145,7 @@ object DecimalText {
 object WeldPulleyQuality {
     private val CALLBACKS = listOf("begin", "postSolve", "end")
     private val ROOT_SCALE = BigNat.powerOfTen(60)
-    private val U = 2.0.pow(-53)
+    private val U: Double = 1.0 / (1L shl 53).toDouble()
 
     private fun require(condition: Boolean, message: String) {
         if (!condition) throw Rejected(message)
@@ -588,10 +588,4 @@ object WeldPulleyQuality {
         }
         return lines
     }
-}
-
-private fun Double.pow(exponent: Int): Double {
-    var result = 1.0
-    repeat(exponent) { result *= this }
-    return result
 }

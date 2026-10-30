@@ -1,15 +1,19 @@
 package consumer
 
+import de.infix.testBalloon.framework.core.testSuite
 import io.github.rubixhacker.dyn4k.*
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-class StagedWorldJourneyTest {
-    @Test
-    fun publishedVectorAssignmentRebindsWhileNamedMutationKeepsIdentity() {
+val StagedWorldJourneyTest by testSuite {
+    test("publishedVectorAssignmentRebindsWhileNamedMutationKeepsIdentity") { StagedWorldJourneyTestFixture().run { publishedVectorAssignmentRebindsWhileNamedMutationKeepsIdentity() } }
+    test("publishedApiBuildsAndExtendsOneMutableWorld") { StagedWorldJourneyTestFixture().run { publishedApiBuildsAndExtendsOneMutableWorld() } }
+}
+
+private class StagedWorldJourneyTestFixture  {
+fun publishedVectorAssignmentRebindsWhileNamedMutationKeepsIdentity() {
         var value = Vector2(1.0, 2.0)
         val shared: org.dyn4j.geometry.Vector2 = value
         value += Vector2(3.0, 4.0)
@@ -37,8 +41,7 @@ class StagedWorldJourneyTest {
         }
     }
 
-    @Test
-    fun publishedApiBuildsAndExtendsOneMutableWorld() {
+fun publishedApiBuildsAndExtendsOneMutableWorld() {
         val extended = ExtendedWorld()
         val simulation = world(extended) {
             gravity = Vector2(0.0, 0.0)

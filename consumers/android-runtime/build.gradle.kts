@@ -10,4 +10,5 @@ buildscript {
 
 plugins {
     id("com.android.application") version "9.3.1" apply false
+    id("de.infix.testBalloon") version "1.2.0" apply false
 }

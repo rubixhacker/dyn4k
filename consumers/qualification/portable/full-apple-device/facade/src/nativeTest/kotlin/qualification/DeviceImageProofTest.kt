@@ -1,14 +1,17 @@
 package qualification
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertTrue
 import platform.Foundation.NSBundle
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSHomeDirectory
 
-class DeviceImageProofTest {
-    @Test
-    fun copyInstalledImageToDataContainer() {
+val DeviceImageProofTest by testSuite {
+    test("copyInstalledImageToDataContainer") { DeviceImageProofTestFixture().run { copyInstalledImageToDataContainer() } }
+}
+
+private class DeviceImageProofTestFixture  {
+fun copyInstalledImageToDataContainer() {
         val source = requireNotNull(NSBundle.mainBundle.executablePath)
         val destination = "${NSHomeDirectory()}/Documents/dyn4k-qualified-host.bin"
         val files = NSFileManager.defaultManager

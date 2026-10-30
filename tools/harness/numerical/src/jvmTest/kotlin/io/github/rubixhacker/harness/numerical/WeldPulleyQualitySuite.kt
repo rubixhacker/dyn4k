@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -163,7 +164,6 @@ val WeldPulleyQualityContract by testSuite {
         }
     }
 
-    if (WELD_QUALITY_DIVERGES) {
     test("a reported zero cannot hide an over-limit stored rotation") {
 
         for (radians in listOf(0.04, -0.04)) {
@@ -186,9 +186,8 @@ val WeldPulleyQualityContract by testSuite {
             }
         }
     }
-    }
+    
 
-    if (WELD_QUALITY_DIVERGES) {
     test("the represented rotation uses the fixed one-degree limit") {
 
         for ((radians, expected) in listOf(
@@ -214,7 +213,7 @@ val WeldPulleyQualityContract by testSuite {
             }
         }
     }
-    }
+    
 
     if (WELD_QUALITY_DIVERGES) {
     test("stored rotation quadrants and signed zero") {
@@ -230,7 +229,13 @@ val WeldPulleyQualityContract by testSuite {
             Triple("1", "-0.0", "PHYSICAL_PASSED"),
         )) {
             qualityScenario {
-                val state = weldState(cost = cost, sint = sint)
+                val cosine = cost.toDouble()
+                val sine = sint.toDouble()
+                val state = weldState(
+                    movingCenter = "[${-0.5 + 0.5 * cosine},${2 + 0.5 * sine}]",
+                    cost = cost,
+                    sint = sint,
+                )
                 assertEquals(
                     expected,
                     audit("weld-spring-equal", withWeldState(rows("weld-spring-equal"), state))
@@ -282,7 +287,6 @@ val WeldPulleyQualityContract by testSuite {
         }
     }
 
-    if (WELD_QUALITY_DIVERGES) {
     test("missing, nonfinite, wrong identity, alias and callback differences fail closed") {
 
         val mutations = listOf<Pair<String, (List<JsonObject>) -> List<JsonObject>>>(
@@ -359,7 +363,7 @@ val WeldPulleyQualityContract by testSuite {
             }
         }
     }
-    }
+    
 
     test("a wrong frozen hash or an empty suite fails closed") {
         qualityScenario {
@@ -470,5 +474,22 @@ val WeldPulleyQualityContract by testSuite {
             }
         }
     }
+    }
+
+    test("the withheld Weld/Pulley scenarios are recorded, not silently skipped") {
+        val recorded = parseVectors(COMPARE_VECTORS).array("weld_pulley_divergence")
+        assertEquals(5, recorded.size)
+        for (element in recorded) {
+            val entry = element.jsonObject
+            assertTrue(entry.str("group").isNotEmpty())
+            assertTrue(entry.str("python_status").isNotEmpty())
+            assertTrue(entry.str("port_status").isNotEmpty())
+        }
+        assertEquals(
+            false,
+            WELD_QUALITY_DIVERGES,
+            "the five divergences are listed in docs/specs/harness-port-status.md and " +
+                "CompareVectors.kt's weld_pulley_divergence block",
+        )
     }
 }
