@@ -12,7 +12,7 @@ implementation rather than transcribed from it:
   `df640f26be0a61d8db5c6e7624114595aebf379a`; regenerate with `parity/generate_vectors.py`.
 - `src/commonTest/.../LeafVectors.kt`, recorded at revision
   `233edd085db9427e7feb19fd150d504b5d43be1b`; regenerate with
-  `parity/generate_leaf_vectors.py`.
+  the (now deleted) `parity/generate_leaf_vectors.py`, which is in git history at `86d3b1f8^`.
 
 `tools/performance` is byte-identical at both revisions and at the current HEAD, so both
 fixtures describe the reference.

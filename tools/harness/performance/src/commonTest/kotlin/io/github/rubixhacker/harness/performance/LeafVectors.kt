@@ -12,7 +12,8 @@ import okio.ByteString.Companion.decodeBase64
  * bootstrap intervals use the tool's own 2000 draws and seed 17017. `report_text` and
  * `stdout_text` are the exact bytes the commands wrote and printed, and the argument
  * cases carry `argparse`'s own usage block for the program name each command declares.
- * Regenerate with `parity/generate_leaf_vectors.py`.
+ * The generator (`parity/generate_leaf_vectors.py`) imported `warmup_probe` and `calibrate` and was
+ * deleted with them; it is in git history at commit `86d3b1f8^` if the vectors must be re-recorded.
  */
 internal object LeafVectors {
     const val PYTHON_REVISION: String = "233edd085db9427e7feb19fd150d504b5d43be1b"
