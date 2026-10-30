@@ -146,11 +146,20 @@ that runs the real `runLockTask` against a committed `gradlew` wrapper.
 The earlier "27 of 124" was a case-level aggregate that counted shared predicates rather than test
 methods; 39 is the method-level count, not a regression.
 
-Of the 85 that remain, about 33 can never be reproduced on the JVM: 27 are Windows-only and 5 need a
-selector loop and a process-group probe that the thread-based drain does not have. Retiring
-`test_safari_windows_file.py` (7) and `test_safari_windows_process.py` (14) is therefore a coverage
-decision of the same kind as the descriptor-anchoring one above, and it has to be taken explicitly
-before `safari_yarn_lock.py` can be deleted.
+Of the 85 that remain, the Windows and selector groups are **not** dead code, and an earlier note here
+claiming a ceiling of about 91 was wrong:
+
+- `test_safari_windows_file.py` (7) runs on POSIX today; it exercises the file layer through symlinks
+  and aliases, so the Kotlin port can reproduce it directly.
+- `test_safari_windows_process.py` (14) and the capture-level Windows cases run in CI on a real Windows
+  runner: `.github/workflows/windows-qualification-harness.yml` runs the full
+  `unittest discover -s tools/qualification` there. They are real coverage, not dead weight.
+- The five selector/process-group cases patch `selectors` and probe a process group. The port drains
+  with reader threads, so an equivalent seam (`drainFactory`, process-group probe) has to be added
+  before those branches are reachable.
+
+Retiring any of them therefore drops coverage that CI actually exercises, and the decision to do so has
+to be explicit rather than inferred from "cannot run on this host".
 
 Recorded divergences: `runLockTask(windows = true)` fails closed with an explicit message rather than
 pretending to lock; the port replaces the three Python paths in `HOSTED_SOURCE_INPUTS` with the Kotlin
