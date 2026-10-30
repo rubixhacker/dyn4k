@@ -24,8 +24,8 @@
  */
 package org.dyn4j.coverage.dynamics.joint.core
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -47,6 +47,71 @@ import org.dyn4j.exception.SameObjectException
 import org.dyn4j.geometry.Mass
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
+
+val AbstractJointCoreCoverageTest by testSuite {
+    test("create") { AbstractJointCoreCoverageTestFixture().run { create() } }
+    test("createNullList") { AbstractJointCoreCoverageTestFixture().run { createNullList() } }
+    test("createListWithNullElement") { AbstractJointCoreCoverageTestFixture().run { createListWithNullElement() } }
+    test("createEmptyList") { AbstractJointCoreCoverageTestFixture().run { createEmptyList() } }
+    test("getBodies") { AbstractJointCoreCoverageTestFixture().run { getBodies() } }
+    test("getBodiesAndAdd") { AbstractJointCoreCoverageTestFixture().run { getBodiesAndAdd() } }
+    test("getBodiesAndRemove") { AbstractJointCoreCoverageTestFixture().run { getBodiesAndRemove() } }
+    test("getBodyAtValidIndex") { AbstractJointCoreCoverageTestFixture().run { getBodyAtValidIndex() } }
+    test("getBodyAtNegativeIndex") { AbstractJointCoreCoverageTestFixture().run { getBodyAtNegativeIndex() } }
+    test("getBodyAtTooHighIndex") { AbstractJointCoreCoverageTestFixture().run { getBodyAtTooHighIndex() } }
+    test("getBodyCount") { AbstractJointCoreCoverageTestFixture().run { getBodyCount() } }
+    test("getBodyIterator") { AbstractJointCoreCoverageTestFixture().run { getBodyIterator() } }
+    test("getBodyIteratorRemove") { AbstractJointCoreCoverageTestFixture().run { getBodyIteratorRemove() } }
+    test("isMember") { AbstractJointCoreCoverageTestFixture().run { isMember() } }
+    test("isEnabled") { AbstractJointCoreCoverageTestFixture().run { isEnabled() } }
+    test("getSetCollisionAllowed") { AbstractJointCoreCoverageTestFixture().run { getSetCollisionAllowed() } }
+    test("getSetUserData") { AbstractJointCoreCoverageTestFixture().run { getSetUserData() } }
+    test("getSetOwner") { AbstractJointCoreCoverageTestFixture().run { getSetOwner() } }
+    test("getConstraintImpulseMixing") { AbstractJointCoreCoverageTestFixture().run { getConstraintImpulseMixing() } }
+    test("getErrorReductionParameter") { AbstractJointCoreCoverageTestFixture().run { getErrorReductionParameter() } }
+    test("getFrequency") { AbstractJointCoreCoverageTestFixture().run { getFrequency() } }
+    test("getSpringStiffness") { AbstractJointCoreCoverageTestFixture().run { getSpringStiffness() } }
+    test("getNaturalFrequency") { AbstractJointCoreCoverageTestFixture().run { getNaturalFrequency() } }
+    test("getSpringDampingCoefficient") { AbstractJointCoreCoverageTestFixture().run { getSpringDampingCoefficient() } }
+}
+
+val AbstractPairedBodyJointCoreCoverageTest by testSuite {
+    test("create") { AbstractPairedBodyJointCoreCoverageTestFixture().run { create() } }
+    test("createNullBody1") { AbstractPairedBodyJointCoreCoverageTestFixture().run { createNullBody1() } }
+    test("createNullBody2") { AbstractPairedBodyJointCoreCoverageTestFixture().run { createNullBody2() } }
+    test("createNullBoth") { AbstractPairedBodyJointCoreCoverageTestFixture().run { createNullBoth() } }
+    test("createSame") { AbstractPairedBodyJointCoreCoverageTestFixture().run { createSame() } }
+    test("getBodies") { AbstractPairedBodyJointCoreCoverageTestFixture().run { getBodies() } }
+    test("getBodiesAndAdd") { AbstractPairedBodyJointCoreCoverageTestFixture().run { getBodiesAndAdd() } }
+    test("getBodiesAndRemove") { AbstractPairedBodyJointCoreCoverageTestFixture().run { getBodiesAndRemove() } }
+    test("getBodyAtValidIndex") { AbstractPairedBodyJointCoreCoverageTestFixture().run { getBodyAtValidIndex() } }
+    test("getBodyAtNegativeIndex") { AbstractPairedBodyJointCoreCoverageTestFixture().run { getBodyAtNegativeIndex() } }
+    test("getBodyAtTooHighIndex") { AbstractPairedBodyJointCoreCoverageTestFixture().run { getBodyAtTooHighIndex() } }
+    test("getBodyCount") { AbstractPairedBodyJointCoreCoverageTestFixture().run { getBodyCount() } }
+    test("getBodyIterator") { AbstractPairedBodyJointCoreCoverageTestFixture().run { getBodyIterator() } }
+    test("getBodyIteratorRemove") { AbstractPairedBodyJointCoreCoverageTestFixture().run { getBodyIteratorRemove() } }
+    test("isMember") { AbstractPairedBodyJointCoreCoverageTestFixture().run { isMember() } }
+    test("isEnabled") { AbstractPairedBodyJointCoreCoverageTestFixture().run { isEnabled() } }
+    test("getOtherBody") { AbstractPairedBodyJointCoreCoverageTestFixture().run { getOtherBody() } }
+    test("getReducedInertia") { AbstractPairedBodyJointCoreCoverageTestFixture().run { getReducedInertia() } }
+    test("getReducedMass") { AbstractPairedBodyJointCoreCoverageTestFixture().run { getReducedMass() } }
+}
+
+val AbstractSingleBodyJointCoreCoverageTest by testSuite {
+    test("create") { AbstractSingleBodyJointCoreCoverageTestFixture().run { create() } }
+    test("createNullBody") { AbstractSingleBodyJointCoreCoverageTestFixture().run { createNullBody() } }
+    test("getBodies") { AbstractSingleBodyJointCoreCoverageTestFixture().run { getBodies() } }
+    test("getBodiesAndAdd") { AbstractSingleBodyJointCoreCoverageTestFixture().run { getBodiesAndAdd() } }
+    test("getBodiesAndRemove") { AbstractSingleBodyJointCoreCoverageTestFixture().run { getBodiesAndRemove() } }
+    test("getBodyAtValidIndex") { AbstractSingleBodyJointCoreCoverageTestFixture().run { getBodyAtValidIndex() } }
+    test("getBodyAtNegativeIndex") { AbstractSingleBodyJointCoreCoverageTestFixture().run { getBodyAtNegativeIndex() } }
+    test("getBodyAtTooHighIndex") { AbstractSingleBodyJointCoreCoverageTestFixture().run { getBodyAtTooHighIndex() } }
+    test("getBodyCount") { AbstractSingleBodyJointCoreCoverageTestFixture().run { getBodyCount() } }
+    test("getBodyIterator") { AbstractSingleBodyJointCoreCoverageTestFixture().run { getBodyIterator() } }
+    test("getBodyIteratorRemove") { AbstractSingleBodyJointCoreCoverageTestFixture().run { getBodyIteratorRemove() } }
+    test("isMember") { AbstractSingleBodyJointCoreCoverageTestFixture().run { isMember() } }
+    test("isEnabled") { AbstractSingleBodyJointCoreCoverageTestFixture().run { isEnabled() } }
+}
 
 private class General(bodies: List<Body>?) : AbstractJoint<Body>(bodies) {
     fun constraintImpulseMixing() = getConstraintImpulseMixing(2.0, 3.0, 4.0)
@@ -114,69 +179,69 @@ private fun checkIterator(joint: AbstractJoint<Body>, expected: List<Body>) {
     expected.forEachIndexed { index, body -> assertSame(body, actual[index]) }
 }
 
-class AbstractJointCoreCoverageTest {
+private class AbstractJointCoreCoverageTestFixture  {
     private val first = Body()
     private val second = Body()
     private fun joint() = General(listOf(first, second))
 
-    @Test fun create() = checkDefaults(joint(), listOf(first, second))
-    @Test fun createNullList() { assertFailsWith<ArgumentNullException> { General(null) } }
-    @Test fun createListWithNullElement() {
+fun create() = checkDefaults(joint(), listOf(first, second))
+fun createNullList() { assertFailsWith<ArgumentNullException> { General(null) } }
+fun createListWithNullElement() {
         @Suppress("UNCHECKED_CAST") val bodies = listOf(first, null) as List<Body>
         assertFailsWith<NullElementException> { General(bodies) }
     }
-    @Test fun createEmptyList() { assertFailsWith<EmptyCollectionException> { General(emptyList()) } }
-    @Test fun getBodies() = checkReadOnlyBodies(joint(), listOf(first, second))
-    @Test fun getBodiesAndAdd() { assertFailsWith<UnsupportedOperationException> { joint().getBodies().add(Body()) } }
-    @Test fun getBodiesAndRemove() { assertFailsWith<UnsupportedOperationException> { joint().getBodies().removeAt(0) } }
-    @Test fun getBodyAtValidIndex() { val j = joint(); assertSame(first, j.getBody(0)); assertSame(second, j.getBody(1)) }
-    @Test fun getBodyAtNegativeIndex() { assertFailsWith<IndexOutOfBoundsException> { joint().getBody(-1) } }
-    @Test fun getBodyAtTooHighIndex() { assertFailsWith<IndexOutOfBoundsException> { joint().getBody(2) } }
-    @Test fun getBodyCount() { assertEquals(2, joint().getBodyCount()) }
-    @Test fun getBodyIterator() = checkIterator(joint(), listOf(first, second))
-    @Test fun getBodyIteratorRemove() { val it = joint().getBodyIterator(); it.next(); assertFailsWith<UnsupportedOperationException> { it.remove() } }
-    @Test fun isMember() { val j = joint(); assertTrue(j.isMember(first)); assertTrue(j.isMember(second)); assertFalse(j.isMember(null)); assertFalse(j.isMember(Body())) }
-    @Test fun isEnabled() { val j = joint(); assertTrue(j.isEnabled()); first.setEnabled(false); assertFalse(j.isEnabled()); second.setEnabled(false); assertFalse(j.isEnabled()); first.setEnabled(true); second.setEnabled(true); assertTrue(j.isEnabled()) }
-    @Test fun getSetCollisionAllowed() { val j = joint(); j.setCollisionAllowed(false); assertFalse(j.isCollisionAllowed()); j.setCollisionAllowed(true); assertTrue(j.isCollisionAllowed()); j.setCollisionAllowed(false); assertFalse(j.isCollisionAllowed()) }
-    @Test fun getSetUserData() { val j = joint(); val marker = Any(); j.setUserData(null); assertNull(j.getUserData()); j.setUserData(marker); assertSame(marker, j.getUserData()); j.setUserData(null); assertNull(j.getUserData()) }
-    @Test fun getSetOwner() { val j = joint(); val marker = Any(); j.setOwner(null); assertNull(j.getOwner()); j.setOwner(marker); assertSame(marker, j.getOwner()); j.setOwner(null); assertNull(j.getOwner()) }
-    @Test fun getConstraintImpulseMixing() { assertEquals(1.0 / 20.0, joint().constraintImpulseMixing()) }
-    @Test fun getErrorReductionParameter() { assertEquals(0.3, joint().errorReductionParameter()) }
-    @Test fun getFrequency() { assertEquals(2.0 / PI, joint().frequency()) }
-    @Test fun getSpringStiffness() { assertEquals(18.0, joint().springStiffness()) }
-    @Test fun getNaturalFrequency() { val j = joint(); assertEquals(6.0 * PI, j.naturalFrequencyFromFrequency()); assertEquals(2.0, j.naturalFrequencyFromStiffness()) }
-    @Test fun getSpringDampingCoefficient() { assertEquals(48.0, joint().springDampingCoefficient()) }
+fun createEmptyList() { assertFailsWith<EmptyCollectionException> { General(emptyList()) } }
+fun getBodies() = checkReadOnlyBodies(joint(), listOf(first, second))
+fun getBodiesAndAdd() { assertFailsWith<UnsupportedOperationException> { joint().getBodies().add(Body()) } }
+fun getBodiesAndRemove() { assertFailsWith<UnsupportedOperationException> { joint().getBodies().removeAt(0) } }
+fun getBodyAtValidIndex() { val j = joint(); assertSame(first, j.getBody(0)); assertSame(second, j.getBody(1)) }
+fun getBodyAtNegativeIndex() { assertFailsWith<IndexOutOfBoundsException> { joint().getBody(-1) } }
+fun getBodyAtTooHighIndex() { assertFailsWith<IndexOutOfBoundsException> { joint().getBody(2) } }
+fun getBodyCount() { assertEquals(2, joint().getBodyCount()) }
+fun getBodyIterator() = checkIterator(joint(), listOf(first, second))
+fun getBodyIteratorRemove() { val it = joint().getBodyIterator(); it.next(); assertFailsWith<UnsupportedOperationException> { it.remove() } }
+fun isMember() { val j = joint(); assertTrue(j.isMember(first)); assertTrue(j.isMember(second)); assertFalse(j.isMember(null)); assertFalse(j.isMember(Body())) }
+fun isEnabled() { val j = joint(); assertTrue(j.isEnabled()); first.setEnabled(false); assertFalse(j.isEnabled()); second.setEnabled(false); assertFalse(j.isEnabled()); first.setEnabled(true); second.setEnabled(true); assertTrue(j.isEnabled()) }
+fun getSetCollisionAllowed() { val j = joint(); j.setCollisionAllowed(false); assertFalse(j.isCollisionAllowed()); j.setCollisionAllowed(true); assertTrue(j.isCollisionAllowed()); j.setCollisionAllowed(false); assertFalse(j.isCollisionAllowed()) }
+fun getSetUserData() { val j = joint(); val marker = Any(); j.setUserData(null); assertNull(j.getUserData()); j.setUserData(marker); assertSame(marker, j.getUserData()); j.setUserData(null); assertNull(j.getUserData()) }
+fun getSetOwner() { val j = joint(); val marker = Any(); j.setOwner(null); assertNull(j.getOwner()); j.setOwner(marker); assertSame(marker, j.getOwner()); j.setOwner(null); assertNull(j.getOwner()) }
+fun getConstraintImpulseMixing() { assertEquals(1.0 / 20.0, joint().constraintImpulseMixing()) }
+fun getErrorReductionParameter() { assertEquals(0.3, joint().errorReductionParameter()) }
+fun getFrequency() { assertEquals(2.0 / PI, joint().frequency()) }
+fun getSpringStiffness() { assertEquals(18.0, joint().springStiffness()) }
+fun getNaturalFrequency() { val j = joint(); assertEquals(6.0 * PI, j.naturalFrequencyFromFrequency()); assertEquals(2.0, j.naturalFrequencyFromStiffness()) }
+fun getSpringDampingCoefficient() { assertEquals(48.0, joint().springDampingCoefficient()) }
 }
 
-class AbstractPairedBodyJointCoreCoverageTest {
+private class AbstractPairedBodyJointCoreCoverageTestFixture  {
     private val first = Body()
     private val second = Body()
     private fun joint() = Pair(first, second)
 
-    @Test fun create() { val j = joint(); checkDefaults(j, listOf(first, second)); assertSame(first, j.getBody1()); assertSame(second, j.getBody2()) }
-    @Test fun createNullBody1() { assertFailsWith<NullElementException> { Pair(null, second) } }
-    @Test fun createNullBody2() { assertFailsWith<NullElementException> { Pair(first, null) } }
-    @Test fun createNullBoth() { assertFailsWith<NullElementException> { Pair(null, null) } }
-    @Test fun createSame() { assertFailsWith<SameObjectException> { Pair(first, first) } }
-    @Test fun getBodies() { val j = joint(); checkReadOnlyBodies(j, listOf(first, second)); assertSame(first, j.getBody1()); assertSame(second, j.getBody2()) }
-    @Test fun getBodiesAndAdd() { assertFailsWith<UnsupportedOperationException> { joint().getBodies().add(Body()) } }
-    @Test fun getBodiesAndRemove() { assertFailsWith<UnsupportedOperationException> { joint().getBodies().removeAt(0) } }
-    @Test fun getBodyAtValidIndex() { assertSame(first, joint().getBody(0)) }
-    @Test fun getBodyAtNegativeIndex() { assertFailsWith<IndexOutOfBoundsException> { joint().getBody(-1) } }
-    @Test fun getBodyAtTooHighIndex() { assertFailsWith<IndexOutOfBoundsException> { joint().getBody(2) } }
-    @Test fun getBodyCount() { assertEquals(2, joint().getBodyCount()) }
-    @Test fun getBodyIterator() = checkIterator(joint(), listOf(first, second))
-    @Test fun getBodyIteratorRemove() { val it = joint().getBodyIterator(); it.next(); assertFailsWith<UnsupportedOperationException> { it.remove() } }
-    @Test fun isMember() { val j = joint(); assertTrue(j.isMember(first)); assertTrue(j.isMember(second)); assertFalse(j.isMember(null)); assertFalse(j.isMember(Body())) }
-    @Test fun isEnabled() { val j = joint(); assertTrue(j.isEnabled()); first.setEnabled(false); assertFalse(j.isEnabled()); second.setEnabled(false); assertFalse(j.isEnabled()); first.setEnabled(true); second.setEnabled(true); assertTrue(j.isEnabled()) }
-    @Test fun getOtherBody() { val j = joint(); assertSame(second, j.getOtherBody(first)); assertSame(first, j.getOtherBody(second)); assertNull(j.getOtherBody(null)); assertNull(j.getOtherBody(Body())) }
-    @Test fun getReducedInertia() {
+fun create() { val j = joint(); checkDefaults(j, listOf(first, second)); assertSame(first, j.getBody1()); assertSame(second, j.getBody2()) }
+fun createNullBody1() { assertFailsWith<NullElementException> { Pair(null, second) } }
+fun createNullBody2() { assertFailsWith<NullElementException> { Pair(first, null) } }
+fun createNullBoth() { assertFailsWith<NullElementException> { Pair(null, null) } }
+fun createSame() { assertFailsWith<SameObjectException> { Pair(first, first) } }
+fun getBodies() { val j = joint(); checkReadOnlyBodies(j, listOf(first, second)); assertSame(first, j.getBody1()); assertSame(second, j.getBody2()) }
+fun getBodiesAndAdd() { assertFailsWith<UnsupportedOperationException> { joint().getBodies().add(Body()) } }
+fun getBodiesAndRemove() { assertFailsWith<UnsupportedOperationException> { joint().getBodies().removeAt(0) } }
+fun getBodyAtValidIndex() { assertSame(first, joint().getBody(0)) }
+fun getBodyAtNegativeIndex() { assertFailsWith<IndexOutOfBoundsException> { joint().getBody(-1) } }
+fun getBodyAtTooHighIndex() { assertFailsWith<IndexOutOfBoundsException> { joint().getBody(2) } }
+fun getBodyCount() { assertEquals(2, joint().getBodyCount()) }
+fun getBodyIterator() = checkIterator(joint(), listOf(first, second))
+fun getBodyIteratorRemove() { val it = joint().getBodyIterator(); it.next(); assertFailsWith<UnsupportedOperationException> { it.remove() } }
+fun isMember() { val j = joint(); assertTrue(j.isMember(first)); assertTrue(j.isMember(second)); assertFalse(j.isMember(null)); assertFalse(j.isMember(Body())) }
+fun isEnabled() { val j = joint(); assertTrue(j.isEnabled()); first.setEnabled(false); assertFalse(j.isEnabled()); second.setEnabled(false); assertFalse(j.isEnabled()); first.setEnabled(true); second.setEnabled(true); assertTrue(j.isEnabled()) }
+fun getOtherBody() { val j = joint(); assertSame(second, j.getOtherBody(first)); assertSame(first, j.getOtherBody(second)); assertNull(j.getOtherBody(null)); assertNull(j.getOtherBody(Body())) }
+fun getReducedInertia() {
         val j = joint(); first.setMass(Mass(Vector2(), 1.0, 2.0)); second.setMass(Mass(Vector2(), 1.0, 2.0))
         assertEquals(1.0, j.reducedInertia()); first.setMassType(MassType.INFINITE); assertEquals(2.0, j.reducedInertia())
         first.setMassType(MassType.NORMAL); second.setMassType(MassType.INFINITE); assertEquals(2.0, j.reducedInertia())
         first.setMassType(MassType.INFINITE); assertEquals(0.0, j.reducedInertia())
     }
-    @Test fun getReducedMass() {
+fun getReducedMass() {
         val j = joint(); first.setMass(Mass(Vector2(), 1.0, 2.0)); second.setMass(Mass(Vector2(), 1.0, 2.0))
         assertEquals(0.5, j.reducedMass()); first.setMassType(MassType.INFINITE); assertEquals(1.0, j.reducedMass())
         first.setMassType(MassType.NORMAL); second.setMassType(MassType.INFINITE); assertEquals(1.0, j.reducedMass())
@@ -184,21 +249,21 @@ class AbstractPairedBodyJointCoreCoverageTest {
     }
 }
 
-class AbstractSingleBodyJointCoreCoverageTest {
+private class AbstractSingleBodyJointCoreCoverageTestFixture  {
     private val body = Body()
     private fun joint() = Single(body)
 
-    @Test fun create() { val j = joint(); checkDefaults(j, listOf(body)); assertSame(body, j.getBody()) }
-    @Test fun createNullBody() { assertFailsWith<NullElementException> { Single(null) } }
-    @Test fun getBodies() = checkReadOnlyBodies(joint(), listOf(body))
-    @Test fun getBodiesAndAdd() { assertFailsWith<UnsupportedOperationException> { joint().getBodies().add(Body()) } }
-    @Test fun getBodiesAndRemove() { assertFailsWith<UnsupportedOperationException> { joint().getBodies().removeAt(0) } }
-    @Test fun getBodyAtValidIndex() { assertSame(body, joint().getBody(0)) }
-    @Test fun getBodyAtNegativeIndex() { assertFailsWith<IndexOutOfBoundsException> { joint().getBody(-1) } }
-    @Test fun getBodyAtTooHighIndex() { assertFailsWith<IndexOutOfBoundsException> { joint().getBody(1) } }
-    @Test fun getBodyCount() { assertEquals(1, joint().getBodyCount()) }
-    @Test fun getBodyIterator() = checkIterator(joint(), listOf(body))
-    @Test fun getBodyIteratorRemove() { val it = joint().getBodyIterator(); it.next(); assertFailsWith<UnsupportedOperationException> { it.remove() } }
-    @Test fun isMember() { val j = joint(); assertTrue(j.isMember(body)); assertFalse(j.isMember(null)); assertFalse(j.isMember(Body())) }
-    @Test fun isEnabled() { val j = joint(); assertTrue(j.isEnabled()); body.setEnabled(false); assertFalse(j.isEnabled()); body.setEnabled(true); assertTrue(j.isEnabled()) }
+fun create() { val j = joint(); checkDefaults(j, listOf(body)); assertSame(body, j.getBody()) }
+fun createNullBody() { assertFailsWith<NullElementException> { Single(null) } }
+fun getBodies() = checkReadOnlyBodies(joint(), listOf(body))
+fun getBodiesAndAdd() { assertFailsWith<UnsupportedOperationException> { joint().getBodies().add(Body()) } }
+fun getBodiesAndRemove() { assertFailsWith<UnsupportedOperationException> { joint().getBodies().removeAt(0) } }
+fun getBodyAtValidIndex() { assertSame(body, joint().getBody(0)) }
+fun getBodyAtNegativeIndex() { assertFailsWith<IndexOutOfBoundsException> { joint().getBody(-1) } }
+fun getBodyAtTooHighIndex() { assertFailsWith<IndexOutOfBoundsException> { joint().getBody(1) } }
+fun getBodyCount() { assertEquals(1, joint().getBodyCount()) }
+fun getBodyIterator() = checkIterator(joint(), listOf(body))
+fun getBodyIteratorRemove() { val it = joint().getBodyIterator(); it.next(); assertFailsWith<UnsupportedOperationException> { it.remove() } }
+fun isMember() { val j = joint(); assertTrue(j.isMember(body)); assertFalse(j.isMember(null)); assertFalse(j.isMember(Body())) }
+fun isEnabled() { val j = joint(); assertTrue(j.isEnabled()); body.setEnabled(false); assertFalse(j.isEnabled()); body.setEnabled(true); assertTrue(j.isEnabled()) }
 }

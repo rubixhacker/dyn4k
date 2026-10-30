@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.collision.shapes.b
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.collision.manifold.ClippingManifoldSolver
 import org.dyn4j.collision.manifold.Manifold
 import org.dyn4j.collision.manifold.ManifoldPoint
@@ -34,22 +35,26 @@ import org.dyn4j.geometry.Slice
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Triangle
 import org.dyn4j.geometry.Vector2
-import kotlin.test.BeforeTest
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
+val TriangleSliceTest by testSuite {
+    test("detectSat") { TriangleSliceTestFixture().apply { setup() }.run { detectSat() } }
+    test("detectGjk") { TriangleSliceTestFixture().apply { setup() }.run { detectGjk() } }
+    test("gjkDistance") { TriangleSliceTestFixture().apply { setup() }.run { gjkDistance() } }
+    test("getClipManifold") { TriangleSliceTestFixture().apply { setup() }.run { getClipManifold() } }
+}
 
 
 
-class TriangleSliceTest : AbstractNarrowphaseShapeTest() {
+
+private class TriangleSliceTestFixture : AbstractNarrowphaseShapeTest()  {
     private lateinit var triangle: Triangle
 
     private lateinit var slice: Slice
 
-    @BeforeTest
     fun setup() {
         this.triangle = Triangle(
         Vector2(1.29, 0.25),
@@ -58,8 +63,7 @@ class TriangleSliceTest : AbstractNarrowphaseShapeTest() {
         this.slice = Slice(0.5, degrees(50.0))
     }
 
-    @Test
-    fun detectSat() {
+fun detectSat() {
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
@@ -124,8 +128,7 @@ class TriangleSliceTest : AbstractNarrowphaseShapeTest() {
         assertFalse(this.sat.detect(slice, t2, triangle, t1))
     }
 
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
@@ -190,8 +193,7 @@ class TriangleSliceTest : AbstractNarrowphaseShapeTest() {
         assertFalse(this.gjk.detect(slice, t2, triangle, t1))
     }
 
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         val s = Separation()
 
         val t1 = Transform()
@@ -276,8 +278,7 @@ class TriangleSliceTest : AbstractNarrowphaseShapeTest() {
         assertClose( 0.250, p2.y, 1.0e-3)
     }
 
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         val m = Manifold()
         val p = Penetration()
 

@@ -24,7 +24,7 @@
  */
 package org.dyn4j.coverage.world.support
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertTrue
 import org.dyn4j.collision.BasicCollisionItem
 import org.dyn4j.collision.BasicCollisionPair
@@ -52,20 +52,29 @@ import org.dyn4j.world.listener.DestructionListenerAdapter
 import org.dyn4j.world.listener.StepListenerAdapter
 import org.dyn4j.world.listener.TimeOfImpactListenerAdapter
 
-class WorldListenerAdapterCoverageTest {
+val WorldListenerAdapterCoverageTest by testSuite {
+    test("listenerAdaptersBoundsListenerAdapter") { WorldListenerAdapterCoverageTestFixture().run { listenerAdaptersBoundsListenerAdapter() } }
+    test("listenerAdaptersCollisionListenerAdapter") { WorldListenerAdapterCoverageTestFixture().run { listenerAdaptersCollisionListenerAdapter() } }
+    test("listenerAdaptersContactListenerAdapter") { WorldListenerAdapterCoverageTestFixture().run { listenerAdaptersContactListenerAdapter() } }
+    test("listenerAdaptersDestructionListenerAdapter") { WorldListenerAdapterCoverageTestFixture().run { listenerAdaptersDestructionListenerAdapter() } }
+    test("listenerAdaptersStepListenerAdapter") { WorldListenerAdapterCoverageTestFixture().run { listenerAdaptersStepListenerAdapter() } }
+    test("listenerAdaptersTimeOfImpactListenerAdapter") { WorldListenerAdapterCoverageTestFixture().run { listenerAdaptersTimeOfImpactListenerAdapter() } }
+}
+
+private class WorldListenerAdapterCoverageTestFixture  {
     private fun collision(): WorldCollisionData<Body> {
         val pair = BasicCollisionPair<CollisionItem<Body, BodyFixture>>(
             BasicCollisionItem(null, null), BasicCollisionItem(null, null))
         return WorldCollisionData(pair)
     }
 
-    @Test fun listenerAdaptersBoundsListenerAdapter() {
+fun listenerAdaptersBoundsListenerAdapter() {
         val adapter = BoundsListenerAdapter<Body, BodyFixture>()
         adapter.outside(null)
         adapter.outside(Body())
     }
 
-    @Test fun listenerAdaptersCollisionListenerAdapter() {
+fun listenerAdaptersCollisionListenerAdapter() {
         val adapter = CollisionListenerAdapter<Body, BodyFixture>()
         val data = collision()
         assertTrue(adapter.collision(null as BroadphaseCollisionData<Body, BodyFixture>?))
@@ -76,7 +85,7 @@ class WorldListenerAdapterCoverageTest {
         assertTrue(adapter.collision(data as ManifoldCollisionData<Body, BodyFixture>))
     }
 
-    @Test fun listenerAdaptersContactListenerAdapter() {
+fun listenerAdaptersContactListenerAdapter() {
         val adapter = ContactListenerAdapter<Body>()
         val data = collision()
         val point = Vector2(1.0, 2.0)
@@ -93,7 +102,7 @@ class WorldListenerAdapterCoverageTest {
         adapter.collision(data)
     }
 
-    @Test fun listenerAdaptersDestructionListenerAdapter() {
+fun listenerAdaptersDestructionListenerAdapter() {
         val adapter = DestructionListenerAdapter<Body>()
         val constraint = ContactConstraint<Body>(BasicCollisionPair<CollisionItem<Body, BodyFixture>>(
             BasicCollisionItem(null, null), BasicCollisionItem(null, null)))
@@ -103,7 +112,7 @@ class WorldListenerAdapterCoverageTest {
         adapter.destroyed(null as Joint<Body>?); adapter.destroyed(joint)
     }
 
-    @Test fun listenerAdaptersStepListenerAdapter() {
+fun listenerAdaptersStepListenerAdapter() {
         val adapter = StepListenerAdapter<Body>()
         val step = TimeStep(0.3)
         val world = World<Body>()
@@ -115,7 +124,7 @@ class WorldListenerAdapterCoverageTest {
         }
     }
 
-    @Test fun listenerAdaptersTimeOfImpactListenerAdapter() {
+fun listenerAdaptersTimeOfImpactListenerAdapter() {
         val adapter = TimeOfImpactListenerAdapter<Body>()
         val body = Body()
         val fixture = BodyFixture(Geometry.createCircle(0.5))

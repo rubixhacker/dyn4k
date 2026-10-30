@@ -24,7 +24,7 @@
  */
 package org.dyn4j.collision.manifold
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
@@ -45,10 +45,41 @@ import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 import kotlin.math.PI
 
-class ManifoldModelCoverageTest {
+val ManifoldModelCoverageTest by testSuite {
+    test("indexedManifoldPointIdCreate") { ManifoldModelCoverageTestFixture().run { indexedManifoldPointIdCreate() } }
+    test("indexedManifoldPointIdEquals") { ManifoldModelCoverageTestFixture().run { indexedManifoldPointIdEquals() } }
+    test("indexedManifoldPointIdHashcode") { ManifoldModelCoverageTestFixture().run { indexedManifoldPointIdHashcode() } }
+    test("indexedManifoldPointIdTostring") { ManifoldModelCoverageTestFixture().run { indexedManifoldPointIdTostring() } }
+    test("indexedManifoldPointIdCopy") { ManifoldModelCoverageTestFixture().run { indexedManifoldPointIdCopy() } }
+    test("manifoldPointIdCreate") { ManifoldModelCoverageTestFixture().run { manifoldPointIdCreate() } }
+    test("manifoldPointIdCopy") { ManifoldModelCoverageTestFixture().run { manifoldPointIdCopy() } }
+    test("manifoldPointCreate") { ManifoldModelCoverageTestFixture().run { manifoldPointCreate() } }
+    test("manifoldPointCopy") { ManifoldModelCoverageTestFixture().run { manifoldPointCopy() } }
+    test("manifoldPointGetSetPoint") { ManifoldModelCoverageTestFixture().run { manifoldPointGetSetPoint() } }
+    test("manifoldPointGetSetDepth") { ManifoldModelCoverageTestFixture().run { manifoldPointGetSetDepth() } }
+    test("manifoldPointTostring") { ManifoldModelCoverageTestFixture().run { manifoldPointTostring() } }
+    test("manifoldPointShift") { ManifoldModelCoverageTestFixture().run { manifoldPointShift() } }
+    test("manifoldCreate") { ManifoldModelCoverageTestFixture().run { manifoldCreate() } }
+    test("manifoldClear") { ManifoldModelCoverageTestFixture().run { manifoldClear() } }
+    test("manifoldCopy") { ManifoldModelCoverageTestFixture().run { manifoldCopy() } }
+    test("manifoldGetSetNormal") { ManifoldModelCoverageTestFixture().run { manifoldGetSetNormal() } }
+    test("manifoldGetSetPoints") { ManifoldModelCoverageTestFixture().run { manifoldGetSetPoints() } }
+    test("manifoldTostring") { ManifoldModelCoverageTestFixture().run { manifoldTostring() } }
+    test("manifoldShift") { ManifoldModelCoverageTestFixture().run { manifoldShift() } }
+}
+
+val ClippingManifoldCoverageTest by testSuite {
+    test("scenario1") { ClippingManifoldCoverageTestFixture().run { scenario1() } }
+    test("scenario2") { ClippingManifoldCoverageTestFixture().run { scenario2() } }
+    test("scenario3") { ClippingManifoldCoverageTestFixture().run { scenario3() } }
+    test("scenario4") { ClippingManifoldCoverageTestFixture().run { scenario4() } }
+    test("scenario5") { ClippingManifoldCoverageTestFixture().run { scenario5() } }
+}
+
+private class ManifoldModelCoverageTestFixture  {
     private class SeedManifold(normal: Vector2, points: List<ManifoldPoint>) : Manifold(normal, points)
 
-    @Test fun indexedManifoldPointIdCreate() {
+fun indexedManifoldPointIdCreate() {
         val plain = IndexedManifoldPointId(0, 1, 0)
         assertEquals(0, plain.getReferenceEdgeIndex())
         assertEquals(1, plain.getIncidentEdgeIndex())
@@ -61,7 +92,7 @@ class ManifoldModelCoverageTest {
         assertTrue(flipped.isFlipped())
     }
 
-    @Test fun indexedManifoldPointIdEquals() {
+fun indexedManifoldPointIdEquals() {
         val source = IndexedManifoldPointId(0, 1, 0)
         assertEquals(source, source)
         assertEquals(source, IndexedManifoldPointId(0, 1, 0))
@@ -74,34 +105,34 @@ class ManifoldModelCoverageTest {
         assertFalse(source.equals(Any()))
     }
 
-    @Test fun indexedManifoldPointIdHashcode() {
+fun indexedManifoldPointIdHashcode() {
         val source = IndexedManifoldPointId(0, 1, 0)
         assertEquals(source.hashCode(), IndexedManifoldPointId(0, 1, 0).hashCode())
         assertNotEquals(source.hashCode(), IndexedManifoldPointId(0, 1, 2).hashCode())
         assertNotEquals(source.hashCode(), IndexedManifoldPointId(0, 1, 0, true).hashCode())
     }
 
-    @Test fun indexedManifoldPointIdTostring() {
+fun indexedManifoldPointIdTostring() {
         assertNotNull(IndexedManifoldPointId(0, 1, 0).toString())
     }
 
-    @Test fun indexedManifoldPointIdCopy() {
+fun indexedManifoldPointIdCopy() {
         val source = IndexedManifoldPointId(0, 1, 0, true)
         val copy = source.copy()
         assertEquals(source, copy)
         assertNotSame(source, copy)
     }
 
-    @Test fun manifoldPointIdCreate() {
+fun manifoldPointIdCreate() {
         assertNotNull(ManifoldPointId.DISTANCE.toString())
     }
 
-    @Test fun manifoldPointIdCopy() {
+fun manifoldPointIdCopy() {
         val id = ManifoldPointId.DISTANCE
         assertSame(id, id.copy())
     }
 
-    @Test fun manifoldPointCreate() {
+fun manifoldPointCreate() {
         val empty = ManifoldPoint(ManifoldPointId.DISTANCE)
         assertEquals(Vector2(), empty.getPoint())
         assertEquals(0.0, empty.getDepth())
@@ -115,7 +146,7 @@ class ManifoldModelCoverageTest {
         assertSame(ManifoldPointId.DISTANCE, ManifoldPoint(null).getId())
     }
 
-    @Test fun manifoldPointCopy() {
+fun manifoldPointCopy() {
         val source = ManifoldPoint(ManifoldPointId.DISTANCE, Vector2(1.0, 2.0), 1.0)
         for (result in listOf(source.copy(), ManifoldPoint(ManifoldPointId.DISTANCE).also { it.set(source) })) {
             assertSame(source.getId(), result.getId())
@@ -134,7 +165,7 @@ class ManifoldModelCoverageTest {
         assertEquals(2.0, copy.getDepth())
     }
 
-    @Test fun manifoldPointGetSetPoint() {
+fun manifoldPointGetSetPoint() {
         val result = ManifoldPoint(ManifoldPointId.DISTANCE)
         val exposed = result.getPoint()
         val input = Vector2(-2.0, 1.0)
@@ -146,7 +177,7 @@ class ManifoldModelCoverageTest {
         assertSame(ManifoldPointId.DISTANCE, result.getId())
     }
 
-    @Test fun manifoldPointGetSetDepth() {
+fun manifoldPointGetSetDepth() {
         val result = ManifoldPoint(ManifoldPointId.DISTANCE)
         result.setDepth(5.0)
         assertEquals(5.0, result.getDepth())
@@ -154,11 +185,11 @@ class ManifoldModelCoverageTest {
         assertSame(ManifoldPointId.DISTANCE, result.getId())
     }
 
-    @Test fun manifoldPointTostring() {
+fun manifoldPointTostring() {
         assertNotNull(ManifoldPoint(ManifoldPointId.DISTANCE).toString())
     }
 
-    @Test fun manifoldPointShift() {
+fun manifoldPointShift() {
         val result = ManifoldPoint(ManifoldPointId.DISTANCE)
         result.setPoint(Vector2(1.0, -1.0))
         result.setDepth(4.0)
@@ -168,7 +199,7 @@ class ManifoldModelCoverageTest {
         assertSame(ManifoldPointId.DISTANCE, result.getId())
     }
 
-    @Test fun manifoldCreate() {
+fun manifoldCreate() {
         val result = Manifold()
         assertEquals(Vector2(), result.getNormal())
         assertTrue(result.getPoints().isEmpty())
@@ -179,7 +210,7 @@ class ManifoldModelCoverageTest {
         assertTrue(seeded.getPoints().isEmpty())
     }
 
-    @Test fun manifoldClear() {
+fun manifoldClear() {
         val result = Manifold()
         result.setNormal(Vector2(1.0, 1.0))
         result.getPoints().add(ManifoldPoint(ManifoldPointId.DISTANCE, Vector2(1.0, 1.0), 1.0))
@@ -188,7 +219,7 @@ class ManifoldModelCoverageTest {
         assertTrue(result.getPoints().isEmpty())
     }
 
-    @Test fun manifoldCopy() {
+fun manifoldCopy() {
         val source = Manifold()
         source.setNormal(Vector2(1.0, 1.0))
         source.getPoints().add(ManifoldPoint(ManifoldPointId.DISTANCE, Vector2(1.0, 1.0), 1.0))
@@ -205,7 +236,7 @@ class ManifoldModelCoverageTest {
         }
     }
 
-    @Test fun manifoldGetSetNormal() {
+fun manifoldGetSetNormal() {
         val result = Manifold()
         val exposed = result.getNormal()
         val input = Vector2(1.0, 2.0)
@@ -215,7 +246,7 @@ class ManifoldModelCoverageTest {
         assertEquals(Vector2(1.0, 2.0), exposed)
     }
 
-    @Test fun manifoldGetSetPoints() {
+fun manifoldGetSetPoints() {
         val result = Manifold()
         val input = arrayListOf(ManifoldPoint(ManifoldPointId.DISTANCE, Vector2(2.0, 3.0), 5.0))
         val exposed = result.getPoints()
@@ -229,7 +260,7 @@ class ManifoldModelCoverageTest {
         assertEquals(5.0, exposed[0].getDepth())
     }
 
-    @Test fun manifoldTostring() {
+fun manifoldTostring() {
         val result = Manifold()
         assertNotNull(result.toString())
         result.setNormal(Vector2(1.0, 1.0))
@@ -238,7 +269,7 @@ class ManifoldModelCoverageTest {
         assertNotNull(result.toString())
     }
 
-    @Test fun manifoldShift() {
+fun manifoldShift() {
         val result = Manifold()
         result.setNormal(Vector2(1.0, 1.0))
         result.getPoints().add(ManifoldPoint(ManifoldPointId.DISTANCE, Vector2(1.0, 1.0), 1.0))
@@ -250,7 +281,7 @@ class ManifoldModelCoverageTest {
     }
 }
 
-class ClippingManifoldCoverageTest {
+private class ClippingManifoldCoverageTestFixture  {
     private data class Contact(val depth: Double, val x: Double, val y: Double)
     private data class Expected(val x: Double, val y: Double, val points: List<Contact>)
 
@@ -285,35 +316,35 @@ class ClippingManifoldCoverageTest {
         }
     }
 
-    @Test fun scenario1() {
+fun scenario1() {
         val shifted = Transform().also { it.translate(0.5, 0.5) }
         val point = listOf(Contact(0.250, 0.500, 0.000))
         verify(Geometry.createRectangle(1.0, 0.5), Geometry.createCircle(0.5), shifted,
             Expected(0.0, -1.0, point), Expected(0.0, 1.0, point))
     }
 
-    @Test fun scenario2() {
+fun scenario2() {
         val shifted = Transform().also { it.translate(-0.5, -0.35) }
         verify(Geometry.createRectangle(1.0, 0.5), Geometry.createSquare(0.5), shifted,
             Expected(0.0, 1.0, listOf(Contact(0.150, -0.250, -0.100), Contact(0.150, -0.500, -0.100))),
             Expected(0.0, -1.0, listOf(Contact(0.150, -0.500, -0.250), Contact(0.150, -0.250, -0.250))))
     }
 
-    @Test fun scenario3() {
+fun scenario3() {
         val shifted = Transform().also { it.rotate(PI / 18.0); it.translate(-0.5, -0.5) }
         val points = listOf(Contact(0.039, -0.297, -0.210), Contact(0.003, -0.500, -0.246))
         verify(Geometry.createRectangle(1.0, 0.5), Geometry.createSquare(0.5), shifted,
             Expected(0.0, 1.0, points), Expected(0.0, -1.0, points))
     }
 
-    @Test fun scenario4() {
+fun scenario4() {
         val shifted = Transform().also { it.rotate(PI / 3.0); it.translate(-0.5, -0.5) }
         val point = listOf(Contact(0.033, -0.500, -0.250))
         verify(Geometry.createRectangle(1.0, 0.5), Geometry.createSquare(0.5), shifted,
             Expected(0.500, 0.866, point), Expected(-0.500, -0.866, point))
     }
 
-    @Test fun scenario5() {
+fun scenario5() {
         val shifted = Transform().also { it.translate(0.0, -0.35) }
         verify(Geometry.createRectangle(1.0, 0.5), Geometry.createSquare(0.5), shifted,
             Expected(0.0, 1.0, listOf(Contact(0.150, 0.250, -0.100), Contact(0.150, -0.250, -0.100))),

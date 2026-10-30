@@ -1,6 +1,6 @@
 package org.dyn4j.collision.narrowphase
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
 import kotlin.test.assertSame
@@ -14,14 +14,32 @@ import org.dyn4j.geometry.Triangle
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Geometry
 
-class QueryResultTest {
+val QueryResultTest by testSuite {
+    test("typeOnlyFallbackMatchesBuiltInSubclassBeforeObservingInstance") { QueryResultTestFixture().run { typeOnlyFallbackMatchesBuiltInSubclassBeforeObservingInstance() } }
+    test("typeOnlyFallbackMatchesTriangleBeforeObservingInstance") { QueryResultTestFixture().run { typeOnlyFallbackMatchesTriangleBeforeObservingInstance() } }
+    test("declaredCustomTypeMatchesTransitiveSupertypeBeforeObservingInstance") { QueryResultTestFixture().run { declaredCustomTypeMatchesTransitiveSupertypeBeforeObservingInstance() } }
+    test("selfSupertypeDeclarationIsRejectedWithoutChangingFallbackMatches") { QueryResultTestFixture().run { selfSupertypeDeclarationIsRejectedWithoutChangingFallbackMatches() } }
+    test("falseBuiltInReverseDeclarationIsRejectedWithoutChangingFallbackMatches") { QueryResultTestFixture().run { falseBuiltInReverseDeclarationIsRejectedWithoutChangingFallbackMatches() } }
+    test("falseCustomReverseDeclarationIsRejectedWithoutChangingFallbackMatches") { QueryResultTestFixture().run { falseCustomReverseDeclarationIsRejectedWithoutChangingFallbackMatches() } }
+    test("nonCyclicCustomClaimIsTrustedWhileRuntimeMatchUsesActualInstance") { QueryResultTestFixture().run { nonCyclicCustomClaimIsTrustedWhileRuntimeMatchUsesActualInstance() } }
+    test("runtimeSubtypeUsesKClassInstanceCheckWithoutDeclaration") { QueryResultTestFixture().run { runtimeSubtypeUsesKClassInstanceCheckWithoutDeclaration() } }
+    test("resultSetAndShiftKeepExposedVectorIdentity") { QueryResultTestFixture().run { resultSetAndShiftKeepExposedVectorIdentity() } }
+    test("circleQueriesPreserveDirectedResultsAndUntouchedMisses") { QueryResultTestFixture().run { circleQueriesPreserveDirectedResultsAndUntouchedMisses() } }
+    test("minkowskiSupportRestoresCallerDirection") { QueryResultTestFixture().run { minkowskiSupportRestoresCallerDirection() } }
+    test("gjkUsesInjectedPenetrationSolverForNonCircleShapes") { QueryResultTestFixture().run { gjkUsesInjectedPenetrationSolverForNonCircleShapes() } }
+    test("satReportsOverlapAndStrictContainment") { QueryResultTestFixture().run { satReportsOverlapAndStrictContainment() } }
+    test("typedFallbackInvokesSelectedDetector") { QueryResultTestFixture().run { typedFallbackInvokesSelectedDetector() } }
+    test("nonStrictFallbackMatchesRuntimeSubtypeOnEveryTarget") { QueryResultTestFixture().run { nonStrictFallbackMatchesRuntimeSubtypeOnEveryTarget() } }
+    test("gjkRaycastReportsDirectedSquareEntry") { QueryResultTestFixture().run { gjkRaycastReportsDirectedSquareEntry() } }
+}
+
+private class QueryResultTestFixture  {
     private class CustomRectangle : Rectangle(2.0, 1.0)
     private class RuntimeRectangle : Rectangle(2.0, 1.0)
     private class CycleRectangle : Rectangle(2.0, 1.0)
     private class MisdeclaredCircle : Circle(1.0)
 
-    @Test
-    fun typeOnlyFallbackMatchesBuiltInSubclassBeforeObservingInstance() {
+fun typeOnlyFallbackMatchesBuiltInSubclassBeforeObservingInstance() {
         val polygon = convexClassOf(Polygon::class)
         val rectangle = convexClassOf(Rectangle::class)
         val circle = convexClassOf(Circle::class)
@@ -31,8 +49,7 @@ class QueryResultTest {
         assertEquals(true, PairwiseTypedFallbackCondition(polygon, false, circle, true).isMatch(rectangle, circle))
     }
 
-    @Test
-    fun typeOnlyFallbackMatchesTriangleBeforeObservingInstance() {
+fun typeOnlyFallbackMatchesTriangleBeforeObservingInstance() {
         val polygon = convexClassOf(Polygon::class)
         val triangle = convexClassOf(Triangle::class)
         val circle = convexClassOf(Circle::class)
@@ -45,8 +62,7 @@ class QueryResultTest {
         assertEquals(true, condition.isMatch(instance, Circle(1.0)))
     }
 
-    @Test
-    fun declaredCustomTypeMatchesTransitiveSupertypeBeforeObservingInstance() {
+fun declaredCustomTypeMatchesTransitiveSupertypeBeforeObservingInstance() {
         val custom = declareConvexSupertype(CustomRectangle::class, Rectangle::class)
         val polygon = convexClassOf(Polygon::class)
         val circle = convexClassOf(Circle::class)
@@ -55,8 +71,7 @@ class QueryResultTest {
         assertEquals(true, PairwiseTypedFallbackCondition(polygon, false, circle, true).isMatch(custom, circle))
     }
 
-    @Test
-    fun selfSupertypeDeclarationIsRejectedWithoutChangingFallbackMatches() {
+fun selfSupertypeDeclarationIsRejectedWithoutChangingFallbackMatches() {
         val error = assertFailsWith<IllegalArgumentException> {
             declareConvexSupertype(Circle::class, Circle::class)
         }
@@ -67,8 +82,7 @@ class QueryResultTest {
         assertEquals(false, SingleTypedFallbackCondition(polygon, false).isMatch(Circle(1.0), Circle(1.0)))
     }
 
-    @Test
-    fun falseBuiltInReverseDeclarationIsRejectedWithoutChangingFallbackMatches() {
+fun falseBuiltInReverseDeclarationIsRejectedWithoutChangingFallbackMatches() {
         val error = assertFailsWith<IllegalArgumentException> {
             declareConvexSupertype(Polygon::class, Rectangle::class)
         }
@@ -84,8 +98,7 @@ class QueryResultTest {
         assertEquals(false, SingleTypedFallbackCondition(rectangle, false).isMatch(polygonInstance, Circle(1.0)))
     }
 
-    @Test
-    fun falseCustomReverseDeclarationIsRejectedWithoutChangingFallbackMatches() {
+fun falseCustomReverseDeclarationIsRejectedWithoutChangingFallbackMatches() {
         val custom = declareConvexSupertype(CycleRectangle::class, Rectangle::class)
         val error = assertFailsWith<IllegalArgumentException> {
             declareConvexSupertype(Rectangle::class, CycleRectangle::class)
@@ -98,23 +111,20 @@ class QueryResultTest {
         assertEquals(true, SingleTypedFallbackCondition(rectangle, false).isMatch(custom, convexClassOf(Circle::class)))
     }
 
-    @Test
-    fun nonCyclicCustomClaimIsTrustedWhileRuntimeMatchUsesActualInstance() {
+fun nonCyclicCustomClaimIsTrustedWhileRuntimeMatchUsesActualInstance() {
         declareConvexSupertype(MisdeclaredCircle::class, Polygon::class)
         val polygon = convexClassOf(Polygon::class)
         val condition = SingleTypedFallbackCondition(polygon, false)
         assertEquals(false, condition.isMatch(MisdeclaredCircle(), Circle(1.0)))
     }
 
-    @Test
-    fun runtimeSubtypeUsesKClassInstanceCheckWithoutDeclaration() {
+fun runtimeSubtypeUsesKClassInstanceCheckWithoutDeclaration() {
         val polygon = convexClassOf(Polygon::class)
         val condition = SingleTypedFallbackCondition(polygon, false)
         assertEquals(true, condition.isMatch(RuntimeRectangle(), Circle(1.0)))
     }
 
-    @Test
-    fun resultSetAndShiftKeepExposedVectorIdentity() {
+fun resultSetAndShiftKeepExposedVectorIdentity() {
         val penetration = Penetration()
         val normal = penetration.getNormal()
         penetration.setNormal(Vector2(1.0, 0.0))
@@ -144,8 +154,7 @@ class QueryResultTest {
         assertNotSame(hit, raycast.copy().getPoint())
     }
 
-    @Test
-    fun circleQueriesPreserveDirectedResultsAndUntouchedMisses() {
+fun circleQueriesPreserveDirectedResultsAndUntouchedMisses() {
         val first = Circle(1.0)
         val second = Circle(1.0)
         val atOrigin = Transform()
@@ -175,8 +184,7 @@ class QueryResultTest {
         assertEquals(2.0, raycast.getDistance())
     }
 
-    @Test
-    fun minkowskiSupportRestoresCallerDirection() {
+fun minkowskiSupportRestoresCallerDirection() {
         val direction = Vector2(1.0, 0.0)
         val sum = MinkowskiSum(Circle(1.0), Transform(), Circle(2.0), Transform())
         assertEquals(Vector2(3.0, 0.0), sum.getSupportPoint(direction))
@@ -188,8 +196,7 @@ class QueryResultTest {
         assertEquals(Vector2(1.0, 0.0), direction)
     }
 
-    @Test
-    fun gjkUsesInjectedPenetrationSolverForNonCircleShapes() {
+fun gjkUsesInjectedPenetrationSolverForNonCircleShapes() {
         var calls = 0
         val solver = object : MinkowskiPenetrationSolver {
             override fun getPenetration(simplex: List<Vector2>, minkowskiSum: MinkowskiSum, penetration: Penetration) {
@@ -208,8 +215,7 @@ class QueryResultTest {
         assertEquals(0.5, result.getDepth())
     }
 
-    @Test
-    fun satReportsOverlapAndStrictContainment() {
+fun satReportsOverlapAndStrictContainment() {
         val sat = Sat()
         val small = Geometry.createSquare(1.0)
         val large = Geometry.createSquare(4.0)
@@ -222,8 +228,7 @@ class QueryResultTest {
         assertEquals(false, sat.detect(small, Transform(), large, Transform().also { it.translate(5.0, 0.0) }))
     }
 
-    @Test
-    fun typedFallbackInvokesSelectedDetector() {
+fun typedFallbackInvokesSelectedDetector() {
         var primaryCalls = 0
         var fallbackCalls = 0
         val primary = object : NarrowphaseDetector {
@@ -259,8 +264,7 @@ class QueryResultTest {
         assertEquals(1, primaryCalls)
     }
 
-    @Test
-    fun nonStrictFallbackMatchesRuntimeSubtypeOnEveryTarget() {
+fun nonStrictFallbackMatchesRuntimeSubtypeOnEveryTarget() {
         val base = convexClassOf(org.dyn4j.geometry.Convex::class)
         val circle = Circle(1.0)
         val polygon = Geometry.createSquare(1.0)
@@ -271,8 +275,7 @@ class QueryResultTest {
         assertEquals(true, pair.isMatch(circle, polygon))
     }
 
-    @Test
-    fun gjkRaycastReportsDirectedSquareEntry() {
+fun gjkRaycastReportsDirectedSquareEntry() {
         val result = Raycast()
         val ray = Ray(Vector2(-3.0, 0.1), Vector2(1.0, 0.0))
         assertEquals(true, Gjk().raycast(ray, 10.0, Geometry.createSquare(1.0), Transform(), result))

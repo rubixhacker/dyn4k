@@ -24,10 +24,10 @@
  */
 package org.dyn4j.coverage.dynamics.joint.modes
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sqrt
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -42,6 +42,42 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
+val UpstreamWeldJointModesCoverageTest by testSuite {
+    test("createSuccess") { UpstreamWeldJointModesCoverageTestFixture().run { createSuccess() } }
+    test("createWithNullBody1") { UpstreamWeldJointModesCoverageTestFixture().run { createWithNullBody1() } }
+    test("createWithNullBody2") { UpstreamWeldJointModesCoverageTestFixture().run { createWithNullBody2() } }
+    test("createWithNullAnchor") { UpstreamWeldJointModesCoverageTestFixture().run { createWithNullAnchor() } }
+    test("createWithSameBody") { UpstreamWeldJointModesCoverageTestFixture().run { createWithSameBody() } }
+    test("isSpringEnabled") { UpstreamWeldJointModesCoverageTestFixture().run { isSpringEnabled() } }
+    test("isSpringDamperEnabled") { UpstreamWeldJointModesCoverageTestFixture().run { isSpringDamperEnabled() } }
+    test("setSpringDampingRatio") { UpstreamWeldJointModesCoverageTestFixture().run { setSpringDampingRatio() } }
+    test("setNegativeDampingRatio") { UpstreamWeldJointModesCoverageTestFixture().run { setNegativeDampingRatio() } }
+    test("setDampingRatioGreaterThan1") { UpstreamWeldJointModesCoverageTestFixture().run { setDampingRatioGreaterThan1() } }
+    test("setSpringFrequency") { UpstreamWeldJointModesCoverageTestFixture().run { setSpringFrequency() } }
+    test("setSpringMode") { UpstreamWeldJointModesCoverageTestFixture().run { setSpringMode() } }
+    test("setSpringStiffnessNegative") { UpstreamWeldJointModesCoverageTestFixture().run { setSpringStiffnessNegative() } }
+    test("setSpringStiffness") { UpstreamWeldJointModesCoverageTestFixture().run { setSpringStiffness() } }
+    test("setSpringFrequencyNegative") { UpstreamWeldJointModesCoverageTestFixture().run { setSpringFrequencyNegative() } }
+    test("setSpringMaximumForceNegative") { UpstreamWeldJointModesCoverageTestFixture().run { setSpringMaximumForceNegative() } }
+    test("setSpringMaximumForce") { UpstreamWeldJointModesCoverageTestFixture().run { setSpringMaximumForce() } }
+    test("setUpperLimitSuccess") { UpstreamWeldJointModesCoverageTestFixture().run { setUpperLimitSuccess() } }
+    test("setLowerLimit") { UpstreamWeldJointModesCoverageTestFixture().run { setLowerLimit() } }
+    test("setUpperAndLowerLimits") { UpstreamWeldJointModesCoverageTestFixture().run { setUpperAndLowerLimits() } }
+    test("setUpperAndLowerLimitsToSameValue") { UpstreamWeldJointModesCoverageTestFixture().run { setUpperAndLowerLimitsToSameValue() } }
+    test("setLimitsReferenceAngle") { UpstreamWeldJointModesCoverageTestFixture().run { setLimitsReferenceAngle() } }
+    test("setLimitsReferenceAngleSleep") { UpstreamWeldJointModesCoverageTestFixture().run { setLimitsReferenceAngleSleep() } }
+    test("setLimitEnabledSleep") { UpstreamWeldJointModesCoverageTestFixture().run { setLimitEnabledSleep() } }
+    test("setLimitsSameSleep") { UpstreamWeldJointModesCoverageTestFixture().run { setLimitsSameSleep() } }
+    test("setLimitsDifferentSleep") { UpstreamWeldJointModesCoverageTestFixture().run { setLimitsDifferentSleep() } }
+    test("setLowerLimitSleep") { UpstreamWeldJointModesCoverageTestFixture().run { setLowerLimitSleep() } }
+    test("setUpperLimitSleep") { UpstreamWeldJointModesCoverageTestFixture().run { setUpperLimitSleep() } }
+    test("setLimitsEnabledSameSleep") { UpstreamWeldJointModesCoverageTestFixture().run { setLimitsEnabledSameSleep() } }
+    test("setLimitsEnabledDifferentSleep") { UpstreamWeldJointModesCoverageTestFixture().run { setLimitsEnabledDifferentSleep() } }
+    test("setLimitsEnabledSleep") { UpstreamWeldJointModesCoverageTestFixture().run { setLimitsEnabledSleep() } }
+    test("shift") { UpstreamWeldJointModesCoverageTestFixture().run { shift() } }
+    test("copyFailed") { UpstreamWeldJointModesCoverageTestFixture().run { copyFailed() } }
+}
+
 private fun weldBody() = Body().apply {
     addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
     setMass(MassType.NORMAL)
@@ -51,8 +87,8 @@ private fun weldRadians(degrees: Double) = degrees * PI / 180.0
 
 private class WeldTestBody : Body()
 
-class UpstreamWeldJointModesCoverageTest {
-    @Test fun createSuccess() {
+private class UpstreamWeldJointModesCoverageTestFixture  {
+fun createSuccess() {
         val b1 = weldBody()
         val b2 = weldBody()
         var p = Vector2(2.0, 4.0)
@@ -81,7 +117,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertNotNull(wj.toString())
     }
 
-    @Test fun createWithNullBody1() {
+fun createWithNullBody1() {
         val b1 = weldBody()
         val b2 = weldBody()
         assertFailsWith<NullPointerException> {
@@ -89,7 +125,7 @@ class UpstreamWeldJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithNullBody2() {
+fun createWithNullBody2() {
         val b1 = weldBody()
         val b2 = weldBody()
         assertFailsWith<NullPointerException> {
@@ -97,7 +133,7 @@ class UpstreamWeldJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithNullAnchor() {
+fun createWithNullAnchor() {
         val b1 = weldBody()
         val b2 = weldBody()
         assertFailsWith<NullPointerException> {
@@ -105,7 +141,7 @@ class UpstreamWeldJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithSameBody() {
+fun createWithSameBody() {
         val b1 = weldBody()
         val b2 = weldBody()
         assertFailsWith<IllegalArgumentException> {
@@ -113,7 +149,7 @@ class UpstreamWeldJointModesCoverageTest {
         }
     }
 
-    @Test fun isSpringEnabled() {
+fun isSpringEnabled() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -128,7 +164,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertFalse(wj.isSpringEnabled())
     }
 
-    @Test fun isSpringDamperEnabled() {
+fun isSpringDamperEnabled() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -148,7 +184,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertTrue(wj.isSpringDamperEnabled())
     }
 
-    @Test fun setSpringDampingRatio() {
+fun setSpringDampingRatio() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -181,7 +217,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setNegativeDampingRatio() {
+fun setNegativeDampingRatio() {
         val b1 = weldBody()
         val b2 = weldBody()
         assertFailsWith<IllegalArgumentException> {
@@ -190,7 +226,7 @@ class UpstreamWeldJointModesCoverageTest {
         }
     }
 
-    @Test fun setDampingRatioGreaterThan1() {
+fun setDampingRatioGreaterThan1() {
         val b1 = weldBody()
         val b2 = weldBody()
         assertFailsWith<IllegalArgumentException> {
@@ -199,7 +235,7 @@ class UpstreamWeldJointModesCoverageTest {
         }
     }
 
-    @Test fun setSpringFrequency() {
+fun setSpringFrequency() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -237,7 +273,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setSpringMode() {
+fun setSpringMode() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -248,7 +284,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(Joint.SPRING_MODE_FREQUENCY, wj.getSpringMode())
     }
 
-    @Test fun setSpringStiffnessNegative() {
+fun setSpringStiffnessNegative() {
         val b1 = weldBody()
         val b2 = weldBody()
         assertFailsWith<IllegalArgumentException> {
@@ -257,7 +293,7 @@ class UpstreamWeldJointModesCoverageTest {
         }
     }
 
-    @Test fun setSpringStiffness() {
+fun setSpringStiffness() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -294,7 +330,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setSpringFrequencyNegative() {
+fun setSpringFrequencyNegative() {
         val b1 = weldBody()
         val b2 = weldBody()
         assertFailsWith<IllegalArgumentException> {
@@ -303,7 +339,7 @@ class UpstreamWeldJointModesCoverageTest {
         }
     }
 
-    @Test fun setSpringMaximumForceNegative() {
+fun setSpringMaximumForceNegative() {
         val b1 = weldBody()
         val b2 = weldBody()
         assertFailsWith<IllegalArgumentException> {
@@ -312,7 +348,7 @@ class UpstreamWeldJointModesCoverageTest {
         }
     }
 
-    @Test fun setSpringMaximumForce() {
+fun setSpringMaximumForce() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -350,7 +386,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setUpperLimitSuccess() {
+fun setUpperLimitSuccess() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -358,7 +394,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(weldRadians(10.0), wj.getUpperLimit(), 1e-6)
     }
 
-    @Test fun setLowerLimit() {
+fun setLowerLimit() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -366,7 +402,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(weldRadians(-10.0), wj.getLowerLimit(), 1e-6)
     }
 
-    @Test fun setUpperAndLowerLimits() {
+fun setUpperAndLowerLimits() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -375,7 +411,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(weldRadians(20.0), wj.getUpperLimit(), 1e-6)
     }
 
-    @Test fun setUpperAndLowerLimitsToSameValue() {
+fun setUpperAndLowerLimitsToSameValue() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -384,7 +420,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(weldRadians(30.0), wj.getUpperLimit(), 1e-6)
     }
 
-    @Test fun setLimitsReferenceAngle() {
+fun setLimitsReferenceAngle() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -393,7 +429,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(weldRadians(30.0), wj.getLimitsReferenceAngle())
     }
 
-    @Test fun setLimitsReferenceAngleSleep() {
+fun setLimitsReferenceAngleSleep() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -414,7 +450,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setLimitEnabledSleep() {
+fun setLimitEnabledSleep() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -445,7 +481,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setLimitsSameSleep() {
+fun setLimitsSameSleep() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -501,7 +537,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(-PI, wj.getUpperLimit())
     }
 
-    @Test fun setLimitsDifferentSleep() {
+fun setLimitsDifferentSleep() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -557,7 +593,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(2*PI, wj.getUpperLimit())
     }
 
-    @Test fun setLowerLimitSleep() {
+fun setLowerLimitSleep() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -591,7 +627,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(defaultUpperLimit, wj.getUpperLimit())
     }
 
-    @Test fun setUpperLimitSleep() {
+fun setUpperLimitSleep() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -625,7 +661,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(2*PI, wj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledSameSleep() {
+fun setLimitsEnabledSameSleep() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -661,7 +697,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(PI, wj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledDifferentSleep() {
+fun setLimitsEnabledDifferentSleep() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -717,7 +753,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(PI, wj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledSleep() {
+fun setLimitsEnabledSleep() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2())
@@ -749,7 +785,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun shift() {
+fun shift() {
         val b1 = weldBody()
         val b2 = weldBody()
         var wj = WeldJoint<Body>(b1, b2, Vector2(-3.0, 0.5))
@@ -764,7 +800,7 @@ class UpstreamWeldJointModesCoverageTest {
         assertEquals(0.5, wj.getAnchor2().y)
     }
 
-    @Test fun copyFailed() {
+fun copyFailed() {
         val b1 = weldBody()
         val b2 = weldBody()
         assertFailsWith<ClassCastException> {

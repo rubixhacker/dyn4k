@@ -25,6 +25,7 @@
 
 package org.dyn4j.coverage.geometry.factory
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import kotlin.math.PI
 import kotlin.math.abs
@@ -32,11 +33,183 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.test.*
 
+val GeometryFactoryCoverageTest by testSuite {
+    test("getAverageCenterArray") { GeometryFactoryCoverageTestFixture().run { getAverageCenterArray() } }
+    test("getAverageCenterList") { GeometryFactoryCoverageTestFixture().run { getAverageCenterList() } }
+    test("getAverageCenterEmptyArray") { GeometryFactoryCoverageTestFixture().run { getAverageCenterEmptyArray() } }
+    test("getAverageCenterArrayNullElements") { GeometryFactoryCoverageTestFixture().run { getAverageCenterArrayNullElements() } }
+    test("getAverageCenterArrayNullOnlyElement") { GeometryFactoryCoverageTestFixture().run { getAverageCenterArrayNullOnlyElement() } }
+    test("getAverageCenterNullList") { GeometryFactoryCoverageTestFixture().run { getAverageCenterNullList() } }
+    test("getAverageCenterEmptyList") { GeometryFactoryCoverageTestFixture().run { getAverageCenterEmptyList() } }
+    test("getAverageCenterListNullElements") { GeometryFactoryCoverageTestFixture().run { getAverageCenterListNullElements() } }
+    test("getAverageCenterListNullOnlyElement") { GeometryFactoryCoverageTestFixture().run { getAverageCenterListNullOnlyElement() } }
+    test("getAreaWeightedCenter") { GeometryFactoryCoverageTestFixture().run { getAreaWeightedCenter() } }
+    test("getAreaWeightedCenterOffset") { GeometryFactoryCoverageTestFixture().run { getAreaWeightedCenterOffset() } }
+    test("getAreaWeightedCenterEmptyArray") { GeometryFactoryCoverageTestFixture().run { getAreaWeightedCenterEmptyArray() } }
+    test("getAreaWeightedCenterArrayNullElements") { GeometryFactoryCoverageTestFixture().run { getAreaWeightedCenterArrayNullElements() } }
+    test("getAreaWeightedCenterNullList") { GeometryFactoryCoverageTestFixture().run { getAreaWeightedCenterNullList() } }
+    test("getAreaWeightedCenterEmptyList") { GeometryFactoryCoverageTestFixture().run { getAreaWeightedCenterEmptyList() } }
+    test("getAreaWeightedCenterListNullElements") { GeometryFactoryCoverageTestFixture().run { getAreaWeightedCenterListNullElements() } }
+    test("getAreaWeightedCenterZeroAreaList") { GeometryFactoryCoverageTestFixture().run { getAreaWeightedCenterZeroAreaList() } }
+    test("getAreaWeightedCenterZeroAreaArray") { GeometryFactoryCoverageTestFixture().run { getAreaWeightedCenterZeroAreaArray() } }
+    test("createUnitCirclePolygon") { GeometryFactoryCoverageTestFixture().run { createUnitCirclePolygon() } }
+    test("createNegativeRadiusUnitCirclePolygon") { GeometryFactoryCoverageTestFixture().run { createNegativeRadiusUnitCirclePolygon() } }
+    test("createZeroRadiusUnitCirclePolygon") { GeometryFactoryCoverageTestFixture().run { createZeroRadiusUnitCirclePolygon() } }
+    test("createLessThan3PointsUnitCirclePolygon") { GeometryFactoryCoverageTestFixture().run { createLessThan3PointsUnitCirclePolygon() } }
+    test("createCircle") { GeometryFactoryCoverageTestFixture().run { createCircle() } }
+    test("createNegativeRadiusCircle") { GeometryFactoryCoverageTestFixture().run { createNegativeRadiusCircle() } }
+    test("createZeroRadiusCircle") { GeometryFactoryCoverageTestFixture().run { createZeroRadiusCircle() } }
+    test("createPolygonNullPoint") { GeometryFactoryCoverageTestFixture().run { createPolygonNullPoint() } }
+    test("createPolygon") { GeometryFactoryCoverageTestFixture().run { createPolygon() } }
+    test("createPolygonAtOrigin") { GeometryFactoryCoverageTestFixture().run { createPolygonAtOrigin() } }
+    test("createZeroSizeSquare") { GeometryFactoryCoverageTestFixture().run { createZeroSizeSquare() } }
+    test("createNegativeSizeSquare") { GeometryFactoryCoverageTestFixture().run { createNegativeSizeSquare() } }
+    test("createSquare") { GeometryFactoryCoverageTestFixture().run { createSquare() } }
+    test("createRectangle") { GeometryFactoryCoverageTestFixture().run { createRectangle() } }
+    test("createNegativeWidthRectangle") { GeometryFactoryCoverageTestFixture().run { createNegativeWidthRectangle() } }
+    test("createNegativeHeightRectangle") { GeometryFactoryCoverageTestFixture().run { createNegativeHeightRectangle() } }
+    test("createZeroWidthRectangle") { GeometryFactoryCoverageTestFixture().run { createZeroWidthRectangle() } }
+    test("createZeroHeightRectangle") { GeometryFactoryCoverageTestFixture().run { createZeroHeightRectangle() } }
+    test("createTriangleNullPoint") { GeometryFactoryCoverageTestFixture().run { createTriangleNullPoint() } }
+    test("createTriangle") { GeometryFactoryCoverageTestFixture().run { createTriangle() } }
+    test("createTriangleAtOrigin") { GeometryFactoryCoverageTestFixture().run { createTriangleAtOrigin() } }
+    test("createZeroWidthRightTriangle") { GeometryFactoryCoverageTestFixture().run { createZeroWidthRightTriangle() } }
+    test("createZeroHeightRightTriangle") { GeometryFactoryCoverageTestFixture().run { createZeroHeightRightTriangle() } }
+    test("createNegativeWidthRightTriangle") { GeometryFactoryCoverageTestFixture().run { createNegativeWidthRightTriangle() } }
+    test("createNegativeHeightRightTriangle") { GeometryFactoryCoverageTestFixture().run { createNegativeHeightRightTriangle() } }
+    test("createRightTriangle") { GeometryFactoryCoverageTestFixture().run { createRightTriangle() } }
+    test("createRightTriangleMirror") { GeometryFactoryCoverageTestFixture().run { createRightTriangleMirror() } }
+    test("createZeroHeightEquilateralTriangle") { GeometryFactoryCoverageTestFixture().run { createZeroHeightEquilateralTriangle() } }
+    test("createNegativeHeightEquilateralTriangle") { GeometryFactoryCoverageTestFixture().run { createNegativeHeightEquilateralTriangle() } }
+    test("createEquilateralTriangle") { GeometryFactoryCoverageTestFixture().run { createEquilateralTriangle() } }
+    test("createZeroWidthIsoscelesTriangle") { GeometryFactoryCoverageTestFixture().run { createZeroWidthIsoscelesTriangle() } }
+    test("createZeroHeightIsoscelesTriangle") { GeometryFactoryCoverageTestFixture().run { createZeroHeightIsoscelesTriangle() } }
+    test("createNegativeWidthIsoscelesTriangle") { GeometryFactoryCoverageTestFixture().run { createNegativeWidthIsoscelesTriangle() } }
+    test("createNegativeHeightIsoscelesTriangle") { GeometryFactoryCoverageTestFixture().run { createNegativeHeightIsoscelesTriangle() } }
+    test("createIsoscelesTriangle") { GeometryFactoryCoverageTestFixture().run { createIsoscelesTriangle() } }
+    test("createSegmentNullPoint1") { GeometryFactoryCoverageTestFixture().run { createSegmentNullPoint1() } }
+    test("createSegmentNullPoint2") { GeometryFactoryCoverageTestFixture().run { createSegmentNullPoint2() } }
+    test("createSegment") { GeometryFactoryCoverageTestFixture().run { createSegment() } }
+    test("createSegmentAtOrigin") { GeometryFactoryCoverageTestFixture().run { createSegmentAtOrigin() } }
+    test("createSegmentEnd") { GeometryFactoryCoverageTestFixture().run { createSegmentEnd() } }
+    test("createZeroLengthHorizontalSegment") { GeometryFactoryCoverageTestFixture().run { createZeroLengthHorizontalSegment() } }
+    test("createNegativeLengthHorizontalSegment") { GeometryFactoryCoverageTestFixture().run { createNegativeLengthHorizontalSegment() } }
+    test("createHorizontalSegment") { GeometryFactoryCoverageTestFixture().run { createHorizontalSegment() } }
+    test("createZeroLengthVerticalSegment") { GeometryFactoryCoverageTestFixture().run { createZeroLengthVerticalSegment() } }
+    test("createNegativeLengthVerticalSegment") { GeometryFactoryCoverageTestFixture().run { createNegativeLengthVerticalSegment() } }
+    test("createVerticalSegment") { GeometryFactoryCoverageTestFixture().run { createVerticalSegment() } }
+    test("getWindingList") { GeometryFactoryCoverageTestFixture().run { getWindingList() } }
+    test("getWindingNullList") { GeometryFactoryCoverageTestFixture().run { getWindingNullList() } }
+    test("getWindingListLessThan2Points") { GeometryFactoryCoverageTestFixture().run { getWindingListLessThan2Points() } }
+    test("getWindingListNullPoint") { GeometryFactoryCoverageTestFixture().run { getWindingListNullPoint() } }
+    test("getWindingArray") { GeometryFactoryCoverageTestFixture().run { getWindingArray() } }
+    test("getWindingArrayLessThan2Points") { GeometryFactoryCoverageTestFixture().run { getWindingArrayLessThan2Points() } }
+    test("getWindingArrayNullPoint") { GeometryFactoryCoverageTestFixture().run { getWindingArrayNullPoint() } }
+    test("reverseWindingNullList") { GeometryFactoryCoverageTestFixture().run { reverseWindingNullList() } }
+    test("reverseWindingEmptyOrOneElement") { GeometryFactoryCoverageTestFixture().run { reverseWindingEmptyOrOneElement() } }
+    test("cleanseNullList") { GeometryFactoryCoverageTestFixture().run { cleanseNullList() } }
+    test("cleanseListWithNullElements") { GeometryFactoryCoverageTestFixture().run { cleanseListWithNullElements() } }
+    test("cleanseArrayWithNullElements") { GeometryFactoryCoverageTestFixture().run { cleanseArrayWithNullElements() } }
+    test("cleanseEmpty") { GeometryFactoryCoverageTestFixture().run { cleanseEmpty() } }
+    test("cleanseList") { GeometryFactoryCoverageTestFixture().run { cleanseList() } }
+    test("cleanseArray") { GeometryFactoryCoverageTestFixture().run { cleanseArray() } }
+    test("createEllipse") { GeometryFactoryCoverageTestFixture().run { createEllipse() } }
+    test("createHalfEllipse") { GeometryFactoryCoverageTestFixture().run { createHalfEllipse() } }
+    test("createHalfEllipseAtOrigin") { GeometryFactoryCoverageTestFixture().run { createHalfEllipseAtOrigin() } }
+    test("createPolygonalEllipse") { GeometryFactoryCoverageTestFixture().run { createPolygonalEllipse() } }
+    test("createPolygonalEllipseOddCount") { GeometryFactoryCoverageTestFixture().run { createPolygonalEllipseOddCount() } }
+    test("createPolygonalEllipseLessCount") { GeometryFactoryCoverageTestFixture().run { createPolygonalEllipseLessCount() } }
+    test("createPolygonalEllipseZeroWidth") { GeometryFactoryCoverageTestFixture().run { createPolygonalEllipseZeroWidth() } }
+    test("createPolygonalEllipseZeroHeight") { GeometryFactoryCoverageTestFixture().run { createPolygonalEllipseZeroHeight() } }
+    test("createPolygonalEllipseNegativeWidth") { GeometryFactoryCoverageTestFixture().run { createPolygonalEllipseNegativeWidth() } }
+    test("createPolygonalEllipseNegativeHeight") { GeometryFactoryCoverageTestFixture().run { createPolygonalEllipseNegativeHeight() } }
+    test("createPolygonalSlice") { GeometryFactoryCoverageTestFixture().run { createPolygonalSlice() } }
+    test("createPolygonalSliceAtOrigin") { GeometryFactoryCoverageTestFixture().run { createPolygonalSliceAtOrigin() } }
+    test("createPolygonalSliceInvalidCount") { GeometryFactoryCoverageTestFixture().run { createPolygonalSliceInvalidCount() } }
+    test("createPolygonalSliceNegativeRadius") { GeometryFactoryCoverageTestFixture().run { createPolygonalSliceNegativeRadius() } }
+    test("createPolygonalSliceZeroRadius") { GeometryFactoryCoverageTestFixture().run { createPolygonalSliceZeroRadius() } }
+    test("createPolygonalSliceThetaLessThanZero") { GeometryFactoryCoverageTestFixture().run { createPolygonalSliceThetaLessThanZero() } }
+    test("createPolygonalSliceThetaLessZero") { GeometryFactoryCoverageTestFixture().run { createPolygonalSliceThetaLessZero() } }
+    test("createPolygonalSliceThetaGreaterThan180") { GeometryFactoryCoverageTestFixture().run { createPolygonalSliceThetaGreaterThan180() } }
+    test("createPolygonalHalfEllipse") { GeometryFactoryCoverageTestFixture().run { createPolygonalHalfEllipse() } }
+    test("createPolygonalHalfEllipseAtOrigin") { GeometryFactoryCoverageTestFixture().run { createPolygonalHalfEllipseAtOrigin() } }
+    test("createPolygonalHalfEllipseInvalidCount") { GeometryFactoryCoverageTestFixture().run { createPolygonalHalfEllipseInvalidCount() } }
+    test("createPolygonalHalfEllipseZeroWidth") { GeometryFactoryCoverageTestFixture().run { createPolygonalHalfEllipseZeroWidth() } }
+    test("createPolygonalHalfEllipseNegativeWidth") { GeometryFactoryCoverageTestFixture().run { createPolygonalHalfEllipseNegativeWidth() } }
+    test("createPolygonalHalfEllipseNegativeHeight") { GeometryFactoryCoverageTestFixture().run { createPolygonalHalfEllipseNegativeHeight() } }
+    test("createPolygonalHalfEllipseZeroHeight") { GeometryFactoryCoverageTestFixture().run { createPolygonalHalfEllipseZeroHeight() } }
+    test("createPolygonalCircle") { GeometryFactoryCoverageTestFixture().run { createPolygonalCircle() } }
+    test("createPolygonalCircleInvalidCount") { GeometryFactoryCoverageTestFixture().run { createPolygonalCircleInvalidCount() } }
+    test("createPolygonalCircleZeroCount") { GeometryFactoryCoverageTestFixture().run { createPolygonalCircleZeroCount() } }
+    test("createPolygonalCircleNegativeCount") { GeometryFactoryCoverageTestFixture().run { createPolygonalCircleNegativeCount() } }
+    test("createPolygonalCircleZeroRadius") { GeometryFactoryCoverageTestFixture().run { createPolygonalCircleZeroRadius() } }
+    test("createPolygonalCircleNegativeRadius") { GeometryFactoryCoverageTestFixture().run { createPolygonalCircleNegativeRadius() } }
+    test("createPolygonalCapsule") { GeometryFactoryCoverageTestFixture().run { createPolygonalCapsule() } }
+    test("createPolygonalCapsuleInvalidCount") { GeometryFactoryCoverageTestFixture().run { createPolygonalCapsuleInvalidCount() } }
+    test("createPolygonalCapsuleZeroWidth") { GeometryFactoryCoverageTestFixture().run { createPolygonalCapsuleZeroWidth() } }
+    test("createPolygonalCapsuleNegativeWidth") { GeometryFactoryCoverageTestFixture().run { createPolygonalCapsuleNegativeWidth() } }
+    test("createPolygonalCapsuleZeroHeight") { GeometryFactoryCoverageTestFixture().run { createPolygonalCapsuleZeroHeight() } }
+    test("createPolygonalCapsuleNegativeHeight") { GeometryFactoryCoverageTestFixture().run { createPolygonalCapsuleNegativeHeight() } }
+    test("flip") { GeometryFactoryCoverageTestFixture().run { flip() } }
+    test("flipNullPolygon") { GeometryFactoryCoverageTestFixture().run { flipNullPolygon() } }
+    test("flipNullAxis") { GeometryFactoryCoverageTestFixture().run { flipNullAxis() } }
+    test("flipZeroAxis") { GeometryFactoryCoverageTestFixture().run { flipZeroAxis() } }
+    test("flipNullPoint") { GeometryFactoryCoverageTestFixture().run { flipNullPoint() } }
+    test("minkowskiSum") { GeometryFactoryCoverageTestFixture().run { minkowskiSum() } }
+    test("minkowskiSumInvalidSegments") { GeometryFactoryCoverageTestFixture().run { minkowskiSumInvalidSegments() } }
+    test("minkowskiSumNullWound1") { GeometryFactoryCoverageTestFixture().run { minkowskiSumNullWound1() } }
+    test("minkowskiSumNullWound2") { GeometryFactoryCoverageTestFixture().run { minkowskiSumNullWound2() } }
+    test("minkowskiSumNullShape1") { GeometryFactoryCoverageTestFixture().run { minkowskiSumNullShape1() } }
+    test("minkowskiSumNullShape2") { GeometryFactoryCoverageTestFixture().run { minkowskiSumNullShape2() } }
+    test("minkowskiSumNullShape3") { GeometryFactoryCoverageTestFixture().run { minkowskiSumNullShape3() } }
+    test("minkowskiSumInvalidCount1") { GeometryFactoryCoverageTestFixture().run { minkowskiSumInvalidCount1() } }
+    test("minkowskiSumInvalidCount2") { GeometryFactoryCoverageTestFixture().run { minkowskiSumInvalidCount2() } }
+    test("minkowskiSumInvalidCount3") { GeometryFactoryCoverageTestFixture().run { minkowskiSumInvalidCount3() } }
+    test("minkowskiSumInvalidCount4") { GeometryFactoryCoverageTestFixture().run { minkowskiSumInvalidCount4() } }
+    test("minkowskiSumInvalidRadius1") { GeometryFactoryCoverageTestFixture().run { minkowskiSumInvalidRadius1() } }
+    test("minkowskiSumInvalidRadius2") { GeometryFactoryCoverageTestFixture().run { minkowskiSumInvalidRadius2() } }
+    test("scale") { GeometryFactoryCoverageTestFixture().run { scale() } }
+    test("scaleNullCircle") { GeometryFactoryCoverageTestFixture().run { scaleNullCircle() } }
+    test("scaleNullCapsule") { GeometryFactoryCoverageTestFixture().run { scaleNullCapsule() } }
+    test("scaleNullEllipse") { GeometryFactoryCoverageTestFixture().run { scaleNullEllipse() } }
+    test("scaleNullHalfEllipse") { GeometryFactoryCoverageTestFixture().run { scaleNullHalfEllipse() } }
+    test("scaleNullSlice") { GeometryFactoryCoverageTestFixture().run { scaleNullSlice() } }
+    test("scaleNullPolygon") { GeometryFactoryCoverageTestFixture().run { scaleNullPolygon() } }
+    test("scaleNullSegment") { GeometryFactoryCoverageTestFixture().run { scaleNullSegment() } }
+    test("scaleCircleInvalid") { GeometryFactoryCoverageTestFixture().run { scaleCircleInvalid() } }
+    test("scaleCapsuleInvalid") { GeometryFactoryCoverageTestFixture().run { scaleCapsuleInvalid() } }
+    test("scaleEllipseInvalid") { GeometryFactoryCoverageTestFixture().run { scaleEllipseInvalid() } }
+    test("scaleHalfEllipseInvalid") { GeometryFactoryCoverageTestFixture().run { scaleHalfEllipseInvalid() } }
+    test("scaleSliceInvalid") { GeometryFactoryCoverageTestFixture().run { scaleSliceInvalid() } }
+    test("scalePolygonInvalid") { GeometryFactoryCoverageTestFixture().run { scalePolygonInvalid() } }
+    test("scaleSegmentInvalid") { GeometryFactoryCoverageTestFixture().run { scaleSegmentInvalid() } }
+    test("createLinksWrap") { GeometryFactoryCoverageTestFixture().run { createLinksWrap() } }
+    test("createLinks") { GeometryFactoryCoverageTestFixture().run { createLinks() } }
+    test("createLinksNull") { GeometryFactoryCoverageTestFixture().run { createLinksNull() } }
+    test("createLinksOneVertex") { GeometryFactoryCoverageTestFixture().run { createLinksOneVertex() } }
+    test("createLinksNullVertex") { GeometryFactoryCoverageTestFixture().run { createLinksNullVertex() } }
+    test("createSlice") { GeometryFactoryCoverageTestFixture().run { createSlice() } }
+    test("createSliceAtOrigin") { GeometryFactoryCoverageTestFixture().run { createSliceAtOrigin() } }
+    test("polygonIntersection") { GeometryFactoryCoverageTestFixture().run { polygonIntersection() } }
+    test("polygonIntersectionVertexOnEdgeA") { GeometryFactoryCoverageTestFixture().run { polygonIntersectionVertexOnEdgeA() } }
+    test("polygonIntersectionVertexOnEdgeB") { GeometryFactoryCoverageTestFixture().run { polygonIntersectionVertexOnEdgeB() } }
+    test("polygonIntersectionCoincidentVertexA") { GeometryFactoryCoverageTestFixture().run { polygonIntersectionCoincidentVertexA() } }
+    test("polygonIntersectionCoincidentVertexB") { GeometryFactoryCoverageTestFixture().run { polygonIntersectionCoincidentVertexB() } }
+    test("polygonIntersectionColinearEdgeB") { GeometryFactoryCoverageTestFixture().run { polygonIntersectionColinearEdgeB() } }
+    test("polygonIntersectionEdgeTouching") { GeometryFactoryCoverageTestFixture().run { polygonIntersectionEdgeTouching() } }
+    test("polygonIntersectionVertexTouching") { GeometryFactoryCoverageTestFixture().run { polygonIntersectionVertexTouching() } }
+    test("polygonIntersectionVertexTouchingCoincident") { GeometryFactoryCoverageTestFixture().run { polygonIntersectionVertexTouchingCoincident() } }
+    test("polygonIntersectionNoIntersection") { GeometryFactoryCoverageTestFixture().run { polygonIntersectionNoIntersection() } }
+    test("polygonIntersectionContainment") { GeometryFactoryCoverageTestFixture().run { polygonIntersectionContainment() } }
+    test("getRotationRadius") { GeometryFactoryCoverageTestFixture().run { getRotationRadius() } }
+    test("getCounterClockwiseEdgeNormals") { GeometryFactoryCoverageTestFixture().run { getCounterClockwiseEdgeNormals() } }
+    test("getCounterClockwiseEdgeNormalsWithNullVertex") { GeometryFactoryCoverageTestFixture().run { getCounterClockwiseEdgeNormalsWithNullVertex() } }
+}
+
 private fun radians(degrees: Double): Double = degrees * PI / 180.0
 
-class GeometryFactoryCoverageTest {
-    @Test
-    fun getAverageCenterArray() {
+private class GeometryFactoryCoverageTestFixture  {
+fun getAverageCenterArray() {
 
 		val vertices = arrayOfNulls<Vector2>(6)
 		vertices[0] = Vector2(-2.0, 1.0)
@@ -53,8 +226,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals( 1.000, c.y, 1.0e-3)
 
     }
-    @Test
-    fun getAverageCenterList() {
+fun getAverageCenterList() {
 
 		val vertices = mutableListOf<Vector2>()
 		vertices.add(Vector2(-2.0, 1.0))
@@ -71,16 +243,14 @@ class GeometryFactoryCoverageTest {
 		assertEquals( 1.000, c.y, 1.0e-3)
 
     }
-    @Test
-    fun getAverageCenterEmptyArray() {
+fun getAverageCenterEmptyArray() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.getAverageCenter(*arrayOf<Vector2?>())
 
         }
     }
-    @Test
-    fun getAverageCenterArrayNullElements() {
+fun getAverageCenterArrayNullElements() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.getAverageCenter(*arrayOf<Vector2?>(
@@ -93,8 +263,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun getAverageCenterArrayNullOnlyElement() {
+fun getAverageCenterArrayNullOnlyElement() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.getAverageCenter(*arrayOf<Vector2?>(
@@ -103,24 +272,21 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun getAverageCenterNullList() {
+fun getAverageCenterNullList() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.getAverageCenter(null as List<Vector2?>?)
 
         }
     }
-    @Test
-    fun getAverageCenterEmptyList() {
+fun getAverageCenterEmptyList() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.getAverageCenter(mutableListOf<Vector2>())
 
         }
     }
-    @Test
-    fun getAverageCenterListNullElements() {
+fun getAverageCenterListNullElements() {
         assertFailsWith<NullPointerException> {
 
 		val vertices = mutableListOf<Vector2?>()
@@ -133,8 +299,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun getAverageCenterListNullOnlyElement() {
+fun getAverageCenterListNullOnlyElement() {
         assertFailsWith<NullPointerException> {
 
 		val vertices = mutableListOf<Vector2?>()
@@ -143,8 +308,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun getAreaWeightedCenter() {
+fun getAreaWeightedCenter() {
 
 		val vertices = arrayOfNulls<Vector2>(6)
 		vertices[0] = Vector2(-2.0, 1.0)
@@ -161,8 +325,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals( 0.527, c.y, 1.0e-3)
 
     }
-    @Test
-    fun getAreaWeightedCenterOffset() {
+fun getAreaWeightedCenterOffset() {
 
 		val vertices = arrayOfNulls<Vector2>(6)
 		vertices[0] = Vector2(-1.0, 2.0)
@@ -179,16 +342,14 @@ class GeometryFactoryCoverageTest {
 		assertEquals(1.527, c.y, 1.0e-3)
 
     }
-    @Test
-    fun getAreaWeightedCenterEmptyArray() {
+fun getAreaWeightedCenterEmptyArray() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.getAreaWeightedCenter(*arrayOf<Vector2?>())
 
         }
     }
-    @Test
-    fun getAreaWeightedCenterArrayNullElements() {
+fun getAreaWeightedCenterArrayNullElements() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.getAreaWeightedCenter(*arrayOf<Vector2?>(
@@ -201,24 +362,21 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun getAreaWeightedCenterNullList() {
+fun getAreaWeightedCenterNullList() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.getAreaWeightedCenter(null as List<Vector2?>?)
 
         }
     }
-    @Test
-    fun getAreaWeightedCenterEmptyList() {
+fun getAreaWeightedCenterEmptyList() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.getAreaWeightedCenter(mutableListOf<Vector2>())
 
         }
     }
-    @Test
-    fun getAreaWeightedCenterListNullElements() {
+fun getAreaWeightedCenterListNullElements() {
         assertFailsWith<NullPointerException> {
 
 		val vertices = mutableListOf<Vector2?>()
@@ -231,8 +389,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun getAreaWeightedCenterZeroAreaList() {
+fun getAreaWeightedCenterZeroAreaList() {
 
 		val points = mutableListOf<Vector2>()
 		points.add(Vector2(2.0, 1.0))
@@ -244,8 +401,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(1.000, c.y, 1.0e-3)
 
     }
-    @Test
-    fun getAreaWeightedCenterZeroAreaArray() {
+fun getAreaWeightedCenterZeroAreaArray() {
 
 		val points = arrayOfNulls<Vector2>(4)
 		points[0] = Vector2(2.0, 1.0)
@@ -257,8 +413,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(1.000, c.y, 1.0e-3)
 
     }
-    @Test
-    fun createUnitCirclePolygon() {
+fun createUnitCirclePolygon() {
 
 		var p = Geometry.createUnitCirclePolygon(5, 0.5)
 		assertEquals( 0.154, p.getVertices()[4].x, 1.0e-3)
@@ -288,54 +443,47 @@ class GeometryFactoryCoverageTest {
 		assertEquals(PI / 2.0, angle, 1.0e-3)
 
     }
-    @Test
-    fun createNegativeRadiusUnitCirclePolygon() {
+fun createNegativeRadiusUnitCirclePolygon() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createUnitCirclePolygon(5, -0.5)
 
         }
     }
-    @Test
-    fun createZeroRadiusUnitCirclePolygon() {
+fun createZeroRadiusUnitCirclePolygon() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createUnitCirclePolygon(5, 0.0)
 
         }
     }
-    @Test
-    fun createLessThan3PointsUnitCirclePolygon() {
+fun createLessThan3PointsUnitCirclePolygon() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createUnitCirclePolygon(2, 0.5)
 
         }
     }
-    @Test
-    fun createCircle() {
+fun createCircle() {
 
 		Geometry.createCircle(1.0)
 
     }
-    @Test
-    fun createNegativeRadiusCircle() {
+fun createNegativeRadiusCircle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createCircle(-1.0)
 
         }
     }
-    @Test
-    fun createZeroRadiusCircle() {
+fun createZeroRadiusCircle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createCircle(0.0)
 
         }
     }
-    @Test
-    fun createPolygonNullPoint() {
+fun createPolygonNullPoint() {
         assertFailsWith<NullPointerException> {
 
 		val vertices = arrayOfNulls<Vector2>(5)
@@ -343,8 +491,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun createPolygon() {
+fun createPolygon() {
 
 		val vertices = arrayOfNulls<Vector2>(5)
 		vertices[0] = Vector2(1.0, 0.0)
@@ -371,8 +518,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(1.0, vertices[2]!!.y, 1e-12)
 
     }
-    @Test
-    fun createPolygonAtOrigin() {
+fun createPolygonAtOrigin() {
 
 		val vertices = arrayOfNulls<Vector2>(5)
 		vertices[0] = Vector2(1.0, 0.0)
@@ -408,70 +554,61 @@ class GeometryFactoryCoverageTest {
 		assertEquals(1.0, vertices[2]!!.y, 1e-12)
 
     }
-    @Test
-    fun createZeroSizeSquare() {
+fun createZeroSizeSquare() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createSquare(0.0)
 
         }
     }
-    @Test
-    fun createNegativeSizeSquare() {
+fun createNegativeSizeSquare() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createSquare(-1.0)
 
         }
     }
-    @Test
-    fun createSquare() {
+fun createSquare() {
 
 		val r = Geometry.createSquare(1.0)
 		assertEquals(1.000, r.getWidth(), 1.0e-3)
 		assertEquals(1.000, r.getHeight(), 1.0e-3)
 
     }
-    @Test
-    fun createRectangle() {
+fun createRectangle() {
 
 		Geometry.createRectangle(1.0, 2.0)
 
     }
-    @Test
-    fun createNegativeWidthRectangle() {
+fun createNegativeWidthRectangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createRectangle(-1.0, 2.0)
 
         }
     }
-    @Test
-    fun createNegativeHeightRectangle() {
+fun createNegativeHeightRectangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createRectangle(1.0, -2.0)
 
         }
     }
-    @Test
-    fun createZeroWidthRectangle() {
+fun createZeroWidthRectangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createRectangle(0.0, 2.0)
 
         }
     }
-    @Test
-    fun createZeroHeightRectangle() {
+fun createZeroHeightRectangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createRectangle(1.0, 0.0)
 
         }
     }
-    @Test
-    fun createTriangleNullPoint() {
+fun createTriangleNullPoint() {
         assertFailsWith<NullPointerException> {
 
 		val p1 = Vector2(1.0, 0.0)
@@ -480,8 +617,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun createTriangle() {
+fun createTriangle() {
 
 		val p1 = Vector2(1.0, 0.0)
 		val p2 = Vector2(0.5, 1.0)
@@ -492,8 +628,7 @@ class GeometryFactoryCoverageTest {
 		assertFalse(t.getVertices()[2] === p3)
 
     }
-    @Test
-    fun createTriangleAtOrigin() {
+fun createTriangleAtOrigin() {
 
 		val p1 = Vector2(1.0, 0.0)
 		val p2 = Vector2(0.5, 1.0)
@@ -507,40 +642,35 @@ class GeometryFactoryCoverageTest {
 		assertEquals(0.000, c.y, 1.0e-3)
 
     }
-    @Test
-    fun createZeroWidthRightTriangle() {
+fun createZeroWidthRightTriangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createRightTriangle(0.0, 2.0)
 
         }
     }
-    @Test
-    fun createZeroHeightRightTriangle() {
+fun createZeroHeightRightTriangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createRightTriangle(1.0, 0.0)
 
         }
     }
-    @Test
-    fun createNegativeWidthRightTriangle() {
+fun createNegativeWidthRightTriangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createRightTriangle(-1.0, 2.0)
 
         }
     }
-    @Test
-    fun createNegativeHeightRightTriangle() {
+fun createNegativeHeightRightTriangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createRightTriangle(2.0, -2.0)
 
         }
     }
-    @Test
-    fun createRightTriangle() {
+fun createRightTriangle() {
 
 		val t = Geometry.createRightTriangle(1.0, 2.0)
 		val center = t.getCenter()
@@ -567,8 +697,7 @@ class GeometryFactoryCoverageTest {
 		assertFalse(true)
 
     }
-    @Test
-    fun createRightTriangleMirror() {
+fun createRightTriangleMirror() {
 
 		val t = Geometry.createRightTriangle(1.0, 2.0, true)
 		val center = t.getCenter()
@@ -595,24 +724,21 @@ class GeometryFactoryCoverageTest {
 		assertFalse(true)
 
     }
-    @Test
-    fun createZeroHeightEquilateralTriangle() {
+fun createZeroHeightEquilateralTriangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createEquilateralTriangle(0.0)
 
         }
     }
-    @Test
-    fun createNegativeHeightEquilateralTriangle() {
+fun createNegativeHeightEquilateralTriangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createEquilateralTriangle(-1.0)
 
         }
     }
-    @Test
-    fun createEquilateralTriangle() {
+fun createEquilateralTriangle() {
 
 		val t = Geometry.createEquilateralTriangle(2.0)
 		val center = t.getCenter()
@@ -637,40 +763,35 @@ class GeometryFactoryCoverageTest {
 		assertTrue(true)
 
     }
-    @Test
-    fun createZeroWidthIsoscelesTriangle() {
+fun createZeroWidthIsoscelesTriangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createIsoscelesTriangle(0.0, 1.0)
 
         }
     }
-    @Test
-    fun createZeroHeightIsoscelesTriangle() {
+fun createZeroHeightIsoscelesTriangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createIsoscelesTriangle(1.0, 0.0)
 
         }
     }
-    @Test
-    fun createNegativeWidthIsoscelesTriangle() {
+fun createNegativeWidthIsoscelesTriangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createIsoscelesTriangle(-1.0, 2.0)
 
         }
     }
-    @Test
-    fun createNegativeHeightIsoscelesTriangle() {
+fun createNegativeHeightIsoscelesTriangle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createIsoscelesTriangle(2.0, -2.0)
 
         }
     }
-    @Test
-    fun createIsoscelesTriangle() {
+fun createIsoscelesTriangle() {
 
 		val t = Geometry.createIsoscelesTriangle(2.0, 1.0)
 		val center = t.getCenter()
@@ -686,30 +807,26 @@ class GeometryFactoryCoverageTest {
 		assertEquals(e1.getAngleBetween(e2), e2.getAngleBetween(e3), 1.0e-3)
 
     }
-    @Test
-    fun createSegmentNullPoint1() {
+fun createSegmentNullPoint1() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.createSegment(null, Vector2())
 
         }
     }
-    @Test
-    fun createSegmentNullPoint2() {
+fun createSegmentNullPoint2() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.createSegment(Vector2(), null)
 
         }
     }
-    @Test
-    fun createSegment() {
+fun createSegment() {
 
 		Geometry.createSegment(Vector2(1.0, 1.0), Vector2(2.0, -1.0))
 
     }
-    @Test
-    fun createSegmentAtOrigin() {
+fun createSegmentAtOrigin() {
 
 		val s = Geometry.createSegmentAtOrigin(Vector2(1.0, 1.0), Vector2(2.0, -1.0))
 		val center = s.getCenter()
@@ -717,30 +834,26 @@ class GeometryFactoryCoverageTest {
 		assertEquals(0.000, center.y, 1.0e-3)
 
     }
-    @Test
-    fun createSegmentEnd() {
+fun createSegmentEnd() {
 
 		Geometry.createSegment(Vector2(1.0, 1.0))
 
     }
-    @Test
-    fun createZeroLengthHorizontalSegment() {
+fun createZeroLengthHorizontalSegment() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createHorizontalSegment(0.0)
 
         }
     }
-    @Test
-    fun createNegativeLengthHorizontalSegment() {
+fun createNegativeLengthHorizontalSegment() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createHorizontalSegment(-1.0)
 
         }
     }
-    @Test
-    fun createHorizontalSegment() {
+fun createHorizontalSegment() {
 
 		val s = Geometry.createHorizontalSegment(5.0)
 		val center = s.getCenter()
@@ -748,24 +861,21 @@ class GeometryFactoryCoverageTest {
 		assertEquals(0.000, center.y, 1.0e-3)
 
     }
-    @Test
-    fun createZeroLengthVerticalSegment() {
+fun createZeroLengthVerticalSegment() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createVerticalSegment(0.0)
 
         }
     }
-    @Test
-    fun createNegativeLengthVerticalSegment() {
+fun createNegativeLengthVerticalSegment() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createVerticalSegment(-1.0)
 
         }
     }
-    @Test
-    fun createVerticalSegment() {
+fun createVerticalSegment() {
 
 		val s = Geometry.createVerticalSegment(5.0)
 		val center = s.getCenter()
@@ -773,8 +883,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(0.000, center.y, 1.0e-3)
 
     }
-    @Test
-    fun getWindingList() {
+fun getWindingList() {
 
 		val points = mutableListOf<Vector2>()
 		points.add(Vector2(-1.0, -1.0))
@@ -786,16 +895,14 @@ class GeometryFactoryCoverageTest {
 		assertTrue(Geometry.getWinding(points) < 0)
 
     }
-    @Test
-    fun getWindingNullList() {
+fun getWindingNullList() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.getWinding(null as List<Vector2?>?)
 
         }
     }
-    @Test
-    fun getWindingListLessThan2Points() {
+fun getWindingListLessThan2Points() {
         assertFailsWith<IllegalArgumentException> {
 
 		val points = mutableListOf<Vector2>()
@@ -804,8 +911,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun getWindingListNullPoint() {
+fun getWindingListNullPoint() {
         assertFailsWith<NullPointerException> {
 
 		val points = mutableListOf<Vector2?>()
@@ -816,8 +922,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun getWindingArray() {
+fun getWindingArray() {
 
 		val points = arrayOfNulls<Vector2>(4)
 		points[0] = Vector2(-1.0, -1.0)
@@ -834,8 +939,7 @@ class GeometryFactoryCoverageTest {
 		assertTrue(Geometry.getWinding(*points) < 0)
 
     }
-    @Test
-    fun getWindingArrayLessThan2Points() {
+fun getWindingArrayLessThan2Points() {
         assertFailsWith<IllegalArgumentException> {
 
 		val points = arrayOfNulls<Vector2>(1)
@@ -844,8 +948,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun getWindingArrayNullPoint() {
+fun getWindingArrayNullPoint() {
         assertFailsWith<NullPointerException> {
 
 		val points = arrayOfNulls<Vector2>(4)
@@ -857,16 +960,14 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun reverseWindingNullList() {
+fun reverseWindingNullList() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.reverseWinding(null as MutableList<Vector2?>?)
 
         }
     }
-    @Test
-    fun reverseWindingEmptyOrOneElement() {
+fun reverseWindingEmptyOrOneElement() {
 
 		var array = arrayOf<Vector2?>()
 		Geometry.reverseWinding(*array)
@@ -880,16 +981,14 @@ class GeometryFactoryCoverageTest {
 		Geometry.reverseWinding(list)
 
     }
-    @Test
-    fun cleanseNullList() {
+fun cleanseNullList() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.cleanse(null as List<Vector2?>?)
 
         }
     }
-    @Test
-    fun cleanseListWithNullElements() {
+fun cleanseListWithNullElements() {
         assertFailsWith<NullPointerException> {
 
 		val list = mutableListOf<Vector2?>()
@@ -901,8 +1000,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun cleanseArrayWithNullElements() {
+fun cleanseArrayWithNullElements() {
         assertFailsWith<NullPointerException> {
 
 		val array = arrayOfNulls<Vector2>(5)
@@ -913,8 +1011,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun cleanseEmpty() {
+fun cleanseEmpty() {
 
 		val points = mutableListOf<Vector2>()
 		val result1 = Geometry.cleanse(points)
@@ -923,8 +1020,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(0, result2.size)
 
     }
-    @Test
-    fun cleanseList() {
+fun cleanseList() {
 
 		val points = mutableListOf<Vector2>()
 		points.add(Vector2(1.0, 0.0))
@@ -944,8 +1040,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(4, result.size)
 
     }
-    @Test
-    fun cleanseArray() {
+fun cleanseArray() {
 
 		var points = arrayOfNulls<Vector2>(8)
 		points[0] = Vector2(1.0, 0.0)
@@ -967,8 +1062,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(4, result.size)
 
     }
-    @Test
-    fun createEllipse() {
+fun createEllipse() {
 
 		val e = Geometry.createEllipse(1.0, 0.5)
 		assertEquals(1.0, e.getWidth())
@@ -977,8 +1071,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(0.000, e.getCenter().y, 1.0e-3)
 
     }
-    @Test
-    fun createHalfEllipse() {
+fun createHalfEllipse() {
 
 		val e = Geometry.createHalfEllipse(1.0, 0.5)
 		assertEquals(1.0, e.getWidth())
@@ -987,8 +1080,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(0.212, e.getCenter().y, 1.0e-3)
 
     }
-    @Test
-    fun createHalfEllipseAtOrigin() {
+fun createHalfEllipseAtOrigin() {
 
 		val e = Geometry.createHalfEllipseAtOrigin(1.0, 0.5)
 		assertEquals(1.0, e.getWidth())
@@ -997,16 +1089,14 @@ class GeometryFactoryCoverageTest {
 		assertEquals(0.000, e.getCenter().y, 1.0e-3)
 
     }
-    @Test
-    fun createPolygonalEllipse() {
+fun createPolygonalEllipse() {
 
 		val p = Geometry.createPolygonalEllipse(10, 2.0, 1.0)
 		assertEquals(0.000, p.getCenter().x, 1.0e-3)
 		assertEquals(0.000, p.getCenter().y, 1.0e-3)
 
     }
-    @Test
-    fun createPolygonalEllipseOddCount() {
+fun createPolygonalEllipseOddCount() {
 
 		var p = Geometry.createPolygonalEllipse(5, 2.0, 1.0)
 		assertEquals(4, p.getVertices().size)
@@ -1014,168 +1104,147 @@ class GeometryFactoryCoverageTest {
 		assertEquals(10, p.getVertices().size)
 
     }
-    @Test
-    fun createPolygonalEllipseLessCount() {
+fun createPolygonalEllipseLessCount() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalEllipse(3, 2.0, 1.0)
 
         }
     }
-    @Test
-    fun createPolygonalEllipseZeroWidth() {
+fun createPolygonalEllipseZeroWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalEllipse(10, 0.0, 1.0)
 
         }
     }
-    @Test
-    fun createPolygonalEllipseZeroHeight() {
+fun createPolygonalEllipseZeroHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalEllipse(10, 2.0, 0.0)
 
         }
     }
-    @Test
-    fun createPolygonalEllipseNegativeWidth() {
+fun createPolygonalEllipseNegativeWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalEllipse(10, -1.0, 1.0)
 
         }
     }
-    @Test
-    fun createPolygonalEllipseNegativeHeight() {
+fun createPolygonalEllipseNegativeHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalEllipse(10, 2.0, -1.0)
 
         }
     }
-    @Test
-    fun createPolygonalSlice() {
+fun createPolygonalSlice() {
 
 		val p = Geometry.createPolygonalSlice(5, 1.0, radians(30.0))
 		assertEquals(0.658, p.getCenter().x, 1.0e-3)
 		assertEquals(0.000, p.getCenter().y, 1.0e-3)
 
     }
-    @Test
-    fun createPolygonalSliceAtOrigin() {
+fun createPolygonalSliceAtOrigin() {
 
 		val p = Geometry.createPolygonalSliceAtOrigin(5, 1.0, radians(30.0))
 		assertEquals(0.000, p.getCenter().x, 1.0e-3)
 		assertEquals(0.000, p.getCenter().y, 1.0e-3)
 
     }
-    @Test
-    fun createPolygonalSliceInvalidCount() {
+fun createPolygonalSliceInvalidCount() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalSlice(0, 1.0, radians(30.0))
 
         }
     }
-    @Test
-    fun createPolygonalSliceNegativeRadius() {
+fun createPolygonalSliceNegativeRadius() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalSlice(5, -1.0, radians(30.0))
 
         }
     }
-    @Test
-    fun createPolygonalSliceZeroRadius() {
+fun createPolygonalSliceZeroRadius() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalSlice(5, 0.0, radians(30.0))
 
         }
     }
-    @Test
-    fun createPolygonalSliceThetaLessThanZero() {
+fun createPolygonalSliceThetaLessThanZero() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalSlice(5, 1.0, -radians(30.0))
 
         }
     }
-    @Test
-    fun createPolygonalSliceThetaLessZero() {
+fun createPolygonalSliceThetaLessZero() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalSlice(5, 1.0, 0.0)
 
         }
     }
-    @Test
-    fun createPolygonalSliceThetaGreaterThan180() {
+fun createPolygonalSliceThetaGreaterThan180() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalSlice(5, 1.0, radians(190.0))
 
         }
     }
-    @Test
-    fun createPolygonalHalfEllipse() {
+fun createPolygonalHalfEllipse() {
 
 		val p = Geometry.createPolygonalHalfEllipse(5, 1.0, 0.5)
 		assertEquals(0.000, p.getCenter().x, 1.0e-3)
 		assertEquals(0.103, p.getCenter().y, 1.0e-3)
 
     }
-    @Test
-    fun createPolygonalHalfEllipseAtOrigin() {
+fun createPolygonalHalfEllipseAtOrigin() {
 
 		val p = Geometry.createPolygonalHalfEllipseAtOrigin(5, 1.0, 0.5)
 		assertEquals(0.000, p.getCenter().x, 1.0e-3)
 		assertEquals(0.000, p.getCenter().y, 1.0e-3)
 
     }
-    @Test
-    fun createPolygonalHalfEllipseInvalidCount() {
+fun createPolygonalHalfEllipseInvalidCount() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalHalfEllipse(0, 1.0, 0.5)
 
         }
     }
-    @Test
-    fun createPolygonalHalfEllipseZeroWidth() {
+fun createPolygonalHalfEllipseZeroWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalHalfEllipse(5, 0.0, 0.5)
 
         }
     }
-    @Test
-    fun createPolygonalHalfEllipseNegativeWidth() {
+fun createPolygonalHalfEllipseNegativeWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalHalfEllipse(5, -1.0, 0.5)
 
         }
     }
-    @Test
-    fun createPolygonalHalfEllipseNegativeHeight() {
+fun createPolygonalHalfEllipseNegativeHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalHalfEllipse(5, 1.0, -0.5)
 
         }
     }
-    @Test
-    fun createPolygonalHalfEllipseZeroHeight() {
+fun createPolygonalHalfEllipseZeroHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalHalfEllipse(5, 1.0, 0.0)
 
         }
     }
-    @Test
-    fun createPolygonalCircle() {
+fun createPolygonalCircle() {
 
 		var p = Geometry.createPolygonalCircle(5, 1.0)
 		assertEquals(0.000, p.getCenter().x, 1.0e-3)
@@ -1191,48 +1260,42 @@ class GeometryFactoryCoverageTest {
 		assertEquals(5, p.getVertices().size)
 
     }
-    @Test
-    fun createPolygonalCircleInvalidCount() {
+fun createPolygonalCircleInvalidCount() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalCircle(2, 1.0)
 
         }
     }
-    @Test
-    fun createPolygonalCircleZeroCount() {
+fun createPolygonalCircleZeroCount() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalCircle(0, 1.0)
 
         }
     }
-    @Test
-    fun createPolygonalCircleNegativeCount() {
+fun createPolygonalCircleNegativeCount() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalCircle(-1, 1.0)
 
         }
     }
-    @Test
-    fun createPolygonalCircleZeroRadius() {
+fun createPolygonalCircleZeroRadius() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalCircle(6, 0.0)
 
         }
     }
-    @Test
-    fun createPolygonalCircleNegativeRadius() {
+fun createPolygonalCircleNegativeRadius() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalCircle(6, -1.0)
 
         }
     }
-    @Test
-    fun createPolygonalCapsule() {
+fun createPolygonalCapsule() {
 
 		var p = Geometry.createPolygonalCapsule(5, 1.0, 0.5)
 		assertEquals(0.000, p.getCenter().x, 1.0e-3)
@@ -1245,48 +1308,42 @@ class GeometryFactoryCoverageTest {
 		assertEquals(0.000, p.getCenter().y, 1.0e-3)
 
     }
-    @Test
-    fun createPolygonalCapsuleInvalidCount() {
+fun createPolygonalCapsuleInvalidCount() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalCapsule(0, 1.0, 0.5)
 
         }
     }
-    @Test
-    fun createPolygonalCapsuleZeroWidth() {
+fun createPolygonalCapsuleZeroWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalCapsule(5, 0.0, 0.5)
 
         }
     }
-    @Test
-    fun createPolygonalCapsuleNegativeWidth() {
+fun createPolygonalCapsuleNegativeWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalCapsule(5, -1.0, 0.5)
 
         }
     }
-    @Test
-    fun createPolygonalCapsuleZeroHeight() {
+fun createPolygonalCapsuleZeroHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalCapsule(5, 1.0, 0.0)
 
         }
     }
-    @Test
-    fun createPolygonalCapsuleNegativeHeight() {
+fun createPolygonalCapsuleNegativeHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.createPolygonalCapsule(5, 1.0, -0.5)
 
         }
     }
-    @Test
-    fun flip() {
+fun flip() {
 
 		val p = Geometry.createUnitCirclePolygon(5, 1.0)
 		var flipped = Geometry.flip(p, Vector2(1.0, 1.0),  Vector2(0.0, 2.0))
@@ -1363,38 +1420,33 @@ class GeometryFactoryCoverageTest {
 		assertEquals( 0.000, vertices[4]!!.y, 1.0e-3)
 
     }
-    @Test
-    fun flipNullPolygon() {
+fun flipNullPolygon() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.flip(null, Vector2(1.0, 1.0),  null)
 
         }
     }
-    @Test
-    fun flipNullAxis() {
+fun flipNullAxis() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.flip(Geometry.createSquare(1.0), null,  null)
 
         }
     }
-    @Test
-    fun flipZeroAxis() {
+fun flipZeroAxis() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.flip(Geometry.createSquare(1.0), Vector2(),  null)
 
         }
     }
-    @Test
-    fun flipNullPoint() {
+fun flipNullPoint() {
 
 		Geometry.flip(Geometry.createSquare(1.0), Vector2(1.0, 1.0),  null)
 
     }
-    @Test
-    fun minkowskiSum() {
+fun minkowskiSum() {
 
 		var p = Geometry.minkowskiSum(Geometry.createUnitCirclePolygon(5, 0.5), Geometry.createCircle(0.2), 3)
 		assertEquals(25, p.getVertices().size)
@@ -1416,104 +1468,91 @@ class GeometryFactoryCoverageTest {
 		assertEquals(4, p.getVertices().size)
 
     }
-    @Test
-    fun minkowskiSumInvalidSegments() {
+fun minkowskiSumInvalidSegments() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.minkowskiSum(Geometry.createSegment(Vector2(1.0, 0.0)), Geometry.createSegment(Vector2(-0.5, 0.0)))
 
         }
     }
-    @Test
-    fun minkowskiSumNullWound1() {
+fun minkowskiSumNullWound1() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.minkowskiSum(null, Geometry.createUnitCirclePolygon(5, 0.5))
 
         }
     }
-    @Test
-    fun minkowskiSumNullWound2() {
+fun minkowskiSumNullWound2() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.minkowskiSum(Geometry.createUnitCirclePolygon(5, 0.5), null)
 
         }
     }
-    @Test
-    fun minkowskiSumNullShape1() {
+fun minkowskiSumNullShape1() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.minkowskiSum(null, Geometry.createCircle(0.2), 3)
 
         }
     }
-    @Test
-    fun minkowskiSumNullShape2() {
+fun minkowskiSumNullShape2() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.minkowskiSum(Geometry.createUnitCirclePolygon(5, 0.5), null, 3)
 
         }
     }
-    @Test
-    fun minkowskiSumNullShape3() {
+fun minkowskiSumNullShape3() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.minkowskiSum(null, 0.2, 3)
 
         }
     }
-    @Test
-    fun minkowskiSumInvalidCount1() {
+fun minkowskiSumInvalidCount1() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.minkowskiSum(Geometry.createUnitCirclePolygon(5, 0.5), 0.2, 0)
 
         }
     }
-    @Test
-    fun minkowskiSumInvalidCount2() {
+fun minkowskiSumInvalidCount2() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.minkowskiSum(Geometry.createUnitCirclePolygon(5, 0.5), 0.2, -2)
 
         }
     }
-    @Test
-    fun minkowskiSumInvalidCount3() {
+fun minkowskiSumInvalidCount3() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.minkowskiSum(Geometry.createUnitCirclePolygon(5, 0.5), Geometry.createCircle(0.5), 0)
 
         }
     }
-    @Test
-    fun minkowskiSumInvalidCount4() {
+fun minkowskiSumInvalidCount4() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.minkowskiSum(Geometry.createUnitCirclePolygon(5, 0.5), Geometry.createCircle(0.5), -2)
 
         }
     }
-    @Test
-    fun minkowskiSumInvalidRadius1() {
+fun minkowskiSumInvalidRadius1() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.minkowskiSum(Geometry.createUnitCirclePolygon(5, 0.5), 0.0, 3)
 
         }
     }
-    @Test
-    fun minkowskiSumInvalidRadius2() {
+fun minkowskiSumInvalidRadius2() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.minkowskiSum(Geometry.createUnitCirclePolygon(5, 0.5), -2.0, 3)
 
         }
     }
-    @Test
-    fun scale() {
+fun scale() {
 
 		var s1 = Geometry.scale(Geometry.createCircle(0.5), 2.0)
 		var s2 = Geometry.scale(Geometry.createCapsule(1.0, 0.5), 2.0)
@@ -1551,120 +1590,105 @@ class GeometryFactoryCoverageTest {
 		assertEquals(0.500, s7.getLength(), 1.0e-3)
 
     }
-    @Test
-    fun scaleNullCircle() {
+fun scaleNullCircle() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.scale(null as Circle?, 1.2)
 
         }
     }
-    @Test
-    fun scaleNullCapsule() {
+fun scaleNullCapsule() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.scale(null as Capsule?, 1.2)
 
         }
     }
-    @Test
-    fun scaleNullEllipse() {
+fun scaleNullEllipse() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.scale(null as Ellipse?, 1.2)
 
         }
     }
-    @Test
-    fun scaleNullHalfEllipse() {
+fun scaleNullHalfEllipse() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.scale(null as HalfEllipse?, 1.2)
 
         }
     }
-    @Test
-    fun scaleNullSlice() {
+fun scaleNullSlice() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.scale(null as Slice?, 1.2)
 
         }
     }
-    @Test
-    fun scaleNullPolygon() {
+fun scaleNullPolygon() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.scale(null as Polygon?, 1.2)
 
         }
     }
-    @Test
-    fun scaleNullSegment() {
+fun scaleNullSegment() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.scale(null as Segment?, 1.2)
 
         }
     }
-    @Test
-    fun scaleCircleInvalid() {
+fun scaleCircleInvalid() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.scale(Geometry.createCircle(0.5), 0.0)
 
         }
     }
-    @Test
-    fun scaleCapsuleInvalid() {
+fun scaleCapsuleInvalid() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.scale(Geometry.createCapsule(1.0, 0.5), 0.0)
 
         }
     }
-    @Test
-    fun scaleEllipseInvalid() {
+fun scaleEllipseInvalid() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.scale(Geometry.createEllipse(1.0, 0.5), 0.0)
 
         }
     }
-    @Test
-    fun scaleHalfEllipseInvalid() {
+fun scaleHalfEllipseInvalid() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.scale(Geometry.createHalfEllipse(1.0, 0.25), 0.0)
 
         }
     }
-    @Test
-    fun scaleSliceInvalid() {
+fun scaleSliceInvalid() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.scale(Geometry.createSlice(0.5, radians(30.0)), 0.0)
 
         }
     }
-    @Test
-    fun scalePolygonInvalid() {
+fun scalePolygonInvalid() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.scale(Geometry.createUnitCirclePolygon(5, 0.5), 0.0)
 
         }
     }
-    @Test
-    fun scaleSegmentInvalid() {
+fun scaleSegmentInvalid() {
         assertFailsWith<IllegalArgumentException> {
 
 		Geometry.scale(Geometry.createSegment(Vector2(1.0, 1.0)), 0.0)
 
         }
     }
-    @Test
-    fun createLinksWrap() {
+fun createLinksWrap() {
 
 		val a = Vector2(0.0, 0.0)
 		val b = Vector2(2.4, 0.0)
@@ -1682,8 +1706,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(links[3].getPoint2(), a)
 
     }
-    @Test
-    fun createLinks() {
+fun createLinks() {
 
 		val verts = mutableListOf<Vector2>()
 		verts.add(Vector2(2.0, 1.5))
@@ -1750,16 +1773,14 @@ class GeometryFactoryCoverageTest {
 		assertEquals(null, links[2].getPoint3())
 
     }
-    @Test
-    fun createLinksNull() {
+fun createLinksNull() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.createLinks(null as Array<Vector2?>?, false)
 
         }
     }
-    @Test
-    fun createLinksOneVertex() {
+fun createLinksOneVertex() {
         assertFailsWith<IllegalArgumentException> {
 
 		val verts = mutableListOf<Vector2>()
@@ -1768,8 +1789,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun createLinksNullVertex() {
+fun createLinksNullVertex() {
         assertFailsWith<NullPointerException> {
 
 		val verts = mutableListOf<Vector2?>()
@@ -1781,8 +1801,7 @@ class GeometryFactoryCoverageTest {
 
         }
     }
-    @Test
-    fun createSlice() {
+fun createSlice() {
 
 		val s = Geometry.createSlice(1.0, radians(30.0))
 		assertEquals(1.0, s.getSliceRadius())
@@ -1791,8 +1810,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(0.000, s.getCircleCenter().y)
 
     }
-    @Test
-    fun createSliceAtOrigin() {
+fun createSliceAtOrigin() {
 
 		val s = Geometry.createSliceAtOrigin(1.0, radians(30.0))
 		assertEquals(1.0, s.getSliceRadius())
@@ -1801,8 +1819,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(0.000, s.getCenter().y)
 
     }
-    @Test
-    fun polygonIntersection() {
+fun polygonIntersection() {
 
 		val p1 = Polygon(
 				Vector2(0.0, 0.0),
@@ -1850,8 +1867,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals( 2.474, result.getVertices()[10].y, 1e-3)
 
     }
-    @Test
-    fun polygonIntersectionVertexOnEdgeA() {
+fun polygonIntersectionVertexOnEdgeA() {
 
 		val p1 = Polygon(
 				Vector2(0.0, 0.0),
@@ -1897,8 +1913,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals( 4.000, result.getVertices()[9].y, 1e-3)
 
     }
-    @Test
-    fun polygonIntersectionVertexOnEdgeB() {
+fun polygonIntersectionVertexOnEdgeB() {
 
 		val p1 = Polygon(
 				Vector2(0.0, 0.0),
@@ -1944,8 +1959,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals( 2.474, result.getVertices()[9].y, 1e-3)
 
     }
-    @Test
-    fun polygonIntersectionCoincidentVertexA() {
+fun polygonIntersectionCoincidentVertexA() {
 
 		val p1 = Polygon(
 				Vector2(0.0, 0.0),
@@ -1991,8 +2005,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals( 3.250, result.getVertices()[9].y, 1e-3)
 
     }
-    @Test
-    fun polygonIntersectionCoincidentVertexB() {
+fun polygonIntersectionCoincidentVertexB() {
 
 		val p1 = Polygon(
 				Vector2(0.0, 0.0),
@@ -2038,8 +2051,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals( 2.474, result.getVertices()[9].y, 1e-3)
 
     }
-    @Test
-    fun polygonIntersectionColinearEdgeB() {
+fun polygonIntersectionColinearEdgeB() {
 
 		val p1 = Polygon(
 				Vector2(0.0, 0.0),
@@ -2088,8 +2100,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals( 2.474, result.getVertices()[10].y, 1e-3)
 
     }
-    @Test
-    fun polygonIntersectionEdgeTouching() {
+fun polygonIntersectionEdgeTouching() {
 
 		val p1 = Polygon(
 				Vector2(0.0, 0.0),
@@ -2110,8 +2121,7 @@ class GeometryFactoryCoverageTest {
 		assertNull(result)
 
     }
-    @Test
-    fun polygonIntersectionVertexTouching() {
+fun polygonIntersectionVertexTouching() {
 
 		val p1 = Polygon(
 				Vector2(0.0, 0.0),
@@ -2132,8 +2142,7 @@ class GeometryFactoryCoverageTest {
 		assertNull(result)
 
     }
-    @Test
-    fun polygonIntersectionVertexTouchingCoincident() {
+fun polygonIntersectionVertexTouchingCoincident() {
 
 		val p1 = Polygon(
 				Vector2(0.0, 0.0),
@@ -2154,8 +2163,7 @@ class GeometryFactoryCoverageTest {
 		assertNull(result)
 
     }
-    @Test
-    fun polygonIntersectionNoIntersection() {
+fun polygonIntersectionNoIntersection() {
 
 		val p1 = Polygon(
 				Vector2(0.0, 0.0),
@@ -2176,8 +2184,7 @@ class GeometryFactoryCoverageTest {
 		assertNull(result)
 
     }
-    @Test
-    fun polygonIntersectionContainment() {
+fun polygonIntersectionContainment() {
 
 		val p1 = Polygon(
 				Vector2(0.0, 0.0),
@@ -2199,8 +2206,7 @@ class GeometryFactoryCoverageTest {
 		assertSame(result, p2)
 
     }
-    @Test
-    fun getRotationRadius() {
+fun getRotationRadius() {
 
 		val p1 = Geometry.createUnitCirclePolygon(5, 0.5)
 		var r = Geometry.getRotationRadius(p1.getVertices())
@@ -2219,8 +2225,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(1.000, r, 1e-3)
 
     }
-    @Test
-    fun getCounterClockwiseEdgeNormals() {
+fun getCounterClockwiseEdgeNormals() {
 
 		val p1 = Geometry.createUnitCirclePolygon(4, 0.5)
 		var normals = Geometry.getCounterClockwiseEdgeNormals(p1.getVertices())
@@ -2238,8 +2243,7 @@ class GeometryFactoryCoverageTest {
 		assertEquals(null, normals)
 
     }
-    @Test
-    fun getCounterClockwiseEdgeNormalsWithNullVertex() {
+fun getCounterClockwiseEdgeNormalsWithNullVertex() {
         assertFailsWith<NullPointerException> {
 
 		Geometry.getCounterClockwiseEdgeNormals(arrayOf<Vector2?>(

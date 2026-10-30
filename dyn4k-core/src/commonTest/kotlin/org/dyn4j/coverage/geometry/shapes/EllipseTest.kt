@@ -24,14 +24,36 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class EllipseTest {
+val EllipseTest by testSuite {
+    test("createZeroWidth") { EllipseTestFixture().run { createZeroWidth() } }
+    test("createNegativeWidth") { EllipseTestFixture().run { createNegativeWidth() } }
+    test("createZeroHeight") { EllipseTestFixture().run { createZeroHeight() } }
+    test("createNegativeHeight") { EllipseTestFixture().run { createNegativeHeight() } }
+    test("createSuccess") { EllipseTestFixture().run { createSuccess() } }
+    test("contains") { EllipseTestFixture().run { contains() } }
+    test("project") { EllipseTestFixture().run { project() } }
+    test("getFarthest") { EllipseTestFixture().run { getFarthest() } }
+    test("getFarthestPointOnEllipse") { EllipseTestFixture().run { getFarthestPointOnEllipse() } }
+    test("getAxes") { EllipseTestFixture().run { getAxes() } }
+    test("getFoci") { EllipseTestFixture().run { getFoci() } }
+    test("rotate") { EllipseTestFixture().run { rotate() } }
+    test("translate") { EllipseTestFixture().run { translate() } }
+    test("createAABB") { EllipseTestFixture().run { createAABB() } }
+    test("getRadius") { EllipseTestFixture().run { getRadius() } }
+    test("createMass") { EllipseTestFixture().run { createMass() } }
+    test("getArea") { EllipseTestFixture().run { getArea() } }
+    test("getRotation") { EllipseTestFixture().run { getRotation() } }
+    test("copy") { EllipseTestFixture().run { copy() } }
+}
+
+private class EllipseTestFixture  {
     private val IDENTITY = Transform()
-    @Test
-    fun createZeroWidth() {
+fun createZeroWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		Ellipse(0.0, 1.0);
@@ -39,8 +61,7 @@ class EllipseTest {
         }
     }
 
-    @Test
-    fun createNegativeWidth() {
+fun createNegativeWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		Ellipse(-1.0, 1.0);
@@ -48,8 +69,7 @@ class EllipseTest {
         }
     }
 
-    @Test
-    fun createZeroHeight() {
+fun createZeroHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		Ellipse(1.0, 0.0);
@@ -57,8 +77,7 @@ class EllipseTest {
         }
     }
 
-    @Test
-    fun createNegativeHeight() {
+fun createNegativeHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		Ellipse(1.0, -1.0);
@@ -66,8 +85,7 @@ class EllipseTest {
         }
     }
 
-    @Test
-    fun createSuccess() {
+fun createSuccess() {
 
 		var e = Ellipse(1.0, 2.0);
 		assertEquals(1.0, e.getHalfHeight());
@@ -78,8 +96,7 @@ class EllipseTest {
 
     }
 
-    @Test
-    fun contains() {
+fun contains() {
 
 		var e = Ellipse(2.0, 1.0);
 		var t = Transform();
@@ -113,8 +130,7 @@ class EllipseTest {
 
     }
 
-    @Test
-    fun project() {
+fun project() {
 
 		var e = Ellipse(2.0, 1.0);
 		var t = Transform();
@@ -148,8 +164,7 @@ class EllipseTest {
 
     }
 
-    @Test
-    fun getFarthest() {
+fun getFarthest() {
 
 		var e = Ellipse(2.0, 1.0);
 		var t = Transform();
@@ -183,8 +198,7 @@ class EllipseTest {
 
     }
 
-    @Test
-    fun getFarthestPointOnEllipse() {
+fun getFarthestPointOnEllipse() {
 
 
 
@@ -216,8 +230,7 @@ class EllipseTest {
 
     }
 
-    @Test
-    fun getAxes() {
+fun getAxes() {
         assertFailsWith<UnsupportedOperationException> {
 
 		var e = Ellipse(1.0, 0.5);
@@ -226,8 +239,7 @@ class EllipseTest {
         }
     }
 
-    @Test
-    fun getFoci() {
+fun getFoci() {
         assertFailsWith<UnsupportedOperationException> {
 
 		var e = Ellipse(1.0, 0.5);
@@ -236,8 +248,7 @@ class EllipseTest {
         }
     }
 
-    @Test
-    fun rotate() {
+fun rotate() {
 
 		var e = Ellipse(1.0, 0.5);
 
@@ -257,8 +268,7 @@ class EllipseTest {
 
     }
 
-    @Test
-    fun translate() {
+fun translate() {
 
 		var e = Ellipse(1.0, 0.5);
 
@@ -269,8 +279,7 @@ class EllipseTest {
 
     }
 
-    @Test
-    fun createAABB() {
+fun createAABB() {
 
 		var e = Ellipse(1.0, 0.5);
 
@@ -298,8 +307,7 @@ class EllipseTest {
 
     }
 
-    @Test
-    fun getRadius() {
+fun getRadius() {
 
 		var e = Ellipse(1.0, 0.5);
 
@@ -315,8 +323,7 @@ class EllipseTest {
 
     }
 
-    @Test
-    fun createMass() {
+fun createMass() {
 
 		var e = Ellipse(1.0, 0.5);
 		var mass = e.createMass(1.0);
@@ -351,8 +358,7 @@ class EllipseTest {
 
     }
 
-    @Test
-    fun getArea() {
+fun getArea() {
 
 		var e = Ellipse(1.0, 0.5);
 		assertEquals(0.392, e.getArea(), 1e-3);
@@ -362,8 +368,7 @@ class EllipseTest {
 
     }
 
-    @Test
-    fun getRotation() {
+fun getRotation() {
 
 		var e = Ellipse(1.0, 0.5);
 		assertEquals(0.0, e.getRotationAngle());
@@ -387,8 +392,7 @@ class EllipseTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var ellipse = Ellipse(1.0, 0.5);
 		ellipse.setUserData(Any());

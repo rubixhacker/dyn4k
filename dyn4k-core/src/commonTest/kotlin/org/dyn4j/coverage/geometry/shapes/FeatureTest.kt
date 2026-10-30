@@ -24,13 +24,19 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class FeatureTest {
-    @Test
-    fun create() {
+val FeatureTest by testSuite {
+    test("create") { FeatureTestFixture().run { create() } }
+    test("createNonIndexed") { FeatureTestFixture().run { createNonIndexed() } }
+    test("copy") { FeatureTestFixture().run { copy() } }
+}
+
+private class FeatureTestFixture  {
+fun create() {
 
 		var pf1 = PointFeature(Vector2(1.0, 1.0), 1);
 		var pf2 = PointFeature(Vector2(1.0, 2.0), 0);
@@ -56,8 +62,7 @@ class FeatureTest {
 
     }
 
-    @Test
-    fun createNonIndexed() {
+fun createNonIndexed() {
 
 		var pf1 = PointFeature(Vector2(1.0, 1.0), Feature.NOT_INDEXED);
 
@@ -68,8 +73,7 @@ class FeatureTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var pf = PointFeature(Vector2(5.0, -4.0), 1);
 		var cpf = pf.copy();

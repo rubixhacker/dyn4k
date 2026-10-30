@@ -24,13 +24,27 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class RectangleTest {
-    @Test
-    fun createInvalidWidth() {
+val RectangleTest by testSuite {
+    test("createInvalidWidth") { RectangleTestFixture().run { createInvalidWidth() } }
+    test("createInvalidHeight") { RectangleTestFixture().run { createInvalidHeight() } }
+    test("createSuccess") { RectangleTestFixture().run { createSuccess() } }
+    test("getAxes") { RectangleTestFixture().run { getAxes() } }
+    test("contains") { RectangleTestFixture().run { contains() } }
+    test("project") { RectangleTestFixture().run { project() } }
+    test("getRotation") { RectangleTestFixture().run { getRotation() } }
+    test("createMass") { RectangleTestFixture().run { createMass() } }
+    test("getArea") { RectangleTestFixture().run { getArea() } }
+    test("computeAABB") { RectangleTestFixture().run { computeAABB() } }
+    test("copy") { RectangleTestFixture().run { copy() } }
+}
+
+private class RectangleTestFixture  {
+fun createInvalidWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		Rectangle(-1.0, 3.0);
@@ -38,8 +52,7 @@ class RectangleTest {
         }
     }
 
-    @Test
-    fun createInvalidHeight() {
+fun createInvalidHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		Rectangle(2.0, 0.0);
@@ -47,8 +60,7 @@ class RectangleTest {
         }
     }
 
-    @Test
-    fun createSuccess() {
+fun createSuccess() {
 
 		var r = Rectangle(2.0, 2.0);
 
@@ -71,8 +83,7 @@ class RectangleTest {
 
     }
 
-    @Test
-    fun getAxes() {
+fun getAxes() {
 
 		var r = Rectangle(1.0, 1.0);
 		var t = Transform();
@@ -95,8 +106,7 @@ class RectangleTest {
 
     }
 
-    @Test
-    fun contains() {
+fun contains() {
 
 		var r = Rectangle(1.0, 2.0);
 		var t = Transform();
@@ -120,8 +130,7 @@ class RectangleTest {
 
     }
 
-    @Test
-    fun project() {
+fun project() {
 
 		var r = Rectangle(2.0, 1.0);
 		var t = Transform();
@@ -150,8 +159,7 @@ class RectangleTest {
 
     }
 
-    @Test
-    fun getRotation() {
+fun getRotation() {
 
 		var r = Geometry.createRectangle(1.0, 1.0);
 		r.translate(1.0, 1.0);
@@ -164,8 +172,7 @@ class RectangleTest {
 
     }
 
-    @Test
-    fun createMass() {
+fun createMass() {
 
 		var r = Rectangle(1.0, 1.0);
 		var m = r.createMass(1.5);
@@ -184,8 +191,7 @@ class RectangleTest {
 
     }
 
-    @Test
-    fun getArea() {
+fun getArea() {
 
 		var r = Rectangle(1.0, 1.0);
 		assertEquals(1.0, r.getArea(), 1.0e-3);
@@ -195,8 +201,7 @@ class RectangleTest {
 
     }
 
-    @Test
-    fun computeAABB() {
+fun computeAABB() {
 
 		var r = Rectangle(1.0, 1.0);
 		var aabb = r.createAABB();
@@ -214,8 +219,7 @@ class RectangleTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var rect = Rectangle(1.0, 1.0);
 		rect.setUserData(Any());

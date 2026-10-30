@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.simulation
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.dynamics.joint.RevoluteJoint
@@ -31,13 +32,17 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class RevoluteJointSimulationTest {
-    @Test
-    fun noLimitsNoMotor() {
+val RevoluteJointSimulationTest by testSuite {
+    test("noLimitsNoMotor") { RevoluteJointSimulationTestFixture().run { noLimitsNoMotor() } }
+    test("limits") { RevoluteJointSimulationTestFixture().run { limits() } }
+    test("motorWithAndWithoutLimits") { RevoluteJointSimulationTestFixture().run { motorWithAndWithoutLimits() } }
+}
+
+private class RevoluteJointSimulationTestFixture  {
+fun noLimitsNoMotor() {
         val w = World<Body>()
         var g = Body()
         var gf = g.addFixture(Geometry.createRectangle(10.0, 0.5))
@@ -83,8 +88,7 @@ class RevoluteJointSimulationTest {
         assertEquals(0.0, rj.getReactionTorque(invdt), 1e-5)
         assertEquals(7.6969, rj.getReactionForce(invdt).getMagnitude(), 1e-5)
     }
-    @Test
-    fun limits() {
+fun limits() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         w.getSettings().setAngularTolerance(0.0)
@@ -134,8 +138,7 @@ class RevoluteJointSimulationTest {
         assertEquals( 0.08726, rj.getAngularTranslation(), 1e-3)
         assertEquals( 0.0, rj.getReactionTorque(invdt), 1e-3)
     }
-    @Test
-    fun motorWithAndWithoutLimits() {
+fun motorWithAndWithoutLimits() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         w.getSettings().setAngularTolerance(0.0)

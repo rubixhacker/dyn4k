@@ -24,18 +24,21 @@
  */
 package org.dyn4j.coverage.simulation
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.Torque
 import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class TorqueSimulationTest {
-    @Test
-    fun applyTimed() {
+val TorqueSimulationTest by testSuite {
+    test("applyTimed") { TorqueSimulationTestFixture().run { applyTimed() } }
+}
+
+private class TorqueSimulationTestFixture  {
+fun applyTimed() {
         val w = World<Body>()
         var b = Body()
         b.addFixture(Geometry.createCircle(1.0))

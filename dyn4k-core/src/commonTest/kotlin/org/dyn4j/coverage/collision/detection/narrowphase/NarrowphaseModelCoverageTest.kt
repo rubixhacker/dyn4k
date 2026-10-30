@@ -24,7 +24,7 @@
  */
 package org.dyn4j.collision.narrowphase
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -34,7 +34,30 @@ import kotlin.test.assertFailsWith
 import org.dyn4j.collision.narrowphase.*
 import org.dyn4j.geometry.*
 
-class NarrowphaseModelCoverageTest {
+val NarrowphaseModelCoverageTest by testSuite {
+    test("abstractFallbackConditionCreate") { NarrowphaseModelCoverageTestFixture().run { abstractFallbackConditionCreate() } }
+    test("abstractFallbackConditionGetSortIndex") { NarrowphaseModelCoverageTestFixture().run { abstractFallbackConditionGetSortIndex() } }
+    test("abstractFallbackConditionCompareTo") { NarrowphaseModelCoverageTestFixture().run { abstractFallbackConditionCompareTo() } }
+    test("epaCreateGetSet") { NarrowphaseModelCoverageTestFixture().run { epaCreateGetSet() } }
+    test("epaSetSmallMaxIterations") { NarrowphaseModelCoverageTestFixture().run { epaSetSmallMaxIterations() } }
+    test("epaSetZeroMaxIterations") { NarrowphaseModelCoverageTestFixture().run { epaSetZeroMaxIterations() } }
+    test("epaSetNegativeMaxIterations") { NarrowphaseModelCoverageTestFixture().run { epaSetNegativeMaxIterations() } }
+    test("epaSetZeroDistanceEpsilon") { NarrowphaseModelCoverageTestFixture().run { epaSetZeroDistanceEpsilon() } }
+    test("epaSetNegativeDistanceEpsilon") { NarrowphaseModelCoverageTestFixture().run { epaSetNegativeDistanceEpsilon() } }
+    test("expandingSimplexEdgeCreateSuccess") { NarrowphaseModelCoverageTestFixture().run { expandingSimplexEdgeCreateSuccess() } }
+    test("expandingSimplexEdgeCompareTo") { NarrowphaseModelCoverageTestFixture().run { expandingSimplexEdgeCompareTo() } }
+    test("expandingSimplexEdgeTostring") { NarrowphaseModelCoverageTestFixture().run { expandingSimplexEdgeTostring() } }
+    test("expandingSimplexCreateSuccess") { NarrowphaseModelCoverageTestFixture().run { expandingSimplexCreateSuccess() } }
+    test("expandingSimplexGetWinding") { NarrowphaseModelCoverageTestFixture().run { expandingSimplexGetWinding() } }
+    test("expandingSimplexExpandAndGetClosest") { NarrowphaseModelCoverageTestFixture().run { expandingSimplexExpandAndGetClosest() } }
+    test("minkowskiSumPointCreateSuccess") { NarrowphaseModelCoverageTestFixture().run { minkowskiSumPointCreateSuccess() } }
+    test("minkowskiSumCreateSuccess") { NarrowphaseModelCoverageTestFixture().run { minkowskiSumCreateSuccess() } }
+    test("minkowskiSumTostring") { NarrowphaseModelCoverageTestFixture().run { minkowskiSumTostring() } }
+    test("minkowskiSumGetSupportPoint") { NarrowphaseModelCoverageTestFixture().run { minkowskiSumGetSupportPoint() } }
+    test("minkowskiSumGetSupportPoints") { NarrowphaseModelCoverageTestFixture().run { minkowskiSumGetSupportPoints() } }
+}
+
+private class NarrowphaseModelCoverageTestFixture  {
     private class Condition(index: Int) : AbstractFallbackCondition(index) {
         override fun isMatch(convex1: Convex, convex2: Convex) = false
     }
@@ -49,14 +72,14 @@ class NarrowphaseModelCoverageTest {
         assertEquals(expectedY, actual.y, tolerance)
     }
 
-    @Test fun abstractFallbackConditionCreate() {
+fun abstractFallbackConditionCreate() {
         assertEquals(1, Condition(1).getSortIndex())
         assertEquals(0, TypedCondition().getSortIndex())
     }
-    @Test fun abstractFallbackConditionGetSortIndex() {
+fun abstractFallbackConditionGetSortIndex() {
         listOf(1, 2, 5, -1, 2).forEach { assertEquals(it, Condition(it).getSortIndex()) }
     }
-    @Test fun abstractFallbackConditionCompareTo() {
+fun abstractFallbackConditionCompareTo() {
         val conditions = listOf(Condition(1), Condition(2), Condition(5), Condition(-1), Condition(2))
         assertTrue(conditions[0] > conditions[3]); assertTrue(conditions[3] < conditions[0])
         assertEquals(0, conditions[1].compareTo(conditions[4]))
@@ -64,20 +87,20 @@ class NarrowphaseModelCoverageTest {
         assertTrue(conditions[0] < conditions[2]); assertTrue(conditions[2] > conditions[0])
     }
 
-    @Test fun epaCreateGetSet() {
+fun epaCreateGetSet() {
         val epa = Epa()
         assertEquals(Epa.DEFAULT_DISTANCE_EPSILON, epa.getDistanceEpsilon())
         assertEquals(Epa.DEFAULT_MAX_ITERATIONS, epa.getMaxIterations())
         epa.setDistanceEpsilon(0.1); epa.setMaxIterations(20)
         assertEquals(0.1, epa.getDistanceEpsilon()); assertEquals(20, epa.getMaxIterations())
     }
-    @Test fun epaSetSmallMaxIterations() { assertFailsWith<IllegalArgumentException> { Epa().setMaxIterations(3) } }
-    @Test fun epaSetZeroMaxIterations() { assertFailsWith<IllegalArgumentException> { Epa().setMaxIterations(0) } }
-    @Test fun epaSetNegativeMaxIterations() { assertFailsWith<IllegalArgumentException> { Epa().setMaxIterations(-3) } }
-    @Test fun epaSetZeroDistanceEpsilon() { assertFailsWith<IllegalArgumentException> { Epa().setDistanceEpsilon(0.0) } }
-    @Test fun epaSetNegativeDistanceEpsilon() { assertFailsWith<IllegalArgumentException> { Epa().setDistanceEpsilon(-0.11) } }
+fun epaSetSmallMaxIterations() { assertFailsWith<IllegalArgumentException> { Epa().setMaxIterations(3) } }
+fun epaSetZeroMaxIterations() { assertFailsWith<IllegalArgumentException> { Epa().setMaxIterations(0) } }
+fun epaSetNegativeMaxIterations() { assertFailsWith<IllegalArgumentException> { Epa().setMaxIterations(-3) } }
+fun epaSetZeroDistanceEpsilon() { assertFailsWith<IllegalArgumentException> { Epa().setDistanceEpsilon(0.0) } }
+fun epaSetNegativeDistanceEpsilon() { assertFailsWith<IllegalArgumentException> { Epa().setDistanceEpsilon(-0.11) } }
 
-    @Test fun expandingSimplexEdgeCreateSuccess() {
+fun expandingSimplexEdgeCreateSuccess() {
         val edges = listOf(
             ExpandingSimplexEdge(a, b, 1) to doubleArrayOf(1.0, 0.0, -1.0),
             ExpandingSimplexEdge(b, c, 1) to doubleArrayOf(1.109, 0.832, 0.554),
@@ -93,14 +116,14 @@ class NarrowphaseModelCoverageTest {
             assertEquals(1.0, edge.normal.getMagnitude(), 1e-3)
         }
     }
-    @Test fun expandingSimplexEdgeCompareTo() {
+fun expandingSimplexEdgeCompareTo() {
         val e1 = ExpandingSimplexEdge(a, b, 1); val e2 = ExpandingSimplexEdge(b, c, 1); val e3 = ExpandingSimplexEdge(c, a, 1)
         assertEquals(-1, e1.compareTo(e2)); assertEquals(1, e2.compareTo(e1))
         assertEquals(1, e1.compareTo(e3)); assertEquals(-1, e3.compareTo(e1)); assertEquals(0, e1.compareTo(e1))
     }
-    @Test fun expandingSimplexEdgeTostring() { assertNotNull(ExpandingSimplexEdge(a, b, 1).toString()) }
+fun expandingSimplexEdgeTostring() { assertNotNull(ExpandingSimplexEdge(a, b, 1).toString()) }
 
-    @Test fun expandingSimplexCreateSuccess() {
+fun expandingSimplexCreateSuccess() {
         val simplex = ExpandingSimplex(listOf(a, b, c))
         assertEquals(1, simplex.getWinding()); assertEquals(3, simplex.size())
         val edge = simplex.getClosestEdge()
@@ -108,7 +131,7 @@ class NarrowphaseModelCoverageTest {
         vector(-0.948, 0.316, edge.normal); assertEquals(0.632, edge.distance, 1e-3)
         assertNotNull(simplex.toString())
     }
-    @Test fun expandingSimplexGetWinding() {
+fun expandingSimplexGetWinding() {
         assertEquals(1, ExpandingSimplex(listOf(a, b, c)).getWinding())
         assertEquals(-1, ExpandingSimplex(listOf(c, b, a)).getWinding())
         assertEquals(-1, ExpandingSimplex(listOf(c, b)).getWinding())
@@ -118,7 +141,7 @@ class NarrowphaseModelCoverageTest {
         assertEquals(1, ExpandingSimplex(listOf(b)).size())
         assertEquals(2, ExpandingSimplex(listOf(b, b)).size())
     }
-    @Test fun expandingSimplexExpandAndGetClosest() {
+fun expandingSimplexExpandAndGetClosest() {
         val simplex = ExpandingSimplex(listOf(a, b, c))
         simplex.expand(Vector2(-1.0, 1.0))
         assertEquals(4, simplex.size())
@@ -131,7 +154,7 @@ class NarrowphaseModelCoverageTest {
         assertEquals(1.0, edge.distance, 1e-3); vector(-1.0, 0.0, edge.normal)
     }
 
-    @Test fun minkowskiSumPointCreateSuccess() {
+fun minkowskiSumPointCreateSuccess() {
         val first = Vector2(0.0, 0.0); val second = Vector2(1.0, 1.0)
         val point = MinkowskiSumPoint(first, second)
         assertSame(first, point.getSupportPoint1()); assertSame(second, point.getSupportPoint2())
@@ -141,15 +164,15 @@ class NarrowphaseModelCoverageTest {
         val second = Transform(); second.translate(1.0, 0.0)
         return MinkowskiSum(Geometry.createCircle(1.0), Transform(), Geometry.createCircle(1.0), second)
     }
-    @Test fun minkowskiSumCreateSuccess() {
+fun minkowskiSumCreateSuccess() {
         val c1 = Geometry.createCircle(1.0); val c2 = Geometry.createCircle(1.0)
         val t1 = Transform(); val t2 = Transform(); t2.translate(1.0, 0.0)
         val sum = MinkowskiSum(c1, t1, c2, t2)
         assertSame(c1, sum.getConvex1()); assertSame(t1, sum.getTransform1())
         assertSame(c2, sum.getConvex2()); assertSame(t2, sum.getTransform2())
     }
-    @Test fun minkowskiSumTostring() { assertNotNull(sum().toString()) }
-    @Test fun minkowskiSumGetSupportPoint() {
+fun minkowskiSumTostring() { assertNotNull(sum().toString()) }
+fun minkowskiSumGetSupportPoint() {
         val sum = sum()
         listOf(
             Vector2(0.0, 1.0) to Vector2(-1.0, 2.0),
@@ -158,7 +181,7 @@ class NarrowphaseModelCoverageTest {
             Vector2(-1.0, 0.0) to Vector2(-3.0, 0.0)
         ).forEach { (direction, expected) -> vector(expected.x, expected.y, sum.getSupportPoint(direction)) }
     }
-    @Test fun minkowskiSumGetSupportPoints() {
+fun minkowskiSumGetSupportPoints() {
         val sum = sum()
         listOf(
             Triple(Vector2(0.0, 1.0), Vector2(0.0, 1.0), Vector2(1.0, -1.0)),

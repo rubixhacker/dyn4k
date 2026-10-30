@@ -24,16 +24,20 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.RobustGeometry
 import org.dyn4j.geometry.Vector2
 import kotlin.math.sign
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class RobustGeometryTest {
-    @Test
-    fun randomizedTest() {
+val RobustGeometryTest by testSuite {
+    test("randomizedTest") { RobustGeometryTestFixture().run { randomizedTest() } }
+    test("randomizedTest2") { RobustGeometryTestFixture().run { randomizedTest2() } }
+}
+
+private class RobustGeometryTestFixture  {
+fun randomizedTest() {
         val random = JavaRandom(0L)
         repeat(100) {
             val pa = Vector2(random.nextDouble(), random.nextDouble())
@@ -57,8 +61,7 @@ class RobustGeometryTest {
         }
     }
 
-    @Test
-    fun randomizedTest2() {
+fun randomizedTest2() {
         val random = JavaRandom(0L)
         repeat(1000) {
             val pa = Vector2(random.nextDouble(), random.nextDouble())

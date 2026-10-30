@@ -24,13 +24,42 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class AABBTest {
-    @Test
-    fun createSuccess() {
+val AABBTest by testSuite {
+    test("createSuccess") { AABBTestFixture().run { createSuccess() } }
+    test("createRadius") { AABBTestFixture().run { createRadius() } }
+    test("createRadiusNegative") { AABBTestFixture().run { createRadiusNegative() } }
+    test("createCopy") { AABBTestFixture().run { createCopy() } }
+    test("createFailure1") { AABBTestFixture().run { createFailure1() } }
+    test("createFailure2") { AABBTestFixture().run { createFailure2() } }
+    test("perimeter") { AABBTestFixture().run { perimeter() } }
+    test("area") { AABBTestFixture().run { area() } }
+    test("union") { AABBTestFixture().run { union() } }
+    test("expand") { AABBTestFixture().run { expand() } }
+    test("overlaps") { AABBTestFixture().run { overlaps() } }
+    test("contains") { AABBTestFixture().run { contains() } }
+    test("getWidth") { AABBTestFixture().run { getWidth() } }
+    test("getHeight") { AABBTestFixture().run { getHeight() } }
+    test("translate") { AABBTestFixture().run { translate() } }
+    test("containsPoint") { AABBTestFixture().run { containsPoint() } }
+    test("intersection") { AABBTestFixture().run { intersection() } }
+    test("degenerate") { AABBTestFixture().run { degenerate() } }
+    test("testEquals") { AABBTestFixture().run { testEquals() } }
+    test("testHashcode") { AABBTestFixture().run { testHashcode() } }
+    test("testToString") { AABBTestFixture().run { testToString() } }
+    test("createFromPoints") { AABBTestFixture().run { createFromPoints() } }
+    test("setFromPoints") { AABBTestFixture().run { setFromPoints() } }
+    test("copy") { AABBTestFixture().run { copy() } }
+    test("getCenter") { AABBTestFixture().run { getCenter() } }
+    test("zero") { AABBTestFixture().run { zero() } }
+}
+
+private class AABBTestFixture  {
+fun createSuccess() {
 
 		AABB(0.0, 0.0, 1.0, 1.0);
 		AABB(-2.0, 2.0, -1.0, 5.0);
@@ -38,8 +67,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun createRadius() {
+fun createRadius() {
 
 		var aabb = AABB(0.5);
 		assertEquals(-0.500, aabb.getMinX(), 1.0e-3);
@@ -55,8 +83,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun createRadiusNegative() {
+fun createRadiusNegative() {
         assertFailsWith<IllegalArgumentException> {
 
 		AABB(Vector2(-1.0, 1.0), -1.0);
@@ -64,8 +91,7 @@ class AABBTest {
         }
     }
 
-    @Test
-    fun createCopy() {
+fun createCopy() {
 
 		var aabb1 = AABB(Vector2(-3.0, 0.0), Vector2(-2.0, 2.0));
 		var aabb2 = AABB(aabb1);
@@ -77,8 +103,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun createFailure1() {
+fun createFailure1() {
         assertFailsWith<IllegalArgumentException> {
 
 		AABB(0.0, 0.0, -1.0, 2.0);
@@ -86,8 +111,7 @@ class AABBTest {
         }
     }
 
-    @Test
-    fun createFailure2() {
+fun createFailure2() {
         assertFailsWith<IllegalArgumentException> {
 
 		AABB(Vector2(0.0, 0.0), Vector2(-1.0, 2.0));
@@ -95,8 +119,7 @@ class AABBTest {
         }
     }
 
-    @Test
-    fun perimeter() {
+fun perimeter() {
 
 		var aabb = AABB(-2.0, 0.0, 2.0, 1.0);
 
@@ -104,8 +127,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun area() {
+fun area() {
 
 		var aabb = AABB(-2.0, 0.0, 2.0, 1.0);
 
@@ -113,8 +135,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun union() {
+fun union() {
 
 		var aabb1 = AABB(-2.0, 0.0, 2.0, 1.0);
 		var aabb2 = AABB(-1.0, -2.0, 5.0, 0.5);
@@ -146,8 +167,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun expand() {
+fun expand() {
 
 		var aabb = AABB(-2.0, 0.0, 4.0, 4.0);
 		var aabb2 = aabb.getExpanded(2.0);
@@ -189,8 +209,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun overlaps() {
+fun overlaps() {
 
 		var aabb1 = AABB(-2.0, 0.0, 2.0, 1.0);
 		var aabb2 = AABB(-1.0, -2.0, 5.0, 2.0);
@@ -207,8 +226,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun contains() {
+fun contains() {
 
 		var aabb1 = AABB(-2.0, 0.0, 2.0, 1.0);
 		var aabb2 = AABB(-1.0, -2.0, 5.0, 2.0);
@@ -225,8 +243,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun getWidth() {
+fun getWidth() {
 
 		var aabb = AABB(-2.0, 0.0, 1.0, 1.0);
 
@@ -234,8 +251,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun getHeight() {
+fun getHeight() {
 
 		var aabb = AABB(-2.0, 0.0, 1.0, 1.0);
 
@@ -243,8 +259,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun translate() {
+fun translate() {
 
 		var aabb = AABB(-2.0, 0.0, 1.0, 1.0);
 
@@ -270,8 +285,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun containsPoint() {
+fun containsPoint() {
 
 		var aabb = AABB(-2.0, 0.0, 2.0, 1.0);
 
@@ -286,8 +300,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun intersection() {
+fun intersection() {
 
 		var aabb1 = AABB(-2.0, 0.0, 2.0, 1.0);
 		var aabb2 = AABB(-1.0, -2.0, 5.0, 0.5);
@@ -325,8 +338,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun degenerate() {
+fun degenerate() {
 
 		var aabb = AABB(0.0, 0.0, 0.0, 0.0);
 		assertTrue(aabb.isDegenerate());
@@ -344,8 +356,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun testEquals() {
+fun testEquals() {
 
 		var aabb1 = AABB(-2.0, 0.0, 2.0, 1.0);
 		var aabb2 = AABB(-1.0, -2.0, 5.0, 2.0);
@@ -360,8 +371,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun testHashcode() {
+fun testHashcode() {
 
 		var aabb1 = AABB(-2.0, 0.0, 2.0, 1.0);
 		var aabb2 = AABB(-1.0, -2.0, 5.0, 2.0);
@@ -373,16 +383,14 @@ class AABBTest {
 
     }
 
-    @Test
-    fun testToString() {
+fun testToString() {
 
 		var aabb1 = AABB(-2.0, 0.0, 2.0, 1.0);
 		assertNotNull(aabb1.toString());
 
     }
 
-    @Test
-    fun createFromPoints() {
+fun createFromPoints() {
 
 		var p1 = Vector2(1.0, 1.0);
 		var p2 = Vector2(3.0, 3.0);
@@ -403,8 +411,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun setFromPoints() {
+fun setFromPoints() {
 
 		var p1 = Vector2(1.0, 1.0);
 		var p2 = Vector2(3.0, 3.0);
@@ -426,8 +433,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var aabb = AABB(1.0,1.0,3.0,3.0);
 
@@ -440,8 +446,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun getCenter() {
+fun getCenter() {
 
 		var aabb = AABB(1.0,1.0,3.0,3.0);
 		var c = aabb.getCenter();
@@ -451,8 +456,7 @@ class AABBTest {
 
     }
 
-    @Test
-    fun zero() {
+fun zero() {
 
 		var aabb = AABB(1.0,1.0,3.0,3.0);
 

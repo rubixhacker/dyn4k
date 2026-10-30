@@ -24,7 +24,7 @@
  */
 package org.dyn4j.collision.broadphase
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotSame
@@ -55,6 +55,178 @@ import org.dyn4j.geometry.AABB
 import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.Ray
 import org.dyn4j.geometry.Vector2
+
+val ItemBroadphaseCoverageTest by testSuite {
+    test("addContainsBody_brute_force") { ItemBroadphaseCoverageTestFixture().run { addContainsBody_brute_force() } }
+    test("addContainsBody_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { addContainsBody_sap_untracked() } }
+    test("addContainsBody_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { addContainsBody_sap_tracked() } }
+    test("addContainsBody_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { addContainsBody_tree_untracked() } }
+    test("addContainsBody_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { addContainsBody_tree_tracked() } }
+    test("addContainsCollisionItem_brute_force") { ItemBroadphaseCoverageTestFixture().run { addContainsCollisionItem_brute_force() } }
+    test("addContainsCollisionItem_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { addContainsCollisionItem_sap_untracked() } }
+    test("addContainsCollisionItem_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { addContainsCollisionItem_sap_tracked() } }
+    test("addContainsCollisionItem_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { addContainsCollisionItem_tree_untracked() } }
+    test("addContainsCollisionItem_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { addContainsCollisionItem_tree_tracked() } }
+    test("addContainsFixture_brute_force") { ItemBroadphaseCoverageTestFixture().run { addContainsFixture_brute_force() } }
+    test("addContainsFixture_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { addContainsFixture_sap_untracked() } }
+    test("addContainsFixture_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { addContainsFixture_sap_tracked() } }
+    test("addContainsFixture_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { addContainsFixture_tree_untracked() } }
+    test("addContainsFixture_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { addContainsFixture_tree_tracked() } }
+    test("clear_brute_force") { ItemBroadphaseCoverageTestFixture().run { clear_brute_force() } }
+    test("clear_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { clear_sap_untracked() } }
+    test("clear_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { clear_sap_tracked() } }
+    test("clear_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { clear_tree_untracked() } }
+    test("clear_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { clear_tree_tracked() } }
+    test("updateTargeted_brute_force") { ItemBroadphaseCoverageTestFixture().run { updateTargeted_brute_force() } }
+    test("updateTargeted_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { updateTargeted_sap_untracked() } }
+    test("updateTargeted_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { updateTargeted_sap_tracked() } }
+    test("updateTargeted_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { updateTargeted_tree_untracked() } }
+    test("updateTargeted_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { updateTargeted_tree_tracked() } }
+    test("update_brute_force") { ItemBroadphaseCoverageTestFixture().run { update_brute_force() } }
+    test("update_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { update_sap_untracked() } }
+    test("update_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { update_sap_tracked() } }
+    test("update_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { update_tree_untracked() } }
+    test("update_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { update_tree_tracked() } }
+    test("removeContainsBody_brute_force") { ItemBroadphaseCoverageTestFixture().run { removeContainsBody_brute_force() } }
+    test("removeContainsBody_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { removeContainsBody_sap_untracked() } }
+    test("removeContainsBody_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { removeContainsBody_sap_tracked() } }
+    test("removeContainsBody_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { removeContainsBody_tree_untracked() } }
+    test("removeContainsBody_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { removeContainsBody_tree_tracked() } }
+    test("removeContainsFixture_brute_force") { ItemBroadphaseCoverageTestFixture().run { removeContainsFixture_brute_force() } }
+    test("removeContainsFixture_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { removeContainsFixture_sap_untracked() } }
+    test("removeContainsFixture_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { removeContainsFixture_sap_tracked() } }
+    test("removeContainsFixture_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { removeContainsFixture_tree_untracked() } }
+    test("removeContainsFixture_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { removeContainsFixture_tree_tracked() } }
+    test("getAABB_brute_force") { ItemBroadphaseCoverageTestFixture().run { getAABB_brute_force() } }
+    test("getAABB_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { getAABB_sap_untracked() } }
+    test("getAABB_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { getAABB_sap_tracked() } }
+    test("getAABB_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { getAABB_tree_untracked() } }
+    test("getAABB_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { getAABB_tree_tracked() } }
+    test("getAABBProducer_brute_force") { ItemBroadphaseCoverageTestFixture().run { getAABBProducer_brute_force() } }
+    test("getAABBProducer_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { getAABBProducer_sap_untracked() } }
+    test("getAABBProducer_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { getAABBProducer_sap_tracked() } }
+    test("getAABBProducer_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { getAABBProducer_tree_untracked() } }
+    test("getAABBProducer_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { getAABBProducer_tree_tracked() } }
+    test("getBroadphaseFilter_brute_force") { ItemBroadphaseCoverageTestFixture().run { getBroadphaseFilter_brute_force() } }
+    test("getBroadphaseFilter_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { getBroadphaseFilter_sap_untracked() } }
+    test("getBroadphaseFilter_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { getBroadphaseFilter_sap_tracked() } }
+    test("getBroadphaseFilter_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { getBroadphaseFilter_tree_untracked() } }
+    test("getBroadphaseFilter_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { getBroadphaseFilter_tree_tracked() } }
+    test("getAABBExpansionMethod_brute_force") { ItemBroadphaseCoverageTestFixture().run { getAABBExpansionMethod_brute_force() } }
+    test("getAABBExpansionMethod_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { getAABBExpansionMethod_sap_untracked() } }
+    test("getAABBExpansionMethod_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { getAABBExpansionMethod_sap_tracked() } }
+    test("getAABBExpansionMethod_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { getAABBExpansionMethod_tree_untracked() } }
+    test("getAABBExpansionMethod_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { getAABBExpansionMethod_tree_tracked() } }
+    test("updateSmall_brute_force") { ItemBroadphaseCoverageTestFixture().run { updateSmall_brute_force() } }
+    test("updateSmall_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { updateSmall_sap_untracked() } }
+    test("updateSmall_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { updateSmall_sap_tracked() } }
+    test("updateSmall_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { updateSmall_tree_untracked() } }
+    test("updateSmall_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { updateSmall_tree_tracked() } }
+    test("updateLarge_brute_force") { ItemBroadphaseCoverageTestFixture().run { updateLarge_brute_force() } }
+    test("updateLarge_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { updateLarge_sap_untracked() } }
+    test("updateLarge_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { updateLarge_sap_tracked() } }
+    test("updateLarge_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { updateLarge_tree_untracked() } }
+    test("updateLarge_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { updateLarge_tree_tracked() } }
+    test("getSetUpdateTrackingEnabled_brute_force") { ItemBroadphaseCoverageTestFixture().run { getSetUpdateTrackingEnabled_brute_force() } }
+    test("getSetUpdateTrackingEnabled_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { getSetUpdateTrackingEnabled_sap_untracked() } }
+    test("getSetUpdateTrackingEnabled_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { getSetUpdateTrackingEnabled_sap_tracked() } }
+    test("getSetUpdateTrackingEnabled_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { getSetUpdateTrackingEnabled_tree_untracked() } }
+    test("getSetUpdateTrackingEnabled_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { getSetUpdateTrackingEnabled_tree_tracked() } }
+    test("isUpdateTrackingSupported_brute_force") { ItemBroadphaseCoverageTestFixture().run { isUpdateTrackingSupported_brute_force() } }
+    test("isUpdateTrackingSupported_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { isUpdateTrackingSupported_sap_untracked() } }
+    test("isUpdateTrackingSupported_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { isUpdateTrackingSupported_sap_tracked() } }
+    test("isUpdateTrackingSupported_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { isUpdateTrackingSupported_tree_untracked() } }
+    test("isUpdateTrackingSupported_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { isUpdateTrackingSupported_tree_tracked() } }
+    test("optimize_brute_force") { ItemBroadphaseCoverageTestFixture().run { optimize_brute_force() } }
+    test("optimize_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { optimize_sap_untracked() } }
+    test("optimize_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { optimize_sap_tracked() } }
+    test("optimize_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { optimize_tree_untracked() } }
+    test("optimize_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { optimize_tree_tracked() } }
+    test("setUpdated_brute_force") { ItemBroadphaseCoverageTestFixture().run { setUpdated_brute_force() } }
+    test("setUpdated_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { setUpdated_sap_untracked() } }
+    test("setUpdated_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { setUpdated_sap_tracked() } }
+    test("setUpdated_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { setUpdated_tree_untracked() } }
+    test("setUpdated_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { setUpdated_tree_tracked() } }
+    test("size_brute_force") { ItemBroadphaseCoverageTestFixture().run { size_brute_force() } }
+    test("size_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { size_sap_untracked() } }
+    test("size_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { size_sap_tracked() } }
+    test("size_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { size_tree_untracked() } }
+    test("size_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { size_tree_tracked() } }
+    test("detectConvexAndTransform_brute_force") { ItemBroadphaseCoverageTestFixture().run { detectConvexAndTransform_brute_force() } }
+    test("detectConvexAndTransform_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { detectConvexAndTransform_sap_untracked() } }
+    test("detectConvexAndTransform_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { detectConvexAndTransform_sap_tracked() } }
+    test("detectConvexAndTransform_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { detectConvexAndTransform_tree_untracked() } }
+    test("detectConvexAndTransform_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { detectConvexAndTransform_tree_tracked() } }
+    test("detectIteratorFailure_brute_force") { ItemBroadphaseCoverageTestFixture().run { detectIteratorFailure_brute_force() } }
+    test("detectIteratorFailure_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { detectIteratorFailure_sap_untracked() } }
+    test("detectIteratorFailure_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { detectIteratorFailure_sap_tracked() } }
+    test("detectIteratorFailure_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { detectIteratorFailure_tree_untracked() } }
+    test("detectIteratorFailure_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { detectIteratorFailure_tree_tracked() } }
+    test("raycastIteratorFailure_brute_force") { ItemBroadphaseCoverageTestFixture().run { raycastIteratorFailure_brute_force() } }
+    test("raycastIteratorFailure_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { raycastIteratorFailure_sap_untracked() } }
+    test("raycastIteratorFailure_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { raycastIteratorFailure_sap_tracked() } }
+    test("raycastIteratorFailure_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { raycastIteratorFailure_tree_untracked() } }
+    test("raycastIteratorFailure_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { raycastIteratorFailure_tree_tracked() } }
+    test("detectAABBIteratorFailure_brute_force") { ItemBroadphaseCoverageTestFixture().run { detectAABBIteratorFailure_brute_force() } }
+    test("detectAABBIteratorFailure_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { detectAABBIteratorFailure_sap_untracked() } }
+    test("detectAABBIteratorFailure_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { detectAABBIteratorFailure_sap_tracked() } }
+    test("detectAABBIteratorFailure_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { detectAABBIteratorFailure_tree_untracked() } }
+    test("detectAABBIteratorFailure_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { detectAABBIteratorFailure_tree_tracked() } }
+    test("detectEmptyIterator_brute_force") { ItemBroadphaseCoverageTestFixture().run { detectEmptyIterator_brute_force() } }
+    test("detectEmptyIterator_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { detectEmptyIterator_sap_untracked() } }
+    test("detectEmptyIterator_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { detectEmptyIterator_sap_tracked() } }
+    test("detectEmptyIterator_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { detectEmptyIterator_tree_untracked() } }
+    test("detectEmptyIterator_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { detectEmptyIterator_tree_tracked() } }
+    test("detect_brute_force") { ItemBroadphaseCoverageTestFixture().run { detect_brute_force() } }
+    test("detect_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { detect_sap_untracked() } }
+    test("detect_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { detect_sap_tracked() } }
+    test("detect_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { detect_tree_untracked() } }
+    test("detect_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { detect_tree_tracked() } }
+    test("detectAABB_brute_force") { ItemBroadphaseCoverageTestFixture().run { detectAABB_brute_force() } }
+    test("detectAABB_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { detectAABB_sap_untracked() } }
+    test("detectAABB_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { detectAABB_sap_tracked() } }
+    test("detectAABB_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { detectAABB_tree_untracked() } }
+    test("detectAABB_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { detectAABB_tree_tracked() } }
+    test("detectRay_brute_force") { ItemBroadphaseCoverageTestFixture().run { detectRay_brute_force() } }
+    test("detectRay_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { detectRay_sap_untracked() } }
+    test("detectRay_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { detectRay_sap_tracked() } }
+    test("detectRay_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { detectRay_tree_untracked() } }
+    test("detectRay_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { detectRay_tree_tracked() } }
+    test("shiftCoordinates_brute_force") { ItemBroadphaseCoverageTestFixture().run { shiftCoordinates_brute_force() } }
+    test("shiftCoordinates_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { shiftCoordinates_sap_untracked() } }
+    test("shiftCoordinates_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { shiftCoordinates_sap_tracked() } }
+    test("shiftCoordinates_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { shiftCoordinates_tree_untracked() } }
+    test("shiftCoordinates_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { shiftCoordinates_tree_tracked() } }
+    test("randomizedTest_brute_force") { ItemBroadphaseCoverageTestFixture().run { randomizedTest_brute_force() } }
+    test("randomizedTest_sap_untracked") { ItemBroadphaseCoverageTestFixture().run { randomizedTest_sap_untracked() } }
+    test("randomizedTest_sap_tracked") { ItemBroadphaseCoverageTestFixture().run { randomizedTest_sap_tracked() } }
+    test("randomizedTest_tree_untracked") { ItemBroadphaseCoverageTestFixture().run { randomizedTest_tree_untracked() } }
+    test("randomizedTest_tree_tracked") { ItemBroadphaseCoverageTestFixture().run { randomizedTest_tree_tracked() } }
+    test("AABBBroadphaseProxyTest_helpers") { ItemBroadphaseCoverageTestFixture().run { AABBBroadphaseProxyTest_helpers() } }
+    test("AABBBroadphaseProxyTest_compareTo") { ItemBroadphaseCoverageTestFixture().run { AABBBroadphaseProxyTest_compareTo() } }
+    test("AbstractBroadphaseDetectorTest_createNullFilter") { ItemBroadphaseCoverageTestFixture().run { AbstractBroadphaseDetectorTest_createNullFilter() } }
+    test("AbstractBroadphaseDetectorTest_createNullAABBProducer") { ItemBroadphaseCoverageTestFixture().run { AbstractBroadphaseDetectorTest_createNullAABBProducer() } }
+    test("AbstractBroadphaseDetectorTest_createNullAABBExpansionMethod") { ItemBroadphaseCoverageTestFixture().run { AbstractBroadphaseDetectorTest_createNullAABBExpansionMethod() } }
+    test("AbstractBroadphaseDetectorTest_createSuccess") { ItemBroadphaseCoverageTestFixture().run { AbstractBroadphaseDetectorTest_createSuccess() } }
+    test("AbstractBroadphaseDetectorTest_updateTracking") { ItemBroadphaseCoverageTestFixture().run { AbstractBroadphaseDetectorTest_updateTracking() } }
+    test("AbstractBroadphaseDetectorTest_detectConvexAndTransform") { ItemBroadphaseCoverageTestFixture().run { AbstractBroadphaseDetectorTest_detectConvexAndTransform() } }
+    test("AssortedBroadphaseTest_dynamicAABBSpecial") { ItemBroadphaseCoverageTestFixture().run { AssortedBroadphaseTest_dynamicAABBSpecial() } }
+    test("AssortedBroadphaseTest_bruteForceSpecial") { ItemBroadphaseCoverageTestFixture().run { AssortedBroadphaseTest_bruteForceSpecial() } }
+    test("AssortedBroadphaseTest_helpers") { ItemBroadphaseCoverageTestFixture().run { AssortedBroadphaseTest_helpers() } }
+    test("BroadphaseItemTest_create") { ItemBroadphaseCoverageTestFixture().run { BroadphaseItemTest_create() } }
+    test("BroadphaseItemTest_copy") { ItemBroadphaseCoverageTestFixture().run { BroadphaseItemTest_copy() } }
+    test("BroadphaseItemTest_tostring") { ItemBroadphaseCoverageTestFixture().run { BroadphaseItemTest_tostring() } }
+    test("CollisionBodyAABBProducerTest_computeSuccess") { ItemBroadphaseCoverageTestFixture().run { CollisionBodyAABBProducerTest_computeSuccess() } }
+    test("CollisionBodyBroadphaseFilterTest_isAllowed") { ItemBroadphaseCoverageTestFixture().run { CollisionBodyBroadphaseFilterTest_isAllowed() } }
+    test("CollisionItemAABBProducerTest_computeSuccess") { ItemBroadphaseCoverageTestFixture().run { CollisionItemAABBProducerTest_computeSuccess() } }
+    test("CollisionItemBroadphaseFilterTest_isAllowed") { ItemBroadphaseCoverageTestFixture().run { CollisionItemBroadphaseFilterTest_isAllowed() } }
+    test("CollisionItemBroadphasePairTest_create") { ItemBroadphaseCoverageTestFixture().run { CollisionItemBroadphasePairTest_create() } }
+    test("CollisionItemBroadphasePairTest_hashcodeEquals") { ItemBroadphaseCoverageTestFixture().run { CollisionItemBroadphasePairTest_hashcodeEquals() } }
+    test("CollisionItemBroadphasePairTest_copy") { ItemBroadphaseCoverageTestFixture().run { CollisionItemBroadphasePairTest_copy() } }
+    test("CollisionItemBroadphasePairTest_tostring") { ItemBroadphaseCoverageTestFixture().run { CollisionItemBroadphasePairTest_tostring() } }
+    test("NullAABBExpansionMethodTest_expand") { ItemBroadphaseCoverageTestFixture().run { NullAABBExpansionMethodTest_expand() } }
+    test("StaticValueAABBExpansionMethodTest_expand") { ItemBroadphaseCoverageTestFixture().run { StaticValueAABBExpansionMethodTest_expand() } }
+}
 
 private class Body : AbstractCollisionBody<Fixture> {
     constructor() : super()
@@ -109,187 +281,187 @@ private fun detector(variant: Int): Detector {
     }
 }
 
-class ItemBroadphaseCoverageTest {
-    @Test fun addContainsBody_brute_force() = verify("addContainsBody", 0)
-    @Test fun addContainsBody_sap_untracked() = verify("addContainsBody", 1)
-    @Test fun addContainsBody_sap_tracked() = verify("addContainsBody", 2)
-    @Test fun addContainsBody_tree_untracked() = verify("addContainsBody", 3)
-    @Test fun addContainsBody_tree_tracked() = verify("addContainsBody", 4)
+private class ItemBroadphaseCoverageTestFixture  {
+fun addContainsBody_brute_force() = verify("addContainsBody", 0)
+fun addContainsBody_sap_untracked() = verify("addContainsBody", 1)
+fun addContainsBody_sap_tracked() = verify("addContainsBody", 2)
+fun addContainsBody_tree_untracked() = verify("addContainsBody", 3)
+fun addContainsBody_tree_tracked() = verify("addContainsBody", 4)
 
-    @Test fun addContainsCollisionItem_brute_force() = verify("addContainsCollisionItem", 0)
-    @Test fun addContainsCollisionItem_sap_untracked() = verify("addContainsCollisionItem", 1)
-    @Test fun addContainsCollisionItem_sap_tracked() = verify("addContainsCollisionItem", 2)
-    @Test fun addContainsCollisionItem_tree_untracked() = verify("addContainsCollisionItem", 3)
-    @Test fun addContainsCollisionItem_tree_tracked() = verify("addContainsCollisionItem", 4)
+fun addContainsCollisionItem_brute_force() = verify("addContainsCollisionItem", 0)
+fun addContainsCollisionItem_sap_untracked() = verify("addContainsCollisionItem", 1)
+fun addContainsCollisionItem_sap_tracked() = verify("addContainsCollisionItem", 2)
+fun addContainsCollisionItem_tree_untracked() = verify("addContainsCollisionItem", 3)
+fun addContainsCollisionItem_tree_tracked() = verify("addContainsCollisionItem", 4)
 
-    @Test fun addContainsFixture_brute_force() = verify("addContainsFixture", 0)
-    @Test fun addContainsFixture_sap_untracked() = verify("addContainsFixture", 1)
-    @Test fun addContainsFixture_sap_tracked() = verify("addContainsFixture", 2)
-    @Test fun addContainsFixture_tree_untracked() = verify("addContainsFixture", 3)
-    @Test fun addContainsFixture_tree_tracked() = verify("addContainsFixture", 4)
+fun addContainsFixture_brute_force() = verify("addContainsFixture", 0)
+fun addContainsFixture_sap_untracked() = verify("addContainsFixture", 1)
+fun addContainsFixture_sap_tracked() = verify("addContainsFixture", 2)
+fun addContainsFixture_tree_untracked() = verify("addContainsFixture", 3)
+fun addContainsFixture_tree_tracked() = verify("addContainsFixture", 4)
 
-    @Test fun clear_brute_force() = verify("clear", 0)
-    @Test fun clear_sap_untracked() = verify("clear", 1)
-    @Test fun clear_sap_tracked() = verify("clear", 2)
-    @Test fun clear_tree_untracked() = verify("clear", 3)
-    @Test fun clear_tree_tracked() = verify("clear", 4)
+fun clear_brute_force() = verify("clear", 0)
+fun clear_sap_untracked() = verify("clear", 1)
+fun clear_sap_tracked() = verify("clear", 2)
+fun clear_tree_untracked() = verify("clear", 3)
+fun clear_tree_tracked() = verify("clear", 4)
 
-    @Test fun updateTargeted_brute_force() = verify("updateTargeted", 0)
-    @Test fun updateTargeted_sap_untracked() = verify("updateTargeted", 1)
-    @Test fun updateTargeted_sap_tracked() = verify("updateTargeted", 2)
-    @Test fun updateTargeted_tree_untracked() = verify("updateTargeted", 3)
-    @Test fun updateTargeted_tree_tracked() = verify("updateTargeted", 4)
+fun updateTargeted_brute_force() = verify("updateTargeted", 0)
+fun updateTargeted_sap_untracked() = verify("updateTargeted", 1)
+fun updateTargeted_sap_tracked() = verify("updateTargeted", 2)
+fun updateTargeted_tree_untracked() = verify("updateTargeted", 3)
+fun updateTargeted_tree_tracked() = verify("updateTargeted", 4)
 
-    @Test fun update_brute_force() = verify("update", 0)
-    @Test fun update_sap_untracked() = verify("update", 1)
-    @Test fun update_sap_tracked() = verify("update", 2)
-    @Test fun update_tree_untracked() = verify("update", 3)
-    @Test fun update_tree_tracked() = verify("update", 4)
+fun update_brute_force() = verify("update", 0)
+fun update_sap_untracked() = verify("update", 1)
+fun update_sap_tracked() = verify("update", 2)
+fun update_tree_untracked() = verify("update", 3)
+fun update_tree_tracked() = verify("update", 4)
 
-    @Test fun removeContainsBody_brute_force() = verify("removeContainsBody", 0)
-    @Test fun removeContainsBody_sap_untracked() = verify("removeContainsBody", 1)
-    @Test fun removeContainsBody_sap_tracked() = verify("removeContainsBody", 2)
-    @Test fun removeContainsBody_tree_untracked() = verify("removeContainsBody", 3)
-    @Test fun removeContainsBody_tree_tracked() = verify("removeContainsBody", 4)
+fun removeContainsBody_brute_force() = verify("removeContainsBody", 0)
+fun removeContainsBody_sap_untracked() = verify("removeContainsBody", 1)
+fun removeContainsBody_sap_tracked() = verify("removeContainsBody", 2)
+fun removeContainsBody_tree_untracked() = verify("removeContainsBody", 3)
+fun removeContainsBody_tree_tracked() = verify("removeContainsBody", 4)
 
-    @Test fun removeContainsFixture_brute_force() = verify("removeContainsFixture", 0)
-    @Test fun removeContainsFixture_sap_untracked() = verify("removeContainsFixture", 1)
-    @Test fun removeContainsFixture_sap_tracked() = verify("removeContainsFixture", 2)
-    @Test fun removeContainsFixture_tree_untracked() = verify("removeContainsFixture", 3)
-    @Test fun removeContainsFixture_tree_tracked() = verify("removeContainsFixture", 4)
+fun removeContainsFixture_brute_force() = verify("removeContainsFixture", 0)
+fun removeContainsFixture_sap_untracked() = verify("removeContainsFixture", 1)
+fun removeContainsFixture_sap_tracked() = verify("removeContainsFixture", 2)
+fun removeContainsFixture_tree_untracked() = verify("removeContainsFixture", 3)
+fun removeContainsFixture_tree_tracked() = verify("removeContainsFixture", 4)
 
-    @Test fun getAABB_brute_force() = verify("getAABB", 0)
-    @Test fun getAABB_sap_untracked() = verify("getAABB", 1)
-    @Test fun getAABB_sap_tracked() = verify("getAABB", 2)
-    @Test fun getAABB_tree_untracked() = verify("getAABB", 3)
-    @Test fun getAABB_tree_tracked() = verify("getAABB", 4)
+fun getAABB_brute_force() = verify("getAABB", 0)
+fun getAABB_sap_untracked() = verify("getAABB", 1)
+fun getAABB_sap_tracked() = verify("getAABB", 2)
+fun getAABB_tree_untracked() = verify("getAABB", 3)
+fun getAABB_tree_tracked() = verify("getAABB", 4)
 
-    @Test fun getAABBProducer_brute_force() = verify("getAABBProducer", 0)
-    @Test fun getAABBProducer_sap_untracked() = verify("getAABBProducer", 1)
-    @Test fun getAABBProducer_sap_tracked() = verify("getAABBProducer", 2)
-    @Test fun getAABBProducer_tree_untracked() = verify("getAABBProducer", 3)
-    @Test fun getAABBProducer_tree_tracked() = verify("getAABBProducer", 4)
+fun getAABBProducer_brute_force() = verify("getAABBProducer", 0)
+fun getAABBProducer_sap_untracked() = verify("getAABBProducer", 1)
+fun getAABBProducer_sap_tracked() = verify("getAABBProducer", 2)
+fun getAABBProducer_tree_untracked() = verify("getAABBProducer", 3)
+fun getAABBProducer_tree_tracked() = verify("getAABBProducer", 4)
 
-    @Test fun getBroadphaseFilter_brute_force() = verify("getBroadphaseFilter", 0)
-    @Test fun getBroadphaseFilter_sap_untracked() = verify("getBroadphaseFilter", 1)
-    @Test fun getBroadphaseFilter_sap_tracked() = verify("getBroadphaseFilter", 2)
-    @Test fun getBroadphaseFilter_tree_untracked() = verify("getBroadphaseFilter", 3)
-    @Test fun getBroadphaseFilter_tree_tracked() = verify("getBroadphaseFilter", 4)
+fun getBroadphaseFilter_brute_force() = verify("getBroadphaseFilter", 0)
+fun getBroadphaseFilter_sap_untracked() = verify("getBroadphaseFilter", 1)
+fun getBroadphaseFilter_sap_tracked() = verify("getBroadphaseFilter", 2)
+fun getBroadphaseFilter_tree_untracked() = verify("getBroadphaseFilter", 3)
+fun getBroadphaseFilter_tree_tracked() = verify("getBroadphaseFilter", 4)
 
-    @Test fun getAABBExpansionMethod_brute_force() = verify("getAABBExpansionMethod", 0)
-    @Test fun getAABBExpansionMethod_sap_untracked() = verify("getAABBExpansionMethod", 1)
-    @Test fun getAABBExpansionMethod_sap_tracked() = verify("getAABBExpansionMethod", 2)
-    @Test fun getAABBExpansionMethod_tree_untracked() = verify("getAABBExpansionMethod", 3)
-    @Test fun getAABBExpansionMethod_tree_tracked() = verify("getAABBExpansionMethod", 4)
+fun getAABBExpansionMethod_brute_force() = verify("getAABBExpansionMethod", 0)
+fun getAABBExpansionMethod_sap_untracked() = verify("getAABBExpansionMethod", 1)
+fun getAABBExpansionMethod_sap_tracked() = verify("getAABBExpansionMethod", 2)
+fun getAABBExpansionMethod_tree_untracked() = verify("getAABBExpansionMethod", 3)
+fun getAABBExpansionMethod_tree_tracked() = verify("getAABBExpansionMethod", 4)
 
-    @Test fun updateSmall_brute_force() = verify("updateSmall", 0)
-    @Test fun updateSmall_sap_untracked() = verify("updateSmall", 1)
-    @Test fun updateSmall_sap_tracked() = verify("updateSmall", 2)
-    @Test fun updateSmall_tree_untracked() = verify("updateSmall", 3)
-    @Test fun updateSmall_tree_tracked() = verify("updateSmall", 4)
+fun updateSmall_brute_force() = verify("updateSmall", 0)
+fun updateSmall_sap_untracked() = verify("updateSmall", 1)
+fun updateSmall_sap_tracked() = verify("updateSmall", 2)
+fun updateSmall_tree_untracked() = verify("updateSmall", 3)
+fun updateSmall_tree_tracked() = verify("updateSmall", 4)
 
-    @Test fun updateLarge_brute_force() = verify("updateLarge", 0)
-    @Test fun updateLarge_sap_untracked() = verify("updateLarge", 1)
-    @Test fun updateLarge_sap_tracked() = verify("updateLarge", 2)
-    @Test fun updateLarge_tree_untracked() = verify("updateLarge", 3)
-    @Test fun updateLarge_tree_tracked() = verify("updateLarge", 4)
+fun updateLarge_brute_force() = verify("updateLarge", 0)
+fun updateLarge_sap_untracked() = verify("updateLarge", 1)
+fun updateLarge_sap_tracked() = verify("updateLarge", 2)
+fun updateLarge_tree_untracked() = verify("updateLarge", 3)
+fun updateLarge_tree_tracked() = verify("updateLarge", 4)
 
-    @Test fun getSetUpdateTrackingEnabled_brute_force() = verify("getSetUpdateTrackingEnabled", 0)
-    @Test fun getSetUpdateTrackingEnabled_sap_untracked() = verify("getSetUpdateTrackingEnabled", 1)
-    @Test fun getSetUpdateTrackingEnabled_sap_tracked() = verify("getSetUpdateTrackingEnabled", 2)
-    @Test fun getSetUpdateTrackingEnabled_tree_untracked() = verify("getSetUpdateTrackingEnabled", 3)
-    @Test fun getSetUpdateTrackingEnabled_tree_tracked() = verify("getSetUpdateTrackingEnabled", 4)
+fun getSetUpdateTrackingEnabled_brute_force() = verify("getSetUpdateTrackingEnabled", 0)
+fun getSetUpdateTrackingEnabled_sap_untracked() = verify("getSetUpdateTrackingEnabled", 1)
+fun getSetUpdateTrackingEnabled_sap_tracked() = verify("getSetUpdateTrackingEnabled", 2)
+fun getSetUpdateTrackingEnabled_tree_untracked() = verify("getSetUpdateTrackingEnabled", 3)
+fun getSetUpdateTrackingEnabled_tree_tracked() = verify("getSetUpdateTrackingEnabled", 4)
 
-    @Test fun isUpdateTrackingSupported_brute_force() = verify("isUpdateTrackingSupported", 0)
-    @Test fun isUpdateTrackingSupported_sap_untracked() = verify("isUpdateTrackingSupported", 1)
-    @Test fun isUpdateTrackingSupported_sap_tracked() = verify("isUpdateTrackingSupported", 2)
-    @Test fun isUpdateTrackingSupported_tree_untracked() = verify("isUpdateTrackingSupported", 3)
-    @Test fun isUpdateTrackingSupported_tree_tracked() = verify("isUpdateTrackingSupported", 4)
+fun isUpdateTrackingSupported_brute_force() = verify("isUpdateTrackingSupported", 0)
+fun isUpdateTrackingSupported_sap_untracked() = verify("isUpdateTrackingSupported", 1)
+fun isUpdateTrackingSupported_sap_tracked() = verify("isUpdateTrackingSupported", 2)
+fun isUpdateTrackingSupported_tree_untracked() = verify("isUpdateTrackingSupported", 3)
+fun isUpdateTrackingSupported_tree_tracked() = verify("isUpdateTrackingSupported", 4)
 
-    @Test fun optimize_brute_force() = verify("optimize", 0)
-    @Test fun optimize_sap_untracked() = verify("optimize", 1)
-    @Test fun optimize_sap_tracked() = verify("optimize", 2)
-    @Test fun optimize_tree_untracked() = verify("optimize", 3)
-    @Test fun optimize_tree_tracked() = verify("optimize", 4)
+fun optimize_brute_force() = verify("optimize", 0)
+fun optimize_sap_untracked() = verify("optimize", 1)
+fun optimize_sap_tracked() = verify("optimize", 2)
+fun optimize_tree_untracked() = verify("optimize", 3)
+fun optimize_tree_tracked() = verify("optimize", 4)
 
-    @Test fun setUpdated_brute_force() = verify("setUpdated", 0)
-    @Test fun setUpdated_sap_untracked() = verify("setUpdated", 1)
-    @Test fun setUpdated_sap_tracked() = verify("setUpdated", 2)
-    @Test fun setUpdated_tree_untracked() = verify("setUpdated", 3)
-    @Test fun setUpdated_tree_tracked() = verify("setUpdated", 4)
+fun setUpdated_brute_force() = verify("setUpdated", 0)
+fun setUpdated_sap_untracked() = verify("setUpdated", 1)
+fun setUpdated_sap_tracked() = verify("setUpdated", 2)
+fun setUpdated_tree_untracked() = verify("setUpdated", 3)
+fun setUpdated_tree_tracked() = verify("setUpdated", 4)
 
-    @Test fun size_brute_force() = verify("size", 0)
-    @Test fun size_sap_untracked() = verify("size", 1)
-    @Test fun size_sap_tracked() = verify("size", 2)
-    @Test fun size_tree_untracked() = verify("size", 3)
-    @Test fun size_tree_tracked() = verify("size", 4)
+fun size_brute_force() = verify("size", 0)
+fun size_sap_untracked() = verify("size", 1)
+fun size_sap_tracked() = verify("size", 2)
+fun size_tree_untracked() = verify("size", 3)
+fun size_tree_tracked() = verify("size", 4)
 
-    @Test fun detectConvexAndTransform_brute_force() = verify("detectConvexAndTransform", 0)
-    @Test fun detectConvexAndTransform_sap_untracked() = verify("detectConvexAndTransform", 1)
-    @Test fun detectConvexAndTransform_sap_tracked() = verify("detectConvexAndTransform", 2)
-    @Test fun detectConvexAndTransform_tree_untracked() = verify("detectConvexAndTransform", 3)
-    @Test fun detectConvexAndTransform_tree_tracked() = verify("detectConvexAndTransform", 4)
+fun detectConvexAndTransform_brute_force() = verify("detectConvexAndTransform", 0)
+fun detectConvexAndTransform_sap_untracked() = verify("detectConvexAndTransform", 1)
+fun detectConvexAndTransform_sap_tracked() = verify("detectConvexAndTransform", 2)
+fun detectConvexAndTransform_tree_untracked() = verify("detectConvexAndTransform", 3)
+fun detectConvexAndTransform_tree_tracked() = verify("detectConvexAndTransform", 4)
 
-    @Test fun detectIteratorFailure_brute_force() = verify("detectIteratorFailure", 0)
-    @Test fun detectIteratorFailure_sap_untracked() = verify("detectIteratorFailure", 1)
-    @Test fun detectIteratorFailure_sap_tracked() = verify("detectIteratorFailure", 2)
-    @Test fun detectIteratorFailure_tree_untracked() = verify("detectIteratorFailure", 3)
-    @Test fun detectIteratorFailure_tree_tracked() = verify("detectIteratorFailure", 4)
+fun detectIteratorFailure_brute_force() = verify("detectIteratorFailure", 0)
+fun detectIteratorFailure_sap_untracked() = verify("detectIteratorFailure", 1)
+fun detectIteratorFailure_sap_tracked() = verify("detectIteratorFailure", 2)
+fun detectIteratorFailure_tree_untracked() = verify("detectIteratorFailure", 3)
+fun detectIteratorFailure_tree_tracked() = verify("detectIteratorFailure", 4)
 
-    @Test fun raycastIteratorFailure_brute_force() = verify("raycastIteratorFailure", 0)
-    @Test fun raycastIteratorFailure_sap_untracked() = verify("raycastIteratorFailure", 1)
-    @Test fun raycastIteratorFailure_sap_tracked() = verify("raycastIteratorFailure", 2)
-    @Test fun raycastIteratorFailure_tree_untracked() = verify("raycastIteratorFailure", 3)
-    @Test fun raycastIteratorFailure_tree_tracked() = verify("raycastIteratorFailure", 4)
+fun raycastIteratorFailure_brute_force() = verify("raycastIteratorFailure", 0)
+fun raycastIteratorFailure_sap_untracked() = verify("raycastIteratorFailure", 1)
+fun raycastIteratorFailure_sap_tracked() = verify("raycastIteratorFailure", 2)
+fun raycastIteratorFailure_tree_untracked() = verify("raycastIteratorFailure", 3)
+fun raycastIteratorFailure_tree_tracked() = verify("raycastIteratorFailure", 4)
 
-    @Test fun detectAABBIteratorFailure_brute_force() = verify("detectAABBIteratorFailure", 0)
-    @Test fun detectAABBIteratorFailure_sap_untracked() = verify("detectAABBIteratorFailure", 1)
-    @Test fun detectAABBIteratorFailure_sap_tracked() = verify("detectAABBIteratorFailure", 2)
-    @Test fun detectAABBIteratorFailure_tree_untracked() = verify("detectAABBIteratorFailure", 3)
-    @Test fun detectAABBIteratorFailure_tree_tracked() = verify("detectAABBIteratorFailure", 4)
+fun detectAABBIteratorFailure_brute_force() = verify("detectAABBIteratorFailure", 0)
+fun detectAABBIteratorFailure_sap_untracked() = verify("detectAABBIteratorFailure", 1)
+fun detectAABBIteratorFailure_sap_tracked() = verify("detectAABBIteratorFailure", 2)
+fun detectAABBIteratorFailure_tree_untracked() = verify("detectAABBIteratorFailure", 3)
+fun detectAABBIteratorFailure_tree_tracked() = verify("detectAABBIteratorFailure", 4)
 
-    @Test fun detectEmptyIterator_brute_force() = verify("detectEmptyIterator", 0)
-    @Test fun detectEmptyIterator_sap_untracked() = verify("detectEmptyIterator", 1)
-    @Test fun detectEmptyIterator_sap_tracked() = verify("detectEmptyIterator", 2)
-    @Test fun detectEmptyIterator_tree_untracked() = verify("detectEmptyIterator", 3)
-    @Test fun detectEmptyIterator_tree_tracked() = verify("detectEmptyIterator", 4)
+fun detectEmptyIterator_brute_force() = verify("detectEmptyIterator", 0)
+fun detectEmptyIterator_sap_untracked() = verify("detectEmptyIterator", 1)
+fun detectEmptyIterator_sap_tracked() = verify("detectEmptyIterator", 2)
+fun detectEmptyIterator_tree_untracked() = verify("detectEmptyIterator", 3)
+fun detectEmptyIterator_tree_tracked() = verify("detectEmptyIterator", 4)
 
-    @Test fun detect_brute_force() = verify("detect", 0)
-    @Test fun detect_sap_untracked() = verify("detect", 1)
-    @Test fun detect_sap_tracked() = verify("detect", 2)
-    @Test fun detect_tree_untracked() = verify("detect", 3)
-    @Test fun detect_tree_tracked() = verify("detect", 4)
+fun detect_brute_force() = verify("detect", 0)
+fun detect_sap_untracked() = verify("detect", 1)
+fun detect_sap_tracked() = verify("detect", 2)
+fun detect_tree_untracked() = verify("detect", 3)
+fun detect_tree_tracked() = verify("detect", 4)
 
-    @Test fun detectAABB_brute_force() = verify("detectAABB", 0)
-    @Test fun detectAABB_sap_untracked() = verify("detectAABB", 1)
-    @Test fun detectAABB_sap_tracked() = verify("detectAABB", 2)
-    @Test fun detectAABB_tree_untracked() = verify("detectAABB", 3)
-    @Test fun detectAABB_tree_tracked() = verify("detectAABB", 4)
+fun detectAABB_brute_force() = verify("detectAABB", 0)
+fun detectAABB_sap_untracked() = verify("detectAABB", 1)
+fun detectAABB_sap_tracked() = verify("detectAABB", 2)
+fun detectAABB_tree_untracked() = verify("detectAABB", 3)
+fun detectAABB_tree_tracked() = verify("detectAABB", 4)
 
-    @Test fun detectRay_brute_force() = verify("detectRay", 0)
-    @Test fun detectRay_sap_untracked() = verify("detectRay", 1)
-    @Test fun detectRay_sap_tracked() = verify("detectRay", 2)
-    @Test fun detectRay_tree_untracked() = verify("detectRay", 3)
-    @Test fun detectRay_tree_tracked() = verify("detectRay", 4)
+fun detectRay_brute_force() = verify("detectRay", 0)
+fun detectRay_sap_untracked() = verify("detectRay", 1)
+fun detectRay_sap_tracked() = verify("detectRay", 2)
+fun detectRay_tree_untracked() = verify("detectRay", 3)
+fun detectRay_tree_tracked() = verify("detectRay", 4)
 
-    @Test fun shiftCoordinates_brute_force() = verify("shiftCoordinates", 0)
-    @Test fun shiftCoordinates_sap_untracked() = verify("shiftCoordinates", 1)
-    @Test fun shiftCoordinates_sap_tracked() = verify("shiftCoordinates", 2)
-    @Test fun shiftCoordinates_tree_untracked() = verify("shiftCoordinates", 3)
-    @Test fun shiftCoordinates_tree_tracked() = verify("shiftCoordinates", 4)
+fun shiftCoordinates_brute_force() = verify("shiftCoordinates", 0)
+fun shiftCoordinates_sap_untracked() = verify("shiftCoordinates", 1)
+fun shiftCoordinates_sap_tracked() = verify("shiftCoordinates", 2)
+fun shiftCoordinates_tree_untracked() = verify("shiftCoordinates", 3)
+fun shiftCoordinates_tree_tracked() = verify("shiftCoordinates", 4)
 
-    @Test fun randomizedTest_brute_force() = verify("randomizedTest", 0)
-    @Test fun randomizedTest_sap_untracked() = verify("randomizedTest", 1)
-    @Test fun randomizedTest_sap_tracked() = verify("randomizedTest", 2)
-    @Test fun randomizedTest_tree_untracked() = verify("randomizedTest", 3)
-    @Test fun randomizedTest_tree_tracked() = verify("randomizedTest", 4)
+fun randomizedTest_brute_force() = verify("randomizedTest", 0)
+fun randomizedTest_sap_untracked() = verify("randomizedTest", 1)
+fun randomizedTest_sap_tracked() = verify("randomizedTest", 2)
+fun randomizedTest_tree_untracked() = verify("randomizedTest", 3)
+fun randomizedTest_tree_tracked() = verify("randomizedTest", 4)
 
-    @Test fun AABBBroadphaseProxyTest_helpers() {
+fun AABBBroadphaseProxyTest_helpers() {
         val proxy = AABBBroadphaseProxy(Body())
         assertTrue(proxy.toString().contains("AABB"))
     }
 
-    @Test fun AABBBroadphaseProxyTest_compareTo() {
+fun AABBBroadphaseProxyTest_compareTo() {
         val a = AABBBroadphaseProxy(Body())
         val b = AABBBroadphaseProxy(Body())
         a.aabb.set(AABB(0.0, 0.0, 10.0, 10.0))
@@ -304,25 +476,25 @@ class ItemBroadphaseCoverageTest {
         assertEquals(0, a.compareTo(a))
     }
 
-    @Test fun AbstractBroadphaseDetectorTest_createNullFilter() {
+fun AbstractBroadphaseDetectorTest_createNullFilter() {
         assertFailsWith<NullPointerException> {
             ConstructorProbe(null, CollisionBodyAABBProducer(), NullAABBExpansionMethod())
         }
     }
 
-    @Test fun AbstractBroadphaseDetectorTest_createNullAABBProducer() {
+fun AbstractBroadphaseDetectorTest_createNullAABBProducer() {
         assertFailsWith<NullPointerException> {
             ConstructorProbe(CollisionBodyBroadphaseFilter(), null, NullAABBExpansionMethod())
         }
     }
 
-    @Test fun AbstractBroadphaseDetectorTest_createNullAABBExpansionMethod() {
+fun AbstractBroadphaseDetectorTest_createNullAABBExpansionMethod() {
         assertFailsWith<NullPointerException> {
             ConstructorProbe(CollisionBodyBroadphaseFilter(), CollisionBodyAABBProducer(), null)
         }
     }
 
-    @Test fun AbstractBroadphaseDetectorTest_createSuccess() {
+fun AbstractBroadphaseDetectorTest_createSuccess() {
         val filter = CollisionBodyBroadphaseFilter<Body>()
         val producer = CollisionBodyAABBProducer<Body>()
         val expansion = NullAABBExpansionMethod<Body>()
@@ -333,7 +505,7 @@ class ItemBroadphaseCoverageTest {
         assertTrue(bp.getAABBExpansionMethod() === expansion)
     }
 
-    @Test fun AbstractBroadphaseDetectorTest_updateTracking() {
+fun AbstractBroadphaseDetectorTest_updateTracking() {
         val bp = Sap(CollisionBodyBroadphaseFilter<Body>(), CollisionBodyAABBProducer<Body>(), NullAABBExpansionMethod<Body>())
         assertFalse(bp.isUpdateTrackingEnabled())
         bp.setUpdateTrackingEnabled(true)
@@ -342,7 +514,7 @@ class ItemBroadphaseCoverageTest {
         assertFalse(bp.isUpdateTrackingEnabled())
     }
 
-    @Test fun AbstractBroadphaseDetectorTest_detectConvexAndTransform() {
+fun AbstractBroadphaseDetectorTest_detectConvexAndTransform() {
         val bp = Sap(CollisionBodyBroadphaseFilter<Body>(), CollisionBodyAABBProducer<Body>(), NullAABBExpansionMethod<Body>())
         val a = Body(1.0)
         val b = Body(0.5)
@@ -354,7 +526,7 @@ class ItemBroadphaseCoverageTest {
         assertFalse(bp.detect(a.getFixture(0).getShape(), a.getTransform(), b.getFixture(0).getShape(), b.getTransform()))
     }
 
-    @Test fun AssortedBroadphaseTest_dynamicAABBSpecial() {
+fun AssortedBroadphaseTest_dynamicAABBSpecial() {
         val bp = DynamicAABBTree(CollisionItemBroadphaseFilter<Body, Fixture>(), CollisionItemAABBProducer<Body, Fixture>(), StaticValueAABBExpansionMethod<Item>(0.2))
         assertTrue(bp.isValid())
         assertEquals(0, bp.getHeight())
@@ -369,7 +541,7 @@ class ItemBroadphaseCoverageTest {
         assertEquals(1, bp.size())
     }
 
-    @Test fun AssortedBroadphaseTest_bruteForceSpecial() {
+fun AssortedBroadphaseTest_bruteForceSpecial() {
         val filter = CollisionItemBroadphaseFilter<Body, Fixture>()
         val producer = CollisionItemAABBProducer<Body, Fixture>()
         val bp = BruteForceBroadphase(filter, producer)
@@ -381,7 +553,7 @@ class ItemBroadphaseCoverageTest {
         assertFalse(bp.isUpdateTrackingEnabled())
     }
 
-    @Test fun AssortedBroadphaseTest_helpers() {
+fun AssortedBroadphaseTest_helpers() {
         val leaf = DynamicAABBTreeLeaf(Body())
         assertTrue(leaf.isLeaf())
         assertTrue(leaf.toString().contains("AABB"))
@@ -392,7 +564,7 @@ class ItemBroadphaseCoverageTest {
         assertTrue(node.toString().contains("AABB"))
     }
 
-    @Test fun BroadphaseItemTest_create() {
+fun BroadphaseItemTest_create() {
         val body = Body()
         val fixture = Fixture(Circle(0.5))
         val result = BroadphaseItem(body, fixture)
@@ -401,7 +573,7 @@ class ItemBroadphaseCoverageTest {
         assertTrue(result.hashCode() != 0)
     }
 
-    @Test fun BroadphaseItemTest_copy() {
+fun BroadphaseItemTest_copy() {
         val source = BroadphaseItem(Body(), Fixture(Circle(0.5)))
         val copy = source.copy()
         assertNotSame(source, copy)
@@ -411,13 +583,13 @@ class ItemBroadphaseCoverageTest {
         assertEquals(source.hashCode(), copy.hashCode())
     }
 
-    @Test fun BroadphaseItemTest_tostring() {
+fun BroadphaseItemTest_tostring() {
         val result = BroadphaseItem(Body(), Fixture(Circle(0.5)))
         assertTrue(result.toString().contains("Body="))
         assertTrue(result.toString().contains("Fixture="))
     }
 
-    @Test fun CollisionBodyAABBProducerTest_computeSuccess() {
+fun CollisionBodyAABBProducerTest_computeSuccess() {
         val producer = CollisionBodyAABBProducer<Body>()
         val body = Body(1.0)
         body.translate(2.0, -3.0)
@@ -429,7 +601,7 @@ class ItemBroadphaseCoverageTest {
         assertBox(result, 0.0, 0.0, 0.0, 0.0)
     }
 
-    @Test fun CollisionBodyBroadphaseFilterTest_isAllowed() {
+fun CollisionBodyBroadphaseFilterTest_isAllowed() {
         val filter = CollisionBodyBroadphaseFilter<Body>()
         val a = Body(1.0)
         val b = Body(1.0)
@@ -440,7 +612,7 @@ class ItemBroadphaseCoverageTest {
         assertFalse(filter.isAllowed(a, a))
     }
 
-    @Test fun CollisionItemAABBProducerTest_computeSuccess() {
+fun CollisionItemAABBProducerTest_computeSuccess() {
         val producer = CollisionItemAABBProducer<Body, Fixture>()
         val body = Body(1.0)
         body.translate(-2.0, 3.0)
@@ -450,7 +622,7 @@ class ItemBroadphaseCoverageTest {
         assertBox(result, -3.0, 2.0, -1.0, 4.0)
     }
 
-    @Test fun CollisionItemBroadphaseFilterTest_isAllowed() {
+fun CollisionItemBroadphaseFilterTest_isAllowed() {
         val filter = CollisionItemBroadphaseFilter<Body, Fixture>()
         val a = Body(1.0)
         val b = Body(1.0)
@@ -462,7 +634,7 @@ class ItemBroadphaseCoverageTest {
         assertFalse(filter.isAllowed(item(b), item(b,1)))
     }
 
-    @Test fun CollisionItemBroadphasePairTest_create() {
+fun CollisionItemBroadphasePairTest_create() {
         val a = Body(1.0); val b = Body(1.0)
         val pair = BroadphasePair(item(a), item(b))
         assertTrue(pair.getFirst().getBody() === a)
@@ -470,7 +642,7 @@ class ItemBroadphaseCoverageTest {
         assertTrue(pair.hashCode() != 0)
     }
 
-    @Test fun CollisionItemBroadphasePairTest_hashcodeEquals() {
+fun CollisionItemBroadphasePairTest_hashcodeEquals() {
         val a = Body(1.0); val b = Body(1.0)
         val forward = BroadphasePair(item(a), item(b))
         val reverse = BroadphasePair(item(b), item(a))
@@ -480,7 +652,7 @@ class ItemBroadphaseCoverageTest {
         assertFalse(forward == duplicate)
     }
 
-    @Test fun CollisionItemBroadphasePairTest_copy() {
+fun CollisionItemBroadphasePairTest_copy() {
         val pair = BroadphasePair(item(Body(1.0)), item(Body(1.0)))
         val copy = pair.copy()
         assertNotSame(pair, copy)
@@ -489,20 +661,20 @@ class ItemBroadphaseCoverageTest {
         assertTrue(pair.getSecond() === copy.getSecond())
     }
 
-    @Test fun CollisionItemBroadphasePairTest_tostring() {
+fun CollisionItemBroadphasePairTest_tostring() {
         val pair = BroadphasePair(item(Body(1.0)), item(Body(1.0)))
         assertTrue(pair.toString().contains("First="))
         assertTrue(pair.toString().contains("Second="))
     }
 
-    @Test fun NullAABBExpansionMethodTest_expand() {
+fun NullAABBExpansionMethodTest_expand() {
         val method = NullAABBExpansionMethod<Any>()
         val box = AABB(-3.0,-2.0,1.0,5.0)
         method.expand(Any(), box)
         assertBox(box,-3.0,-2.0,1.0,5.0)
     }
 
-    @Test fun StaticValueAABBExpansionMethodTest_expand() {
+fun StaticValueAABBExpansionMethodTest_expand() {
         val method = StaticValueAABBExpansionMethod<Any>(4.0)
         assertEquals(4.0, method.getExpansion())
         val box = AABB(-3.0,-2.0,1.0,5.0)

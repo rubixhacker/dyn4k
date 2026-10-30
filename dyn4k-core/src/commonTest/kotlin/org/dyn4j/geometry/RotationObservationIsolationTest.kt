@@ -1,19 +1,26 @@
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.world.World
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.TimeStep
 import org.dyn4j.world.PhysicsWorld
 import org.dyn4j.world.listener.StepListenerAdapter
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-class RotationObservationIsolationTest {
-    @Test
-    fun observedRotationMatchesOrdinaryRotation() {
+val RotationObservationIsolationTest by testSuite {
+    test("observedRotationMatchesOrdinaryRotation") { RotationObservationIsolationTestFixture().run { observedRotationMatchesOrdinaryRotation() } }
+    test("nestedObservationRestoresOuterScope") { RotationObservationIsolationTestFixture().run { nestedObservationRestoresOuterScope() } }
+    test("foreignWorldStepFailsCaptureAfterBothWorldsComplete") { RotationObservationIsolationTestFixture().run { foreignWorldStepFailsCaptureAfterBothWorldsComplete() } }
+    test("failedWorldObservationCannotBeClearedByAnotherStep") { RotationObservationIsolationTestFixture().run { failedWorldObservationCannotBeClearedByAnotherStep() } }
+    test("stepCallbackCannotConsumeOperationRecordsBeforeStepEnds") { RotationObservationIsolationTestFixture().run { stepCallbackCannotConsumeOperationRecordsBeforeStepEnds() } }
+}
+
+private class RotationObservationIsolationTestFixture  {
+fun observedRotationMatchesOrdinaryRotation() {
         val ordinary = Transform()
         ordinary.rotate(0.25)
         val captured = Transform()
@@ -27,8 +34,7 @@ class RotationObservationIsolationTest {
         assertEquals(ordinary.getValues().toList(), captured.getValues().toList())
     }
 
-    @Test
-    fun nestedObservationRestoresOuterScope() {
+fun nestedObservationRestoresOuterScope() {
         RotationOperationTap.capture("outer") { outer ->
             Transform().rotate(0.25)
             RotationOperationTap.capture("inner") { inner ->
@@ -41,8 +47,7 @@ class RotationObservationIsolationTest {
         assertEquals(null, RotationOperationTap.currentCapture())
     }
 
-    @Test
-    fun foreignWorldStepFailsCaptureAfterBothWorldsComplete() {
+fun foreignWorldStepFailsCaptureAfterBothWorldsComplete() {
         val owned = World<Body>()
         val foreign = World<Body>()
         assertFailsWith<IllegalStateException> {
@@ -58,8 +63,7 @@ class RotationObservationIsolationTest {
         assertTrue(foreign.getStepListeners().isEmpty())
     }
 
-    @Test
-    fun failedWorldObservationCannotBeClearedByAnotherStep() {
+fun failedWorldObservationCannotBeClearedByAnotherStep() {
         val owned = World<Body>()
         val foreign = World<Body>()
         assertFailsWith<IllegalStateException> {
@@ -73,8 +77,7 @@ class RotationObservationIsolationTest {
         assertEquals(null, RotationOperationTap.currentCapture())
     }
 
-    @Test
-    fun stepCallbackCannotConsumeOperationRecordsBeforeStepEnds() {
+fun stepCallbackCannotConsumeOperationRecordsBeforeStepEnds() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val body = Body()

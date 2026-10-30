@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.simulation
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.dynamics.joint.DistanceJoint
@@ -31,13 +32,21 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class DistanceJointSimulationTest {
-    @Test
-    fun fixedDistance() {
+val DistanceJointSimulationTest by testSuite {
+    test("fixedDistance") { DistanceJointSimulationTestFixture().run { fixedDistance() } }
+    test("limits") { DistanceJointSimulationTestFixture().run { limits() } }
+    test("upperLimitWithSpring") { DistanceJointSimulationTestFixture().run { upperLimitWithSpring() } }
+    test("lowerLimitWithSpring") { DistanceJointSimulationTestFixture().run { lowerLimitWithSpring() } }
+    test("limitsWithSpring") { DistanceJointSimulationTestFixture().run { limitsWithSpring() } }
+    test("springOnly") { DistanceJointSimulationTestFixture().run { springOnly() } }
+    test("springWithMaxForce") { DistanceJointSimulationTestFixture().run { springWithMaxForce() } }
+}
+
+private class DistanceJointSimulationTestFixture  {
+fun fixedDistance() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()
@@ -73,8 +82,7 @@ class DistanceJointSimulationTest {
         assertEquals(0.0, dj.getReactionForce(invdt).y, 1e-3)
         assertEquals(0.0, dj.getSpringForce(invdt), 1e-3)
     }
-    @Test
-    fun limits() {
+fun limits() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()
@@ -126,8 +134,7 @@ class DistanceJointSimulationTest {
         v2 = b.getWorldCenter()
         assertEquals(3.0, v1.distance(v2), 1e-5)
     }
-    @Test
-    fun upperLimitWithSpring() {
+fun upperLimitWithSpring() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()
@@ -161,8 +168,7 @@ class DistanceJointSimulationTest {
         v2 = b.getWorldCenter()
         assertEquals(5.0, v1.distance(v2), 1e-5)
     }
-    @Test
-    fun lowerLimitWithSpring() {
+fun lowerLimitWithSpring() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()
@@ -196,8 +202,7 @@ class DistanceJointSimulationTest {
         v2 = b.getWorldCenter()
         assertEquals(3.0, v1.distance(v2), 1e-5)
     }
-    @Test
-    fun limitsWithSpring() {
+fun limitsWithSpring() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()
@@ -231,8 +236,7 @@ class DistanceJointSimulationTest {
         v2 = b.getWorldCenter()
         assertEquals(3.0, v1.distance(v2), 1e-3)
     }
-    @Test
-    fun springOnly() {
+fun springOnly() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()
@@ -269,8 +273,7 @@ class DistanceJointSimulationTest {
         assertEquals(0.0, dj.getReactionForce(invdt).x, 1e-3)
         assertEquals(-0.045, dj.getReactionForce(invdt).y, 1e-3)
     }
-    @Test
-    fun springWithMaxForce() {
+fun springWithMaxForce() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()

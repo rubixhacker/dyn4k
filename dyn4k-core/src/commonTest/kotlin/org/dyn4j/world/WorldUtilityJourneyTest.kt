@@ -1,6 +1,6 @@
 package org.dyn4j.world
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotSame
@@ -14,17 +14,24 @@ import org.dyn4j.geometry.AABB
 import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.Vector2
 
-class WorldUtilityJourneyTest {
-    @Test
-    fun defaultMixerUsesBaselineRules() {
+val WorldUtilityJourneyTest by testSuite {
+    test("defaultMixerUsesBaselineRules") { WorldUtilityJourneyTestFixture().run { defaultMixerUsesBaselineRules() } }
+    test("queryFilterTracksSensorDisabledAndFixtureFilterState") { WorldUtilityJourneyTestFixture().run { queryFilterTracksSensorDisabledAndFixtureFilterState() } }
+    test("collisionItemCopyRetainsReferencesWhileAdapterCanBeReused") { WorldUtilityJourneyTestFixture().run { collisionItemCopyRetainsReferencesWhileAdapterCanBeReused() } }
+    test("broadphaseFilterChecksBodyStateAndFixtureMasks") { WorldUtilityJourneyTestFixture().run { broadphaseFilterChecksBodyStateAndFixtureMasks() } }
+    test("sweptProducerUpdatesExistingBounds") { WorldUtilityJourneyTestFixture().run { sweptProducerUpdatesExistingBounds() } }
+    test("graphJointViewIsLiveAndLinksFollowRemoval") { WorldUtilityJourneyTestFixture().run { graphJointViewIsLiveAndLinksFollowRemoval() } }
+}
+
+private class WorldUtilityJourneyTestFixture  {
+fun defaultMixerUsesBaselineRules() {
         val mixer = ValueMixer.DEFAULT_MIXER
         assertEquals(0.3, mixer.mixFriction(0.09, 1.0))
         assertEquals(0.8, mixer.mixRestitution(0.2, 0.8))
         assertEquals(0.2, mixer.mixRestitutionVelocity(0.2, 0.8))
     }
 
-    @Test
-    fun queryFilterTracksSensorDisabledAndFixtureFilterState() {
+fun queryFilterTracksSensorDisabledAndFixtureFilterState() {
         val body = Body()
         val fixture = body.addFixture(Circle(0.5))
         val filter = DetectFilter<Body, BodyFixture>(true, true, CategoryFilter(1, 2))
@@ -41,8 +48,7 @@ class WorldUtilityJourneyTest {
         assertTrue(filter.IsIgnoreDisabledEnabled())
     }
 
-    @Test
-    fun collisionItemCopyRetainsReferencesWhileAdapterCanBeReused() {
+fun collisionItemCopyRetainsReferencesWhileAdapterCanBeReused() {
         val body1 = Body()
         val fixture1 = body1.addFixture(Circle(0.5))
         val body2 = Body()
@@ -59,8 +65,7 @@ class WorldUtilityJourneyTest {
         assertSame(fixture1, copy.getFixture())
     }
 
-    @Test
-    fun broadphaseFilterChecksBodyStateAndFixtureMasks() {
+fun broadphaseFilterChecksBodyStateAndFixtureMasks() {
         val body1 = Body()
         val fixture1 = body1.addFixture(Circle(0.5))
         val body2 = Body()
@@ -76,8 +81,7 @@ class WorldUtilityJourneyTest {
         assertFalse(filter.isAllowed(body1, fixture1, body2, fixture2))
     }
 
-    @Test
-    fun sweptProducerUpdatesExistingBounds() {
+fun sweptProducerUpdatesExistingBounds() {
         val body = Body()
         body.addFixture(Circle(0.5))
         body.translate(1.0, 0.0)
@@ -91,8 +95,7 @@ class WorldUtilityJourneyTest {
         assertEquals(1.5, result.getMaxX())
     }
 
-    @Test
-    fun graphJointViewIsLiveAndLinksFollowRemoval() {
+fun graphJointViewIsLiveAndLinksFollowRemoval() {
         val body1 = Body()
         val body2 = Body()
         val joint = DistanceJoint(body1, body2, Vector2(), Vector2())

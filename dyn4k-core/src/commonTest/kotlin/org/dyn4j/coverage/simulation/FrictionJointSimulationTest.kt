@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.simulation
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.dynamics.joint.FrictionJoint
@@ -31,13 +32,16 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class FrictionJointSimulationTest {
-    @Test
-    fun simulationWithLargeForceTorqueMaximums() {
+val FrictionJointSimulationTest by testSuite {
+    test("simulationWithLargeForceTorqueMaximums") { FrictionJointSimulationTestFixture().run { simulationWithLargeForceTorqueMaximums() } }
+    test("simulationWithLowForceTorqueMaximums") { FrictionJointSimulationTestFixture().run { simulationWithLowForceTorqueMaximums() } }
+}
+
+private class FrictionJointSimulationTestFixture  {
+fun simulationWithLargeForceTorqueMaximums() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()
@@ -73,8 +77,7 @@ class FrictionJointSimulationTest {
         assertEquals(0.0, fj.getReactionTorque(invdt), 1e-3)
         assertEquals(0.0, fj.getReactionForce(invdt).getMagnitude(), 1e-3)
     }
-    @Test
-    fun simulationWithLowForceTorqueMaximums() {
+fun simulationWithLowForceTorqueMaximums() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()

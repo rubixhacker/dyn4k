@@ -24,14 +24,37 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class CapsuleTest {
+val CapsuleTest by testSuite {
+    test("createZeroWidth") { CapsuleTestFixture().run { createZeroWidth() } }
+    test("createNegativeWidth") { CapsuleTestFixture().run { createNegativeWidth() } }
+    test("createZeroHeight") { CapsuleTestFixture().run { createZeroHeight() } }
+    test("createNegativeHeight") { CapsuleTestFixture().run { createNegativeHeight() } }
+    test("createCircle") { CapsuleTestFixture().run { createCircle() } }
+    test("createSuccessHorizontal") { CapsuleTestFixture().run { createSuccessHorizontal() } }
+    test("createSuccessVertical") { CapsuleTestFixture().run { createSuccessVertical() } }
+    test("contains") { CapsuleTestFixture().run { contains() } }
+    test("project") { CapsuleTestFixture().run { project() } }
+    test("getFarthest") { CapsuleTestFixture().run { getFarthest() } }
+    test("getAxes") { CapsuleTestFixture().run { getAxes() } }
+    test("getFoci") { CapsuleTestFixture().run { getFoci() } }
+    test("rotate") { CapsuleTestFixture().run { rotate() } }
+    test("translate") { CapsuleTestFixture().run { translate() } }
+    test("createAABB") { CapsuleTestFixture().run { createAABB() } }
+    test("createMass") { CapsuleTestFixture().run { createMass() } }
+    test("getArea") { CapsuleTestFixture().run { getArea() } }
+    test("getRadius") { CapsuleTestFixture().run { getRadius() } }
+    test("getRotation") { CapsuleTestFixture().run { getRotation() } }
+    test("copy") { CapsuleTestFixture().run { copy() } }
+}
+
+private class CapsuleTestFixture  {
     private val IDENTITY = Transform()
-    @Test
-    fun createZeroWidth() {
+fun createZeroWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		Capsule(0.0, 1.0);
@@ -39,8 +62,7 @@ class CapsuleTest {
         }
     }
 
-    @Test
-    fun createNegativeWidth() {
+fun createNegativeWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		Capsule(-1.0, 1.0);
@@ -48,8 +70,7 @@ class CapsuleTest {
         }
     }
 
-    @Test
-    fun createZeroHeight() {
+fun createZeroHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		Capsule(1.0, 0.0);
@@ -57,8 +78,7 @@ class CapsuleTest {
         }
     }
 
-    @Test
-    fun createNegativeHeight() {
+fun createNegativeHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		Capsule(1.0, -1.0);
@@ -66,8 +86,7 @@ class CapsuleTest {
         }
     }
 
-    @Test
-    fun createCircle() {
+fun createCircle() {
         assertFailsWith<IllegalArgumentException> {
 
 		Capsule(1.0, 1.0);
@@ -75,8 +94,7 @@ class CapsuleTest {
         }
     }
 
-    @Test
-    fun createSuccessHorizontal() {
+fun createSuccessHorizontal() {
 
 		var cap = Capsule(2.0, 1.0);
 		var x = Vector2(cap.getRotation().getCost(), cap.getRotation().getSint());
@@ -90,8 +108,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun createSuccessVertical() {
+fun createSuccessVertical() {
 
 		var cap = Capsule(1.0, 2.0);
 		var x = Vector2(cap.getRotation().getCost(), cap.getRotation().getSint());
@@ -105,8 +122,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun contains() {
+fun contains() {
 
 		var e = Capsule(2.0, 1.0);
 		var t = Transform();
@@ -131,8 +147,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun project() {
+fun project() {
 
 		var e = Capsule(2.0, 1.0);
 		var t = Transform();
@@ -166,8 +181,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun getFarthest() {
+fun getFarthest() {
 
 		var e = Capsule(2.0, 1.0);
 		var t = Transform();
@@ -201,8 +215,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun getAxes() {
+fun getAxes() {
 
 		var e = Capsule(1.0, 0.5);
 
@@ -221,8 +234,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun getFoci() {
+fun getFoci() {
 
 		var e = Capsule(1.0, 0.5);
 		var foci = e.getFoci(IDENTITY);
@@ -236,8 +248,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun rotate() {
+fun rotate() {
 
 		var e = Capsule(1.0, 0.5);
 
@@ -257,8 +268,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun translate() {
+fun translate() {
 
 		var e = Capsule(1.0, 0.5);
 
@@ -269,8 +279,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun createAABB() {
+fun createAABB() {
 
 		var e = Capsule(1.0, 0.5);
 
@@ -298,8 +307,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun createMass() {
+fun createMass() {
 
 		var e = Capsule(1.0, 0.5);
 		var mass = e.createMass(1.0);
@@ -334,8 +342,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun getArea() {
+fun getArea() {
 
 		var e = Capsule(1.0, 0.5);
 		assertEquals(0.446, e.getArea(), 1e-3);
@@ -345,8 +352,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun getRadius() {
+fun getRadius() {
 
 		var e = Capsule(1.0, 0.5);
 		assertEquals(0.5, e.getRadius());
@@ -360,8 +366,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun getRotation() {
+fun getRotation() {
 
 		var e = Capsule(1.0, 0.5);
 		assertEquals(0.0, e.getRotationAngle());
@@ -385,8 +390,7 @@ class CapsuleTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var cap = Capsule(1.0, 0.5);
 		cap.setUserData(Any());

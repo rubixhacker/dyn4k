@@ -24,13 +24,19 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class TriangleTest {
-    @Test
-    fun tostring() {
+val TriangleTest by testSuite {
+    test("tostring") { TriangleTestFixture().run { tostring() } }
+    test("contains") { TriangleTestFixture().run { contains() } }
+    test("copy") { TriangleTestFixture().run { copy() } }
+}
+
+private class TriangleTestFixture  {
+fun tostring() {
 
 		var t = Triangle(
 			Vector2( 0.0,  0.5),
@@ -45,8 +51,7 @@ class TriangleTest {
 
     }
 
-    @Test
-    fun contains() {
+fun contains() {
 
 		var t = Triangle(
 			Vector2( 0.0,  0.5),
@@ -79,8 +84,7 @@ class TriangleTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var tri = Triangle(
 				Vector2( 0.0,  0.5),

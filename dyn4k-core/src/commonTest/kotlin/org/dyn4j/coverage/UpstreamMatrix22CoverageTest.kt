@@ -24,35 +24,62 @@
  */
 package org.dyn4j.coverage
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.Epsilon
 import org.dyn4j.geometry.*
 import kotlin.math.*
 import kotlin.test.*
 
-class UpstreamMatrix22CoverageTest {
-    @Test
-    fun createNullArray() {
+val UpstreamMatrix22CoverageTest by testSuite {
+    test("createNullArray") { UpstreamMatrix22CoverageTestFixture().run { createNullArray() } }
+    test("createLessThanFourElements") { UpstreamMatrix22CoverageTestFixture().run { createLessThanFourElements() } }
+    test("createMoreThanFourElements") { UpstreamMatrix22CoverageTestFixture().run { createMoreThanFourElements() } }
+    test("createFull") { UpstreamMatrix22CoverageTestFixture().run { createFull() } }
+    test("createFullArray") { UpstreamMatrix22CoverageTestFixture().run { createFullArray() } }
+    test("copy") { UpstreamMatrix22CoverageTestFixture().run { copy() } }
+    test("add") { UpstreamMatrix22CoverageTestFixture().run { add() } }
+    test("sum") { UpstreamMatrix22CoverageTestFixture().run { sum() } }
+    test("subtract") { UpstreamMatrix22CoverageTestFixture().run { subtract() } }
+    test("difference") { UpstreamMatrix22CoverageTestFixture().run { difference() } }
+    test("multiplyMatrix") { UpstreamMatrix22CoverageTestFixture().run { multiplyMatrix() } }
+    test("productMatrix") { UpstreamMatrix22CoverageTestFixture().run { productMatrix() } }
+    test("multiplyVector") { UpstreamMatrix22CoverageTestFixture().run { multiplyVector() } }
+    test("productVector") { UpstreamMatrix22CoverageTestFixture().run { productVector() } }
+    test("multiplyVectorT") { UpstreamMatrix22CoverageTestFixture().run { multiplyVectorT() } }
+    test("productVectorT") { UpstreamMatrix22CoverageTestFixture().run { productVectorT() } }
+    test("multiplyScalar") { UpstreamMatrix22CoverageTestFixture().run { multiplyScalar() } }
+    test("productScalar") { UpstreamMatrix22CoverageTestFixture().run { productScalar() } }
+    test("identity") { UpstreamMatrix22CoverageTestFixture().run { identity() } }
+    test("transpose") { UpstreamMatrix22CoverageTestFixture().run { transpose() } }
+    test("getTranspose") { UpstreamMatrix22CoverageTestFixture().run { getTranspose() } }
+    test("determinant") { UpstreamMatrix22CoverageTestFixture().run { determinant() } }
+    test("invert") { UpstreamMatrix22CoverageTestFixture().run { invert() } }
+    test("getInverse") { UpstreamMatrix22CoverageTestFixture().run { getInverse() } }
+    test("solve") { UpstreamMatrix22CoverageTestFixture().run { solve() } }
+    test("norm") { UpstreamMatrix22CoverageTestFixture().run { norm() } }
+    test("equals") { UpstreamMatrix22CoverageTestFixture().run { equals() } }
+}
+
+private class UpstreamMatrix22CoverageTestFixture  {
+fun createNullArray() {
         assertFailsWith<NullPointerException> {
             Matrix22(null)
         }
     }
 
-    @Test
-    fun createLessThanFourElements() {
+fun createLessThanFourElements() {
         assertFailsWith<IndexOutOfBoundsException> {
             Matrix22(doubleArrayOf( 0.0, 1.0, 5.0 ))
         }
     }
 
-    @Test
-    fun createMoreThanFourElements() {
+fun createMoreThanFourElements() {
         assertFailsWith<IndexOutOfBoundsException> {
             Matrix22(doubleArrayOf( 0.0, 1.0, 5.0, 4.0, 2.0 ))
         }
     }
 
-    @Test
-    fun createFull() {
+fun createFull() {
         var m = Matrix22(1.0, 2.0,
             -3.0, 8.0)
         assertEquals(1.0, m.m00)
@@ -62,8 +89,7 @@ class UpstreamMatrix22CoverageTest {
         assertNotNull(m.toString())
     }
 
-    @Test
-    fun createFullArray() {
+fun createFullArray() {
         var m = Matrix22(doubleArrayOf(1.0, 2.0,
             -3.0, 8.0))
         assertEquals(1.0, m.m00)
@@ -72,8 +98,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(8.0, m.m11)
     }
 
-    @Test
-    fun copy() {
+fun copy() {
         var m1 = Matrix22()
         m1.m00 = 0.0
         m1.m01 = 2.0
@@ -86,8 +111,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(m1.m11, m2.m11)
     }
 
-    @Test
-    fun add() {
+fun add() {
         var m1 = Matrix22(0.0, 2.0,
             3.5, 1.2)
         var m2 = Matrix22(1.3, 0.3,
@@ -99,8 +123,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(5.7, m1.m11)
     }
 
-    @Test
-    fun sum() {
+fun sum() {
         var m1 = Matrix22(0.0, 2.0,
             3.5, 1.2)
         var m2 = Matrix22(1.3, 0.3,
@@ -113,8 +136,7 @@ class UpstreamMatrix22CoverageTest {
         assertFalse(m1.equals(m3))
     }
 
-    @Test
-    fun subtract() {
+fun subtract() {
         var m1 = Matrix22(0.0, 2.0,
             3.5, 1.2)
         var m2 = Matrix22(1.3, 0.3,
@@ -126,8 +148,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(-3.3, m1.m11)
     }
 
-    @Test
-    fun difference() {
+fun difference() {
         var m1 = Matrix22(0.0, 2.0,
             3.5, 1.2)
         var m2 = Matrix22(1.3, 0.3,
@@ -140,8 +161,7 @@ class UpstreamMatrix22CoverageTest {
         assertFalse(m1.equals(m3))
     }
 
-    @Test
-    fun multiplyMatrix() {
+fun multiplyMatrix() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         var m2 = Matrix22(4.0, 3.0,
@@ -153,8 +173,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(13.0, m1.m11)
     }
 
-    @Test
-    fun productMatrix() {
+fun productMatrix() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         var m2 = Matrix22(4.0, 3.0,
@@ -167,8 +186,7 @@ class UpstreamMatrix22CoverageTest {
         assertFalse(m1.equals(m3))
     }
 
-    @Test
-    fun multiplyVector() {
+fun multiplyVector() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         var v1 = Vector2(1.0, -1.0)
@@ -177,8 +195,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(-1.0, v1.y)
     }
 
-    @Test
-    fun productVector() {
+fun productVector() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         var v1 = Vector2(1.0, -1.0)
@@ -188,8 +205,7 @@ class UpstreamMatrix22CoverageTest {
         assertFalse(v1.equals(v2))
     }
 
-    @Test
-    fun multiplyVectorT() {
+fun multiplyVectorT() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         var v1 = Vector2(1.0, -1.0)
@@ -198,8 +214,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(-2.0, v1.y)
     }
 
-    @Test
-    fun productVectorT() {
+fun productVectorT() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         var v1 = Vector2(1.0, -1.0)
@@ -209,8 +224,7 @@ class UpstreamMatrix22CoverageTest {
         assertFalse(v1.equals(v2))
     }
 
-    @Test
-    fun multiplyScalar() {
+fun multiplyScalar() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         m1.multiply(2.0)
@@ -220,8 +234,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(8.0, m1.m11)
     }
 
-    @Test
-    fun productScalar() {
+fun productScalar() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         var m2 = m1.product(2.0)
@@ -232,8 +245,7 @@ class UpstreamMatrix22CoverageTest {
         assertFalse(m1.equals(m2))
     }
 
-    @Test
-    fun identity() {
+fun identity() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         m1.identity()
@@ -243,8 +255,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(1.0, m1.m11)
     }
 
-    @Test
-    fun transpose() {
+fun transpose() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         m1.transpose()
@@ -254,8 +265,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(4.0, m1.m11)
     }
 
-    @Test
-    fun getTranspose() {
+fun getTranspose() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         var m2 = m1.getTranspose()
@@ -266,16 +276,14 @@ class UpstreamMatrix22CoverageTest {
         assertFalse(m1.equals(m2))
     }
 
-    @Test
-    fun determinant() {
+fun determinant() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         var det = m1.determinant()
         assertEquals(-2.0, det)
     }
 
-    @Test
-    fun invert() {
+fun invert() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         m1.invert()
@@ -295,8 +303,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(-0.5, m1.m11)
     }
 
-    @Test
-    fun getInverse() {
+fun getInverse() {
         var m1 = Matrix22(1.0, 2.0,
             3.0, 4.0)
         var m2 = m1.getInverse()
@@ -307,8 +314,7 @@ class UpstreamMatrix22CoverageTest {
         assertFalse(m1.equals(m2))
     }
 
-    @Test
-    fun solve() {
+fun solve() {
         var A = Matrix22(3.0, -1.0,
             -1.0, -1.0)
         var b = Vector2(2.0, 6.0)
@@ -317,8 +323,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(-5.0, x.y)
     }
 
-    @Test
-    fun norm() {
+fun norm() {
         var A = Matrix22(3.0, -1.0,
             -1.0, -1.0)
         var n1 = A.norm1()
@@ -331,8 +336,7 @@ class UpstreamMatrix22CoverageTest {
         assertEquals(3.0, nm)
     }
 
-    @Test
-    fun equals() {
+fun equals() {
         var A = Matrix22(3.0, -1.0, -1.0, -1.0)
         var B = Matrix22(3.0, -1.0, -1.0, -1.0)
         var C = Matrix22(4.0, 2.0, 5.0, 0.0)

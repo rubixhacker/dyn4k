@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.simulation
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.dynamics.joint.MotorJoint
@@ -31,13 +32,15 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class MotorJointSimulationTest {
-    @Test
-    fun simple() {
+val MotorJointSimulationTest by testSuite {
+    test("simple") { MotorJointSimulationTestFixture().run { simple() } }
+}
+
+private class MotorJointSimulationTestFixture  {
+fun simple() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()

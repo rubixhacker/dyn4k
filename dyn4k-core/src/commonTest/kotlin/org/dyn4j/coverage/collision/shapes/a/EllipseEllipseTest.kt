@@ -25,7 +25,7 @@
 
 package org.dyn4j.coverage.collision.shapes.a
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -39,7 +39,16 @@ import org.dyn4j.collision.narrowphase.Sat
 import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.geometry.*
 
-class EllipseEllipseTest {
+val EllipseEllipseTest by testSuite {
+    test("detectSat") { EllipseEllipseTestFixture().run { detectSat() } }
+    test("detectGjk") { EllipseEllipseTestFixture().run { detectGjk() } }
+    test("gjkDistance") { EllipseEllipseTestFixture().run { gjkDistance() } }
+    test("getClipManifold") { EllipseEllipseTestFixture().run { getClipManifold() } }
+    test("falsePositiveCollision") { EllipseEllipseTestFixture().run { falsePositiveCollision() } }
+    test("falseNegativeDistance") { EllipseEllipseTestFixture().run { falseNegativeDistance() } }
+}
+
+private class EllipseEllipseTestFixture  {
     private val sat = Sat()
     private val gjk = Gjk()
     private val cmfs = ClippingManifoldSolver()
@@ -49,16 +58,14 @@ class EllipseEllipseTest {
         c1 = Ellipse(1.0, 0.5)
         c2 = Ellipse(0.5, 1.0)
     }
-    @Test
-    fun detectSat() {
+fun detectSat() {
         setup()
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
         assertFailsWith<UnsupportedOperationException> { sat.detect(c1, t1, c2, t2, p) }
     }
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -107,8 +114,7 @@ class EllipseEllipseTest {
         assertFalse(gjk.detect(c2, t2, c1, t1, p))
         assertFalse(gjk.detect(c2, t2, c1, t1))
     }
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         setup()
         val s = Separation()
         val t1 = Transform()
@@ -175,8 +181,7 @@ class EllipseEllipseTest {
         assertFiniteClose(-1.007, p2.x, 1.0e-3)
         assertFiniteClose(-0.043, p2.y, 1.0e-3)
     }
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         setup()
         val m = Manifold()
         val p = Penetration()
@@ -214,8 +219,7 @@ class EllipseEllipseTest {
         assertFiniteClose( 0.000, p1.y, 1.0e-3)
         assertFiniteClose( 0.100, mp.getDepth(), 1.0e-3)
     }
-    @Test
-    fun falsePositiveCollision() {
+fun falsePositiveCollision() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -223,8 +227,7 @@ class EllipseEllipseTest {
         t2.translate(-0.5, -0.6)
         assertTrue(gjk.detect(c1, t1, c2, t2, p))
     }
-    @Test
-    fun falseNegativeDistance() {
+fun falseNegativeDistance() {
         setup()
         val s = Separation()
         val t1 = Transform()

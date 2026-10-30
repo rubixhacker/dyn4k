@@ -24,13 +24,33 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class AdaptiveDecimalTest {
-    @Test
-    fun create() {
+val AdaptiveDecimalTest by testSuite {
+    test("create") { AdaptiveDecimalTestFixture().run { create() } }
+    test("size") { AdaptiveDecimalTestFixture().run { size() } }
+    test("append") { AdaptiveDecimalTestFixture().run { append() } }
+    test("copy") { AdaptiveDecimalTestFixture().run { copy() } }
+    test("clear") { AdaptiveDecimalTestFixture().run { clear() } }
+    test("removeZeros") { AdaptiveDecimalTestFixture().run { removeZeros() } }
+    test("negate") { AdaptiveDecimalTestFixture().run { negate() } }
+    test("getEstimation") { AdaptiveDecimalTestFixture().run { getEstimation() } }
+    test("normalize") { AdaptiveDecimalTestFixture().run { normalize() } }
+    test("sum") { AdaptiveDecimalTestFixture().run { sum() } }
+    test("checkInvariants") { AdaptiveDecimalTestFixture().run { checkInvariants() } }
+    test("testIndex1") { AdaptiveDecimalTestFixture().run { testIndex1() } }
+    test("testIndex2") { AdaptiveDecimalTestFixture().run { testIndex2() } }
+    test("testIndex3") { AdaptiveDecimalTestFixture().run { testIndex3() } }
+    test("testArgument1") { AdaptiveDecimalTestFixture().run { testArgument1() } }
+    test("testArgument2") { AdaptiveDecimalTestFixture().run { testArgument2() } }
+    test("testState") { AdaptiveDecimalTestFixture().run { testState() } }
+}
+
+private class AdaptiveDecimalTestFixture  {
+fun create() {
 
 		var ed = AdaptiveDecimal(2);
 		assertEquals(0, ed.size());
@@ -63,8 +83,7 @@ class AdaptiveDecimalTest {
 
     }
 
-    @Test
-    fun size() {
+fun size() {
 
 		var ed = AdaptiveDecimal(2);
 		assertEquals(0, ed.size());
@@ -76,8 +95,7 @@ class AdaptiveDecimalTest {
 
     }
 
-    @Test
-    fun append() {
+fun append() {
 
 		var ed = AdaptiveDecimal(5);
 
@@ -98,8 +116,7 @@ class AdaptiveDecimalTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var ed = AdaptiveDecimal(2);
 		ed.append(0.1).append(15.0);
@@ -130,8 +147,7 @@ class AdaptiveDecimalTest {
 
     }
 
-    @Test
-    fun clear() {
+fun clear() {
 
 		var ed = AdaptiveDecimal(2);
 		ed.append(0.1).append(15.0);
@@ -144,8 +160,7 @@ class AdaptiveDecimalTest {
 
     }
 
-    @Test
-    fun removeZeros() {
+fun removeZeros() {
 
 		var ed = AdaptiveDecimal(6);
 
@@ -162,8 +177,7 @@ class AdaptiveDecimalTest {
 
     }
 
-    @Test
-    fun negate() {
+fun negate() {
 
 		var ed = AdaptiveDecimal(5);
 
@@ -189,8 +203,7 @@ class AdaptiveDecimalTest {
 
     }
 
-    @Test
-    fun getEstimation() {
+fun getEstimation() {
 
 		var ed = AdaptiveDecimal(5);
 
@@ -213,8 +226,7 @@ class AdaptiveDecimalTest {
 
     }
 
-    @Test
-    fun normalize() {
+fun normalize() {
 
 		var ed = AdaptiveDecimal(2);
 		assertEquals(0, ed.size());
@@ -232,8 +244,7 @@ class AdaptiveDecimalTest {
 
     }
 
-    @Test
-    fun sum() {
+fun sum() {
 
 		var ed1 = AdaptiveDecimal.valueOf(10.0);
 		var ed2 = AdaptiveDecimal.valueOf(3.0);
@@ -248,8 +259,7 @@ class AdaptiveDecimalTest {
 
     }
 
-    @Test
-    fun checkInvariants() {
+fun checkInvariants() {
 
 		var ed1 = AdaptiveDecimal(3);
 		ed1.append(1.0).append(0.0).append(0.2);
@@ -312,8 +322,7 @@ class AdaptiveDecimalTest {
 
     }
 
-    @Test
-    fun testIndex1() {
+fun testIndex1() {
         assertFailsWith<IndexOutOfBoundsException> {
 
 		AdaptiveDecimal(1).get(-1);
@@ -321,8 +330,7 @@ class AdaptiveDecimalTest {
         }
     }
 
-    @Test
-    fun testIndex2() {
+fun testIndex2() {
         assertFailsWith<IndexOutOfBoundsException> {
 
 		AdaptiveDecimal(2).get(2);
@@ -330,8 +338,7 @@ class AdaptiveDecimalTest {
         }
     }
 
-    @Test
-    fun testIndex3() {
+fun testIndex3() {
         assertFailsWith<IndexOutOfBoundsException> {
 
 		AdaptiveDecimal(2).append(0.0).append(0.0).append(0.0);
@@ -339,8 +346,7 @@ class AdaptiveDecimalTest {
         }
     }
 
-    @Test
-    fun testArgument1() {
+fun testArgument1() {
         assertFailsWith<IllegalArgumentException> {
 
 		AdaptiveDecimal(-5);
@@ -348,8 +354,7 @@ class AdaptiveDecimalTest {
         }
     }
 
-    @Test
-    fun testArgument2() {
+fun testArgument2() {
         assertFailsWith<IllegalArgumentException> {
 
 		AdaptiveDecimal(0);
@@ -357,8 +362,7 @@ class AdaptiveDecimalTest {
         }
     }
 
-    @Test
-    fun testState() {
+fun testState() {
         assertFailsWith<IllegalStateException> {
 
 		var ed = AdaptiveDecimal(2);

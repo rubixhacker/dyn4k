@@ -1,6 +1,6 @@
 package org.dyn4j.world
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
@@ -11,6 +11,19 @@ import org.dyn4j.world.listener.BoundsListener
 import org.dyn4j.world.listener.BoundsListenerAdapter
 import org.dyn4j.world.listener.CollisionListener
 import org.dyn4j.world.listener.CollisionListenerAdapter
+
+val CollisionWorldLiveViewErrorsTest by testSuite {
+    test("emptyBodyViewRejectsEveryListMutation") { CollisionWorldLiveViewErrorsTestFixture().run { emptyBodyViewRejectsEveryListMutation() } }
+    test("savedBodyViewStaysLiveWithoutExposingMutation") { CollisionWorldLiveViewErrorsTestFixture().run { savedBodyViewStaysLiveWithoutExposingMutation() } }
+    test("staleBodySubListsRejectAddBeforeReadingTheirSize") { CollisionWorldLiveViewErrorsTestFixture().run { staleBodySubListsRejectAddBeforeReadingTheirSize() } }
+    test("staleBodySubListsCannotCreateReadableNestedViews") { CollisionWorldLiveViewErrorsTestFixture().run { staleBodySubListsCannotCreateReadableNestedViews() } }
+    test("staleBodySubListChecksInvalidRangesBeforeFailFastRead") { CollisionWorldLiveViewErrorsTestFixture().run { staleBodySubListChecksInvalidRangesBeforeFailFastRead() } }
+    test("sameSizeBodyChangesStillInvalidateSavedSubLists") { CollisionWorldLiveViewErrorsTestFixture().run { sameSizeBodyChangesStillInvalidateSavedSubLists() } }
+    test("boundsListenerChildCreatedAfterAddKeepsStaleVersion") { CollisionWorldLiveViewErrorsTestFixture().run { boundsListenerChildCreatedAfterAddKeepsStaleVersion() } }
+    test("boundsListenerChildCreatedAfterSameSizeChangeKeepsStaleVersion") { CollisionWorldLiveViewErrorsTestFixture().run { boundsListenerChildCreatedAfterSameSizeChangeKeepsStaleVersion() } }
+    test("collisionListenerChildCreatedAfterAddKeepsStaleVersion") { CollisionWorldLiveViewErrorsTestFixture().run { collisionListenerChildCreatedAfterAddKeepsStaleVersion() } }
+    test("collisionListenerChildCreatedAfterSameSizeChangeKeepsStaleVersion") { CollisionWorldLiveViewErrorsTestFixture().run { collisionListenerChildCreatedAfterSameSizeChangeKeepsStaleVersion() } }
+}
 
 internal enum class WorldViewOperation {
     CHILD_AFTER_ADD, GRANDCHILD_AFTER_ADD, CHILD_AFTER_REPLACE,
@@ -40,7 +53,7 @@ internal fun <T> assertWorldViewOutcome(expected: WorldViewOutcome, action: () -
     return value
 }
 
-class CollisionWorldLiveViewErrorsTest {
+private class CollisionWorldLiveViewErrorsTestFixture  {
     private fun <T> assertNestedViewMatchesRuntime(view: List<T>?, readableElement: T, operation: WorldViewOperation) {
         if (view != null) {
             val expected = worldNestedViewOutcome(operation)
@@ -49,8 +62,7 @@ class CollisionWorldLiveViewErrorsTest {
         }
     }
 
-    @Test
-    fun emptyBodyViewRejectsEveryListMutation() {
+fun emptyBodyViewRejectsEveryListMutation() {
         val world = World<Body>()
         val view = world.getBodies() as MutableList<Body>
         val emptySubList = view.subList(0, 0)
@@ -75,8 +87,7 @@ class CollisionWorldLiveViewErrorsTest {
         assertTrue(world.isEmpty())
     }
 
-    @Test
-    fun savedBodyViewStaysLiveWithoutExposingMutation() {
+fun savedBodyViewStaysLiveWithoutExposingMutation() {
         val world = World<Body>()
         val view = world.getBodies() as MutableList<Body>
         val first = Body()
@@ -112,8 +123,7 @@ class CollisionWorldLiveViewErrorsTest {
         assertSame(second, view[0])
     }
 
-    @Test
-    fun staleBodySubListsRejectAddBeforeReadingTheirSize() {
+fun staleBodySubListsRejectAddBeforeReadingTheirSize() {
         val world = World<Body>()
         val first = Body()
         world.addBody(first)
@@ -133,8 +143,7 @@ class CollisionWorldLiveViewErrorsTest {
         assertSame(first, view[0])
     }
 
-    @Test
-    fun staleBodySubListsCannotCreateReadableNestedViews() {
+fun staleBodySubListsCannotCreateReadableNestedViews() {
         val world = World<Body>()
         val first = Body()
         world.addBody(first)
@@ -156,8 +165,7 @@ class CollisionWorldLiveViewErrorsTest {
         assertSame(first, view.subList(0, 1).subList(0, 1)[0])
     }
 
-    @Test
-    fun staleBodySubListChecksInvalidRangesBeforeFailFastRead() {
+fun staleBodySubListChecksInvalidRangesBeforeFailFastRead() {
         val world = World<Body>()
         world.addBody(Body())
         val subList = (world.getBodies() as MutableList<Body>).subList(0, 1)
@@ -169,8 +177,7 @@ class CollisionWorldLiveViewErrorsTest {
         assertWorldViewOutcome(worldNestedViewOutcome(WorldViewOperation.REVERSED_RANGE)) { subList.subList(1, 0) }
     }
 
-    @Test
-    fun sameSizeBodyChangesStillInvalidateSavedSubLists() {
+fun sameSizeBodyChangesStillInvalidateSavedSubLists() {
         val world = World<Body>()
         val first = Body()
         world.addBody(first)
@@ -186,8 +193,7 @@ class CollisionWorldLiveViewErrorsTest {
         assertNestedViewMatchesRuntime(child, view[0], WorldViewOperation.READ_AFTER_REPLACE)
     }
 
-    @Test
-    fun boundsListenerChildCreatedAfterAddKeepsStaleVersion() {
+fun boundsListenerChildCreatedAfterAddKeepsStaleVersion() {
         val world = World<Body>()
         val first = BoundsListenerAdapter<Body, BodyFixture>()
         world.addBoundsListener(first)
@@ -204,8 +210,7 @@ class CollisionWorldLiveViewErrorsTest {
         assertSame(first, view[0])
     }
 
-    @Test
-    fun boundsListenerChildCreatedAfterSameSizeChangeKeepsStaleVersion() {
+fun boundsListenerChildCreatedAfterSameSizeChangeKeepsStaleVersion() {
         val world = World<Body>()
         val first = BoundsListenerAdapter<Body, BodyFixture>()
         val second = BoundsListenerAdapter<Body, BodyFixture>()
@@ -223,8 +228,7 @@ class CollisionWorldLiveViewErrorsTest {
         assertSame(second, view[0])
     }
 
-    @Test
-    fun collisionListenerChildCreatedAfterAddKeepsStaleVersion() {
+fun collisionListenerChildCreatedAfterAddKeepsStaleVersion() {
         val world = World<Body>()
         val first = CollisionListenerAdapter<Body, BodyFixture>()
         world.addCollisionListener(first)
@@ -241,8 +245,7 @@ class CollisionWorldLiveViewErrorsTest {
         assertSame(first, view[0])
     }
 
-    @Test
-    fun collisionListenerChildCreatedAfterSameSizeChangeKeepsStaleVersion() {
+fun collisionListenerChildCreatedAfterSameSizeChangeKeepsStaleVersion() {
         val world = World<Body>()
         val first = CollisionListenerAdapter<Body, BodyFixture>()
         val second = CollisionListenerAdapter<Body, BodyFixture>()

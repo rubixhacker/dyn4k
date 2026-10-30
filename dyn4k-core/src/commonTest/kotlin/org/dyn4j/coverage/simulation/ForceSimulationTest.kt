@@ -24,18 +24,21 @@
  */
 package org.dyn4j.coverage.simulation
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.Force
 import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class ForceSimulationTest {
-    @Test
-    fun applyTimed() {
+val ForceSimulationTest by testSuite {
+    test("applyTimed") { ForceSimulationTestFixture().run { applyTimed() } }
+}
+
+private class ForceSimulationTestFixture  {
+fun applyTimed() {
         val w = World<Body>()
         var b = Body()
         b.addFixture(Geometry.createCircle(1.0))

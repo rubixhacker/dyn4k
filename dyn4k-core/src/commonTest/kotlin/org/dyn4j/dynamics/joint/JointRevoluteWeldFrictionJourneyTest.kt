@@ -1,6 +1,6 @@
 package org.dyn4j.dynamics.joint
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotSame
@@ -12,14 +12,22 @@ import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
-class JointRevoluteWeldFrictionJourneyTest {
+val JointRevoluteWeldFrictionJourneyTest by testSuite {
+    test("revoluteMotorAndLimitsRetainSettingsAcrossCopy") { JointRevoluteWeldFrictionJourneyTestFixture().run { revoluteMotorAndLimitsRetainSettingsAcrossCopy() } }
+    test("weldSpringAndLimitsRetainSettingsAcrossCopy") { JointRevoluteWeldFrictionJourneyTestFixture().run { weldSpringAndLimitsRetainSettingsAcrossCopy() } }
+    test("frictionCapsVelocityImpulseAndNeedsNoPositionSolve") { JointRevoluteWeldFrictionJourneyTestFixture().run { frictionCapsVelocityImpulseAndNeedsNoPositionSolve() } }
+    test("revoluteMotorTorqueIsCappedDuringVelocitySolve") { JointRevoluteWeldFrictionJourneyTestFixture().run { revoluteMotorTorqueIsCappedDuringVelocitySolve() } }
+    test("weldSpringTorqueIsCappedDuringVelocitySolve") { JointRevoluteWeldFrictionJourneyTestFixture().run { weldSpringTorqueIsCappedDuringVelocitySolve() } }
+    test("weldSpringUsesSubclassCoefficientOverride") { JointRevoluteWeldFrictionJourneyTestFixture().run { weldSpringUsesSubclassCoefficientOverride() } }
+}
+
+private class JointRevoluteWeldFrictionJourneyTestFixture  {
     private fun dynamicBody(): Body = Body().apply {
         addFixture(Circle(1.0))
         setMass(MassType.NORMAL)
     }
 
-    @Test
-    fun revoluteMotorAndLimitsRetainSettingsAcrossCopy() {
+fun revoluteMotorAndLimitsRetainSettingsAcrossCopy() {
         val first = Body()
         val second = Body()
         val joint = RevoluteJoint(first, second, Vector2(1.0, 2.0))
@@ -39,8 +47,7 @@ class JointRevoluteWeldFrictionJourneyTest {
         assertNotSame(first, joint.copy().getBody1())
     }
 
-    @Test
-    fun weldSpringAndLimitsRetainSettingsAcrossCopy() {
+fun weldSpringAndLimitsRetainSettingsAcrossCopy() {
         val first = Body()
         val second = Body()
         val joint = WeldJoint(first, second, Vector2())
@@ -63,8 +70,7 @@ class JointRevoluteWeldFrictionJourneyTest {
         assertNotSame(first, copy.getBody1())
     }
 
-    @Test
-    fun frictionCapsVelocityImpulseAndNeedsNoPositionSolve() {
+fun frictionCapsVelocityImpulseAndNeedsNoPositionSolve() {
         val first = dynamicBody()
         val second = dynamicBody()
         val joint = FrictionJoint(first, second, Vector2())
@@ -87,8 +93,7 @@ class JointRevoluteWeldFrictionJourneyTest {
         assertFalse(joint.isCollisionAllowed())
     }
 
-    @Test
-    fun revoluteMotorTorqueIsCappedDuringVelocitySolve() {
+fun revoluteMotorTorqueIsCappedDuringVelocitySolve() {
         val first = dynamicBody()
         val second = dynamicBody()
         val joint = RevoluteJoint(first, second, Vector2())
@@ -106,8 +111,7 @@ class JointRevoluteWeldFrictionJourneyTest {
         assertTrue(joint.getAngularSpeed() > 0.0)
     }
 
-    @Test
-    fun weldSpringTorqueIsCappedDuringVelocitySolve() {
+fun weldSpringTorqueIsCappedDuringVelocitySolve() {
         val first = dynamicBody()
         val second = dynamicBody()
         val joint = WeldJoint(first, second, Vector2())
@@ -125,8 +129,7 @@ class JointRevoluteWeldFrictionJourneyTest {
         assertTrue(joint.getSpringStiffness() > 0.0)
     }
 
-    @Test
-    fun weldSpringUsesSubclassCoefficientOverride() {
+fun weldSpringUsesSubclassCoefficientOverride() {
         val joint = InstrumentedWeld(dynamicBody(), dynamicBody(), Vector2())
         joint.setSpringEnabled(true)
 

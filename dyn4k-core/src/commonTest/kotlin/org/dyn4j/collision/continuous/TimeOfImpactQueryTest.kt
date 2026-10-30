@@ -1,6 +1,6 @@
 package org.dyn4j.collision.continuous
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -11,14 +11,18 @@ import org.dyn4j.geometry.Convex
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 
-class TimeOfImpactQueryTest {
-    @Test
-    fun defaultDistanceEpsilonMatchesBaselineCubeRoot() {
+val TimeOfImpactQueryTest by testSuite {
+    test("defaultDistanceEpsilonMatchesBaselineCubeRoot") { TimeOfImpactQueryTestFixture().run { defaultDistanceEpsilonMatchesBaselineCubeRoot() } }
+    test("movingCirclesReachContactAtHalfStep") { TimeOfImpactQueryTestFixture().run { movingCirclesReachContactAtHalfStep() } }
+    test("injectedDistanceDetectorRunsBeforeMotionBounds") { TimeOfImpactQueryTestFixture().run { injectedDistanceDetectorRunsBeforeMotionBounds() } }
+}
+
+private class TimeOfImpactQueryTestFixture  {
+fun defaultDistanceEpsilonMatchesBaselineCubeRoot() {
         assertEquals(4.806217383937352e-6, ConservativeAdvancement.DEFAULT_DISTANCE_EPSILON)
     }
 
-    @Test
-    fun movingCirclesReachContactAtHalfStep() {
+fun movingCirclesReachContactAtHalfStep() {
         val result = TimeOfImpact()
         val separation = result.getSeparation()
         val detector = ConservativeAdvancement()
@@ -31,8 +35,7 @@ class TimeOfImpactQueryTest {
         assertSame(separation, result.getSeparation())
     }
 
-    @Test
-    fun injectedDistanceDetectorRunsBeforeMotionBounds() {
+fun injectedDistanceDetectorRunsBeforeMotionBounds() {
         var calls = 0
         val detector = object : DistanceDetector {
             override fun distance(convex1: Convex, transform1: Transform, convex2: Convex, transform2: Transform, separation: Separation): Boolean {

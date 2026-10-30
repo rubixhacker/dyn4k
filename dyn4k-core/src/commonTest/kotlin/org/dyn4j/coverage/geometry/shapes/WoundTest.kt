@@ -24,13 +24,22 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class WoundTest {
-    @Test
-    fun getRadius() {
+val WoundTest by testSuite {
+    test("getRadius") { WoundTestFixture().run { getRadius() } }
+    test("getRadiusCenter") { WoundTestFixture().run { getRadiusCenter() } }
+    test("woundIteratorStartIndex") { WoundTestFixture().run { woundIteratorStartIndex() } }
+    test("woundIteratorCount") { WoundTestFixture().run { woundIteratorCount() } }
+    test("woundIteratorFail") { WoundTestFixture().run { woundIteratorFail() } }
+    test("woundIteratorRemove") { WoundTestFixture().run { woundIteratorRemove() } }
+}
+
+private class WoundTestFixture  {
+fun getRadius() {
 
 		var p = Geometry.createUnitCirclePolygon(5, 0.5);
 		assertEquals(0.500, p.getRadius(), 1.0e-3);
@@ -46,8 +55,7 @@ class WoundTest {
 
     }
 
-    @Test
-    fun getRadiusCenter() {
+fun getRadiusCenter() {
 
 		var c = Vector2(1.0, 0.0);
 
@@ -65,8 +73,7 @@ class WoundTest {
 
     }
 
-    @Test
-    fun woundIteratorStartIndex() {
+fun woundIteratorStartIndex() {
 
 		var w = Geometry.createPolygon(
 				Vector2(0.0, 0.0),
@@ -82,8 +89,7 @@ class WoundTest {
 
     }
 
-    @Test
-    fun woundIteratorCount() {
+fun woundIteratorCount() {
 
 		var w = Geometry.createPolygon(
 				Vector2(0.0, 0.0),
@@ -100,8 +106,7 @@ class WoundTest {
 
     }
 
-    @Test
-    fun woundIteratorFail() {
+fun woundIteratorFail() {
         assertFailsWith<IndexOutOfBoundsException> {
 
 		var w = Geometry.createPolygon(
@@ -116,8 +121,7 @@ class WoundTest {
         }
     }
 
-    @Test
-    fun woundIteratorRemove() {
+fun woundIteratorRemove() {
         assertFailsWith<UnsupportedOperationException> {
 
 		var w = Geometry.createPolygon(

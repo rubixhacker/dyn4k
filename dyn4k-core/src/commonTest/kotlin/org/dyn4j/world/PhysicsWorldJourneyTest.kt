@@ -1,6 +1,6 @@
 package org.dyn4j.world
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -32,7 +32,34 @@ import org.dyn4j.world.listener.ContactListenerAdapter
 import org.dyn4j.world.listener.DestructionListenerAdapter
 import org.dyn4j.dynamics.joint.Joint
 
-class PhysicsWorldJourneyTest {
+val PhysicsWorldJourneyTest by testSuite {
+    test("kotlinSubclassKeepsProtectedStateAndFactoryDispatch") { PhysicsWorldJourneyTestFixture().run { kotlinSubclassKeepsProtectedStateAndFactoryDispatch() } }
+    test("elapsedTimeStepsAndCarriesTheRemainder") { PhysicsWorldJourneyTestFixture().run { elapsedTimeStepsAndCarriesTheRemainder() } }
+    test("removingBodyClearsOwnershipAndWorldState") { PhysicsWorldJourneyTestFixture().run { removingBodyClearsOwnershipAndWorldState() } }
+    test("jointIteratorRemovesTheJointFromTheWorld") { PhysicsWorldJourneyTestFixture().run { jointIteratorRemovesTheJointFromTheWorld() } }
+    test("savedStepListenerViewIteratorRejectsStructuralChangeOnly") { PhysicsWorldJourneyTestFixture().run { savedStepListenerViewIteratorRejectsStructuralChangeOnly() } }
+    test("savedJointViewIteratorRejectsStructuralChangeOnly") { PhysicsWorldJourneyTestFixture().run { savedJointViewIteratorRejectsStructuralChangeOnly() } }
+    test("protectedBackingIteratorsRejectStructuralChangeOnly") { PhysicsWorldJourneyTestFixture().run { protectedBackingIteratorsRejectStructuralChangeOnly() } }
+    test("publicSubListsRejectStructuralChangeOnly") { PhysicsWorldJourneyTestFixture().run { publicSubListsRejectStructuralChangeOnly() } }
+    test("protectedSubListsRejectStructuralChangeOnly") { PhysicsWorldJourneyTestFixture().run { protectedSubListsRejectStructuralChangeOnly() } }
+    test("emptyProtectedSubListClearInvalidatesSavedWorldTraversals") { PhysicsWorldJourneyTestFixture().run { emptyProtectedSubListClearInvalidatesSavedWorldTraversals() } }
+    test("trackedSortInvalidatesSavedIteratorsAndSubLists") { PhysicsWorldJourneyTestFixture().run { trackedSortInvalidatesSavedIteratorsAndSubLists() } }
+    test("trackedReplaceAllInvalidatesSavedIteratorsAndSubLists") { PhysicsWorldJourneyTestFixture().run { trackedReplaceAllInvalidatesSavedIteratorsAndSubLists() } }
+    test("trackedRemoveIfDoesNotPartiallyRemoveWhenPredicateThrows") { PhysicsWorldJourneyTestFixture().run { trackedRemoveIfDoesNotPartiallyRemoveWhenPredicateThrows() } }
+    test("protectedNestedSubListChangesKeepParentLiveAndInvalidateSiblings") { PhysicsWorldJourneyTestFixture().run { protectedNestedSubListChangesKeepParentLiveAndInvalidateSiblings() } }
+    test("publicSubListsUseBaselineRangeErrors") { PhysicsWorldJourneyTestFixture().run { publicSubListsUseBaselineRangeErrors() } }
+    test("worldListsAndSubListsMarkRandomAccess") { PhysicsWorldJourneyTestFixture().run { worldListsAndSubListsMarkRandomAccess() } }
+    test("allWorldAndGraphPublicViewsKeepIdentityAndRandomAccess") { PhysicsWorldJourneyTestFixture().run { allWorldAndGraphPublicViewsKeepIdentityAndRandomAccess() } }
+    test("emptyPublicViewRejectsDefaultMutations") { PhysicsWorldJourneyTestFixture().run { emptyPublicViewRejectsDefaultMutations() } }
+    test("removingBodyDestroysAttachedJointAndNotifiesListeners") { PhysicsWorldJourneyTestFixture().run { removingBodyDestroysAttachedJointAndNotifiesListeners() } }
+    test("stepListenersObserveTheBaselineStageOrder") { PhysicsWorldJourneyTestFixture().run { stepListenersObserveTheBaselineStageOrder() } }
+    test("overlappingBodiesReachContactListenersAndCustomSolver") { PhysicsWorldJourneyTestFixture().run { overlappingBodiesReachContactListenersAndCustomSolver() } }
+    test("nullableListenerEntriesFollowTheBaselineListContract") { PhysicsWorldJourneyTestFixture().run { nullableListenerEntriesFollowTheBaselineListContract() } }
+    test("sleepingBodyWakesAndMovesAfterImpulse") { PhysicsWorldJourneyTestFixture().run { sleepingBodyWakesAndMovesAfterImpulse() } }
+    test("configuredTimeOfImpactSolverReceivesBulletCollision") { PhysicsWorldJourneyTestFixture().run { configuredTimeOfImpactSolverReceivesBulletCollision() } }
+}
+
+private class PhysicsWorldJourneyTestFixture  {
     private class ExtendedWorld : World<Body>() {
         var created = 0
 
@@ -64,8 +91,7 @@ class PhysicsWorldJourneyTest {
         }
     }
 
-    @Test
-    fun kotlinSubclassKeepsProtectedStateAndFactoryDispatch() {
+fun kotlinSubclassKeepsProtectedStateAndFactoryDispatch() {
         val world = ExtendedWorld()
         world.setGravity(0.0, 0.0)
         assertTrue(world.protectedStateMatchesPublic())
@@ -82,8 +108,7 @@ class PhysicsWorldJourneyTest {
         assertTrue(world.protectedStateMatchesPublic())
     }
 
-    @Test
-    fun elapsedTimeStepsAndCarriesTheRemainder() {
+fun elapsedTimeStepsAndCarriesTheRemainder() {
         val world = World<Body>()
         val frequency = world.getSettings().getStepFrequency()
 
@@ -93,8 +118,7 @@ class PhysicsWorldJourneyTest {
         assertEquals(0.0, world.getAccumulatedTime(), 1.0e-12)
     }
 
-    @Test
-    fun removingBodyClearsOwnershipAndWorldState() {
+fun removingBodyClearsOwnershipAndWorldState() {
         val world = World<Body>()
         val body = Body()
         body.addFixture(Circle(1.0))
@@ -106,8 +130,7 @@ class PhysicsWorldJourneyTest {
         assertTrue(world.isEmpty())
     }
 
-    @Test
-    fun jointIteratorRemovesTheJointFromTheWorld() {
+fun jointIteratorRemovesTheJointFromTheWorld() {
         val world = World<Body>()
         val body = Body()
         world.addBody(body)
@@ -123,8 +146,7 @@ class PhysicsWorldJourneyTest {
         assertEquals(null, joint.getOwner())
     }
 
-    @Test
-    fun savedStepListenerViewIteratorRejectsStructuralChangeOnly() {
+fun savedStepListenerViewIteratorRejectsStructuralChangeOnly() {
         val world = ExtendedWorld()
         val first = StepListenerAdapter<Body>()
         val replacement = StepListenerAdapter<Body>()
@@ -141,8 +163,7 @@ class PhysicsWorldJourneyTest {
         assertFailsWith<ConcurrentModificationException> { beforeAdd.next() }
     }
 
-    @Test
-    fun savedJointViewIteratorRejectsStructuralChangeOnly() {
+fun savedJointViewIteratorRejectsStructuralChangeOnly() {
         val world = ExtendedWorld()
         val body = Body()
         world.addBody(body)
@@ -160,8 +181,7 @@ class PhysicsWorldJourneyTest {
         assertFailsWith<ConcurrentModificationException> { beforeAdd.next() }
     }
 
-    @Test
-    fun protectedBackingIteratorsRejectStructuralChangeOnly() {
+fun protectedBackingIteratorsRejectStructuralChangeOnly() {
         val world = ExtendedWorld()
         val first = StepListenerAdapter<Body>()
         val replacement = StepListenerAdapter<Body>()
@@ -185,8 +205,7 @@ class PhysicsWorldJourneyTest {
         assertFailsWith<ConcurrentModificationException> { beforeJointAdd.next() }
     }
 
-    @Test
-    fun publicSubListsRejectStructuralChangeOnly() {
+fun publicSubListsRejectStructuralChangeOnly() {
         val world = ExtendedWorld()
         val first = StepListenerAdapter<Body>()
         val replacement = StepListenerAdapter<Body>()
@@ -212,8 +231,7 @@ class PhysicsWorldJourneyTest {
         assertFailsWith<ConcurrentModificationException> { jointSubList[0] }
     }
 
-    @Test
-    fun protectedSubListsRejectStructuralChangeOnly() {
+fun protectedSubListsRejectStructuralChangeOnly() {
         val world = ExtendedWorld()
         val first = StepListenerAdapter<Body>()
         val replacement = StepListenerAdapter<Body>()
@@ -237,8 +255,7 @@ class PhysicsWorldJourneyTest {
         assertFailsWith<ConcurrentModificationException> { joints.size }
     }
 
-    @Test
-    fun emptyProtectedSubListClearInvalidatesSavedWorldTraversals() {
+fun emptyProtectedSubListClearInvalidatesSavedWorldTraversals() {
         val world = ExtendedWorld()
         val first = StepListenerAdapter<Body>()
         world.addStepListener(first)
@@ -260,8 +277,7 @@ class PhysicsWorldJourneyTest {
         if (publicOutcome == WorldViewOutcome.VALUE) assertSame(first, publicValue)
     }
 
-    @Test
-    fun trackedSortInvalidatesSavedIteratorsAndSubLists() {
+fun trackedSortInvalidatesSavedIteratorsAndSubLists() {
         val backing = WorldTrackedArrayList<StepListener<Body>?>()
         val listener = StepListenerAdapter<Body>()
         backing.add(listener)
@@ -276,8 +292,7 @@ class PhysicsWorldJourneyTest {
         assertFailsWith<ConcurrentModificationException> { publicSublist[0] }
     }
 
-    @Test
-    fun trackedReplaceAllInvalidatesSavedIteratorsAndSubLists() {
+fun trackedReplaceAllInvalidatesSavedIteratorsAndSubLists() {
         val backing = WorldTrackedArrayList<StepListener<Body>?>()
         val listener = StepListenerAdapter<Body>()
         backing.add(listener)
@@ -292,8 +307,7 @@ class PhysicsWorldJourneyTest {
         assertFailsWith<ConcurrentModificationException> { publicSublist[0] }
     }
 
-    @Test
-    fun trackedRemoveIfDoesNotPartiallyRemoveWhenPredicateThrows() {
+fun trackedRemoveIfDoesNotPartiallyRemoveWhenPredicateThrows() {
         val backing = WorldTrackedArrayList<StepListener<Body>?>()
         val first = StepListenerAdapter<Body>()
         val second = StepListenerAdapter<Body>()
@@ -318,8 +332,7 @@ class PhysicsWorldJourneyTest {
         assertFailsWith<ConcurrentModificationException> { beforeRemoval.next() }
     }
 
-    @Test
-    fun protectedNestedSubListChangesKeepParentLiveAndInvalidateSiblings() {
+fun protectedNestedSubListChangesKeepParentLiveAndInvalidateSiblings() {
         val world = ExtendedWorld()
         val first = StepListenerAdapter<Body>()
         val added = StepListenerAdapter<Body>()
@@ -339,8 +352,7 @@ class PhysicsWorldJourneyTest {
         assertSame(added, world.getStepListeners()[0])
     }
 
-    @Test
-    fun publicSubListsUseBaselineRangeErrors() {
+fun publicSubListsUseBaselineRangeErrors() {
         val world = World<Body>()
         world.addStepListener(StepListenerAdapter())
         val views: List<List<*>> = listOf(world.getStepListeners(), world.getJoints())
@@ -350,8 +362,7 @@ class PhysicsWorldJourneyTest {
         }
     }
 
-    @Test
-    fun worldListsAndSubListsMarkRandomAccess() {
+fun worldListsAndSubListsMarkRandomAccess() {
         val world = ExtendedWorld()
         val body = Body()
         world.addBody(body)
@@ -365,8 +376,7 @@ class PhysicsWorldJourneyTest {
         }
     }
 
-    @Test
-    fun allWorldAndGraphPublicViewsKeepIdentityAndRandomAccess() {
+fun allWorldAndGraphPublicViewsKeepIdentityAndRandomAccess() {
         val world = World<Body>()
         val graph = ConstraintGraph<Body>()
         val graphBody = Body()
@@ -391,8 +401,7 @@ class PhysicsWorldJourneyTest {
         assertSame(body, bodies[0])
     }
 
-    @Test
-    fun emptyPublicViewRejectsDefaultMutations() {
+fun emptyPublicViewRejectsDefaultMutations() {
         val world = World<Body>()
         val graph = ConstraintGraph<Body>()
         val body = Body()
@@ -408,8 +417,7 @@ class PhysicsWorldJourneyTest {
         }
     }
 
-    @Test
-    fun removingBodyDestroysAttachedJointAndNotifiesListeners() {
+fun removingBodyDestroysAttachedJointAndNotifiesListeners() {
         val world = World<Body>()
         val body = Body()
         world.addBody(body)
@@ -428,8 +436,7 @@ class PhysicsWorldJourneyTest {
         assertEquals(null, joint.getOwner())
     }
 
-    @Test
-    fun stepListenersObserveTheBaselineStageOrder() {
+fun stepListenersObserveTheBaselineStageOrder() {
         val world = World<Body>()
         val stages = ArrayList<String>()
         world.addStepListener(object : StepListenerAdapter<Body>() {
@@ -457,8 +464,7 @@ class PhysicsWorldJourneyTest {
         assertEquals(listOf("begin", "postSolve", "end"), stages)
     }
 
-    @Test
-    fun overlappingBodiesReachContactListenersAndCustomSolver() {
+fun overlappingBodiesReachContactListenersAndCustomSolver() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val dynamic = Body()
@@ -488,8 +494,7 @@ class PhysicsWorldJourneyTest {
         assertTrue(initialized > 0)
     }
 
-    @Test
-    fun nullableListenerEntriesFollowTheBaselineListContract() {
+fun nullableListenerEntriesFollowTheBaselineListContract() {
         val world = World<Body>()
         val listeners = world.getContactListeners()
 
@@ -500,8 +505,7 @@ class PhysicsWorldJourneyTest {
         assertTrue(listeners.isEmpty())
     }
 
-    @Test
-    fun sleepingBodyWakesAndMovesAfterImpulse() {
+fun sleepingBodyWakesAndMovesAfterImpulse() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val body = Body()
@@ -517,8 +521,7 @@ class PhysicsWorldJourneyTest {
         assertTrue(body.getTransform().getTranslationX() > 0.0)
     }
 
-    @Test
-    fun configuredTimeOfImpactSolverReceivesBulletCollision() {
+fun configuredTimeOfImpactSolverReceivesBulletCollision() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         world.getSettings().setContinuousDetectionMode(ContinuousDetectionMode.ALL)

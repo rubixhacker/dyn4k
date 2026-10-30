@@ -1,6 +1,6 @@
 package org.dyn4j.dynamics.joint
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -12,14 +12,22 @@ import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
-class JointPrismaticWheelJourneyTest {
+val JointPrismaticWheelJourneyTest by testSuite {
+    test("prismaticMotorMovesAlongItsAxis") { JointPrismaticWheelJourneyTestFixture().run { prismaticMotorMovesAlongItsAxis() } }
+    test("wheelMotorRotatesWheelAndSpringIsEnabledByDefault") { JointPrismaticWheelJourneyTestFixture().run { wheelMotorRotatesWheelAndSpringIsEnabledByDefault() } }
+    test("prismaticLimitCorrectsDisplacementAndCappedMotorStopsAtForceLimit") { JointPrismaticWheelJourneyTestFixture().run { prismaticLimitCorrectsDisplacementAndCappedMotorStopsAtForceLimit() } }
+    test("wheelLimitCorrectsDisplacementAndCappedMotorStopsAtTorqueLimit") { JointPrismaticWheelJourneyTestFixture().run { wheelLimitCorrectsDisplacementAndCappedMotorStopsAtTorqueLimit() } }
+    test("springModesAndCopiesRetainConfiguredBehavior") { JointPrismaticWheelJourneyTestFixture().run { springModesAndCopiesRetainConfiguredBehavior() } }
+    test("subclassSpringCoefficientOverridesRunDuringConstraintSetup") { JointPrismaticWheelJourneyTestFixture().run { subclassSpringCoefficientOverridesRunDuringConstraintSetup() } }
+}
+
+private class JointPrismaticWheelJourneyTestFixture  {
     private fun movingBody() = Body().apply {
         addFixture(Circle(0.5))
         setMass(MassType.NORMAL)
     }
 
-    @Test
-    fun prismaticMotorMovesAlongItsAxis() {
+fun prismaticMotorMovesAlongItsAxis() {
         val frame = Body()
         val slider = movingBody()
         val joint = PrismaticJoint(frame, slider, Vector2(), Vector2(2.0, 0.0))
@@ -37,8 +45,7 @@ class JointPrismaticWheelJourneyTest {
         assertEquals(1.0, joint.getAxis().x, 1.0e-12)
     }
 
-    @Test
-    fun wheelMotorRotatesWheelAndSpringIsEnabledByDefault() {
+fun wheelMotorRotatesWheelAndSpringIsEnabledByDefault() {
         val frame = Body()
         val wheel = movingBody()
         val joint = WheelJoint(frame, wheel, Vector2(), Vector2(0.0, 3.0))
@@ -55,8 +62,7 @@ class JointPrismaticWheelJourneyTest {
         assertEquals(1.0, joint.getAxis().y, 1.0e-12)
     }
 
-    @Test
-    fun prismaticLimitCorrectsDisplacementAndCappedMotorStopsAtForceLimit() {
+fun prismaticLimitCorrectsDisplacementAndCappedMotorStopsAtForceLimit() {
         val frame = Body()
         val slider = movingBody()
         val joint = PrismaticJoint(frame, slider, Vector2(), Vector2(1.0, 0.0))
@@ -77,8 +83,7 @@ class JointPrismaticWheelJourneyTest {
         assertEquals(0.5, joint.getMotorForce(step.getInverseDeltaTime()), 1.0e-9)
     }
 
-    @Test
-    fun wheelLimitCorrectsDisplacementAndCappedMotorStopsAtTorqueLimit() {
+fun wheelLimitCorrectsDisplacementAndCappedMotorStopsAtTorqueLimit() {
         val frame = Body()
         val wheel = movingBody()
         val joint = WheelJoint(frame, wheel, Vector2(), Vector2(0.0, 1.0))
@@ -99,8 +104,7 @@ class JointPrismaticWheelJourneyTest {
         assertEquals(0.5, joint.getMotorTorque(step.getInverseDeltaTime()), 1.0e-9)
     }
 
-    @Test
-    fun springModesAndCopiesRetainConfiguredBehavior() {
+fun springModesAndCopiesRetainConfiguredBehavior() {
         val frame = Body()
         val moving = movingBody()
         val prismatic = PrismaticJoint(frame, moving, Vector2(), Vector2(1.0, 0.0))
@@ -133,8 +137,7 @@ class JointPrismaticWheelJourneyTest {
         assertFalse(wheel.copy().getBody2() === moving)
     }
 
-    @Test
-    fun subclassSpringCoefficientOverridesRunDuringConstraintSetup() {
+fun subclassSpringCoefficientOverridesRunDuringConstraintSetup() {
         val frame = Body()
         val moving = movingBody()
         val prismatic = PrismaticProbe(frame, moving)

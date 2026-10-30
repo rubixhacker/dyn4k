@@ -24,10 +24,10 @@
  */
 package org.dyn4j.coverage.dynamics.joint.modes
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sqrt
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -42,6 +42,20 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
+val UpstreamFrictionJointModesCoverageTest by testSuite {
+    test("createWithTwoDifferentBodies") { UpstreamFrictionJointModesCoverageTestFixture().run { createWithTwoDifferentBodies() } }
+    test("createWithNullBody1") { UpstreamFrictionJointModesCoverageTestFixture().run { createWithNullBody1() } }
+    test("createWithNullBody2") { UpstreamFrictionJointModesCoverageTestFixture().run { createWithNullBody2() } }
+    test("createWithNullAnchor") { UpstreamFrictionJointModesCoverageTestFixture().run { createWithNullAnchor() } }
+    test("createWithSameBody") { UpstreamFrictionJointModesCoverageTestFixture().run { createWithSameBody() } }
+    test("setMaximumTorque") { UpstreamFrictionJointModesCoverageTestFixture().run { setMaximumTorque() } }
+    test("setNegativeMaximumTorque") { UpstreamFrictionJointModesCoverageTestFixture().run { setNegativeMaximumTorque() } }
+    test("setMaximumForce") { UpstreamFrictionJointModesCoverageTestFixture().run { setMaximumForce() } }
+    test("setNegativeMaximumForce") { UpstreamFrictionJointModesCoverageTestFixture().run { setNegativeMaximumForce() } }
+    test("shift") { UpstreamFrictionJointModesCoverageTestFixture().run { shift() } }
+    test("copyFailed") { UpstreamFrictionJointModesCoverageTestFixture().run { copyFailed() } }
+}
+
 private fun frictionBody() = Body().apply {
     addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
     setMass(MassType.NORMAL)
@@ -51,8 +65,8 @@ private fun frictionRadians(degrees: Double) = degrees * PI / 180.0
 
 private class FrictionTestBody : Body()
 
-class UpstreamFrictionJointModesCoverageTest {
-    @Test fun createWithTwoDifferentBodies() {
+private class UpstreamFrictionJointModesCoverageTestFixture  {
+fun createWithTwoDifferentBodies() {
         val b1 = frictionBody()
         val b2 = frictionBody()
         var p = Vector2(1.0, 2.0)
@@ -72,7 +86,7 @@ class UpstreamFrictionJointModesCoverageTest {
         assertNotNull(fj.toString())
     }
 
-    @Test fun createWithNullBody1() {
+fun createWithNullBody1() {
         val b1 = frictionBody()
         val b2 = frictionBody()
         assertFailsWith<NullPointerException> {
@@ -80,7 +94,7 @@ class UpstreamFrictionJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithNullBody2() {
+fun createWithNullBody2() {
         val b1 = frictionBody()
         val b2 = frictionBody()
         assertFailsWith<NullPointerException> {
@@ -88,7 +102,7 @@ class UpstreamFrictionJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithNullAnchor() {
+fun createWithNullAnchor() {
         val b1 = frictionBody()
         val b2 = frictionBody()
         assertFailsWith<NullPointerException> {
@@ -96,7 +110,7 @@ class UpstreamFrictionJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithSameBody() {
+fun createWithSameBody() {
         val b1 = frictionBody()
         val b2 = frictionBody()
         assertFailsWith<IllegalArgumentException> {
@@ -104,7 +118,7 @@ class UpstreamFrictionJointModesCoverageTest {
         }
     }
 
-    @Test fun setMaximumTorque() {
+fun setMaximumTorque() {
         val b1 = frictionBody()
         val b2 = frictionBody()
         var fj = FrictionJoint<Body>(b1, b2, Vector2())
@@ -116,7 +130,7 @@ class UpstreamFrictionJointModesCoverageTest {
         assertEquals(2548.0, fj.getMaximumTorque())
     }
 
-    @Test fun setNegativeMaximumTorque() {
+fun setNegativeMaximumTorque() {
         val b1 = frictionBody()
         val b2 = frictionBody()
         assertFailsWith<IllegalArgumentException> {
@@ -125,7 +139,7 @@ class UpstreamFrictionJointModesCoverageTest {
         }
     }
 
-    @Test fun setMaximumForce() {
+fun setMaximumForce() {
         val b1 = frictionBody()
         val b2 = frictionBody()
         var fj = FrictionJoint<Body>(b1, b2, Vector2())
@@ -137,7 +151,7 @@ class UpstreamFrictionJointModesCoverageTest {
         assertEquals(2548.0, fj.getMaximumForce())
     }
 
-    @Test fun setNegativeMaximumForce() {
+fun setNegativeMaximumForce() {
         val b1 = frictionBody()
         val b2 = frictionBody()
         assertFailsWith<IllegalArgumentException> {
@@ -146,7 +160,7 @@ class UpstreamFrictionJointModesCoverageTest {
         }
     }
 
-    @Test fun shift() {
+fun shift() {
         val b1 = frictionBody()
         val b2 = frictionBody()
         var fj = FrictionJoint<Body>(b1, b2, Vector2(1.0, 2.0))
@@ -161,7 +175,7 @@ class UpstreamFrictionJointModesCoverageTest {
         assertEquals(2.0, fj.getAnchor2().y)
     }
 
-    @Test fun copyFailed() {
+fun copyFailed() {
         val b1 = frictionBody()
         val b2 = frictionBody()
         assertFailsWith<ClassCastException> {

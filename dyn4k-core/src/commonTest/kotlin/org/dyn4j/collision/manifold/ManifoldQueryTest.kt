@@ -1,6 +1,6 @@
 package org.dyn4j.collision.manifold
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
 import kotlin.test.assertSame
@@ -10,9 +10,13 @@ import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 
-class ManifoldQueryTest {
-    @Test
-    fun exposedPointsStayLiveAndCopiesAreIndependent() {
+val ManifoldQueryTest by testSuite {
+    test("exposedPointsStayLiveAndCopiesAreIndependent") { ManifoldQueryTestFixture().run { exposedPointsStayLiveAndCopiesAreIndependent() } }
+    test("clippingCircleContactUsesDirectedNormal") { ManifoldQueryTestFixture().run { clippingCircleContactUsesDirectedNormal() } }
+}
+
+private class ManifoldQueryTestFixture  {
+fun exposedPointsStayLiveAndCopiesAreIndependent() {
         val manifold = Manifold()
         val points = manifold.getPoints()
         val normal = manifold.getNormal()
@@ -31,8 +35,7 @@ class ManifoldQueryTest {
         assertEquals(1, copy.getPoints().size)
     }
 
-    @Test
-    fun clippingCircleContactUsesDirectedNormal() {
+fun clippingCircleContactUsesDirectedNormal() {
         val penetration = Penetration()
         penetration.setNormal(Vector2(1.0, 0.0))
         penetration.setDepth(0.5)

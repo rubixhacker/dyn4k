@@ -24,8 +24,8 @@
  */
 package org.dyn4j.coverage.dynamics.body
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -48,6 +48,28 @@ import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 
+val PhysicsBodyCoverageTest by testSuite {
+    test("defaultsAndFixtureOverloads") { PhysicsBodyCoverageTestFixture().run { defaultsAndFixtureOverloads() } }
+    test("fixtureNullOverloadsRejectBeforeMutation") { PhysicsBodyCoverageTestFixture().run { fixtureNullOverloadsRejectBeforeMutation() } }
+    test("appliedForcesAndTorquesAccumulateWithoutChangingInputs") { PhysicsBodyCoverageTestFixture().run { appliedForcesAndTorquesAccumulateWithoutChangingInputs() } }
+    test("forceAndImpulseNullOverloadsReject") { PhysicsBodyCoverageTestFixture().run { forceAndImpulseNullOverloadsReject() } }
+    test("impulsesUseMassAndInertia") { PhysicsBodyCoverageTestFixture().run { impulsesUseMassAndInertia() } }
+    test("clearMethodsRemoveOnlyTheirOwnState") { PhysicsBodyCoverageTestFixture().run { clearMethodsRemoveOnlyTheirOwnState() } }
+    test("velocityDampingGravityAndBulletAreObservable") { PhysicsBodyCoverageTestFixture().run { velocityDampingGravityAndBulletAreObservable() } }
+    test("sweptBoundsAndPreviousTransformTrackTranslation") { PhysicsBodyCoverageTestFixture().run { sweptBoundsAndPreviousTransformTrackTranslation() } }
+    test("orientationChangePreservesDirectionAcrossWraparound") { PhysicsBodyCoverageTestFixture().run { orientationChangePreservesDirectionAcrossWraparound() } }
+    test("massIdentityAndTypeTransitions") { PhysicsBodyCoverageTestFixture().run { massIdentityAndTypeTransitions() } }
+    test("fixtureMassCompositionIgnoresZeroDensity") { PhysicsBodyCoverageTestFixture().run { fixtureMassCompositionIgnoresZeroDensity() } }
+    test("staticKinematicDynamicAndRestStateTransitions") { PhysicsBodyCoverageTestFixture().run { staticKinematicDynamicAndRestStateTransitions() } }
+    test("fixtureViewAndMassAreLiveAcrossRemoval") { PhysicsBodyCoverageTestFixture().run { fixtureViewAndMassAreLiveAcrossRemoval() } }
+    test("sleepThresholdsCallGettersInOrder") { PhysicsBodyCoverageTestFixture().run { sleepThresholdsCallGettersInOrder() } }
+    test("velocityAndPositionIntegrationUseStepAndLimits") { PhysicsBodyCoverageTestFixture().run { velocityAndPositionIntegrationUseStepAndLimits() } }
+    test("localCenterAndPointVelocityUseLiveMassAndVelocity") { PhysicsBodyCoverageTestFixture().run { localCenterAndPointVelocityUseLiveMassAndVelocity() } }
+    test("bodyCopyKeepsStateButReplacesMutableObjects") { PhysicsBodyCoverageTestFixture().run { bodyCopyKeepsStateButReplacesMutableObjects() } }
+    test("bodyCopyDuplicatesProtectedStateAndPendingCollections") { PhysicsBodyCoverageTestFixture().run { bodyCopyDuplicatesProtectedStateAndPendingCollections() } }
+    test("atRestTimeResetsAndDisabledDetectionKeepsBodyAwake") { PhysicsBodyCoverageTestFixture().run { atRestTimeResetsAndDisabledDetectionKeepsBodyAwake() } }
+}
+
 private class BodyCopyProbe : Body {
     constructor() : super()
     private constructor(source: BodyCopyProbe) : super(source)
@@ -66,7 +88,7 @@ private class BodyCopyProbe : Body {
     fun pendingTorques() = torques
 }
 
-class PhysicsBodyCoverageTest {
+private class PhysicsBodyCoverageTestFixture  {
     private fun dynamicBody(): Body = Body().also {
         it.addFixture(Circle(1.0))
         it.setMass(MassType.NORMAL)
@@ -80,8 +102,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(0.0, body.getTorque())
     }
 
-    @Test
-    fun defaultsAndFixtureOverloads() {
+fun defaultsAndFixtureOverloads() {
         val body = Body()
         assertEquals(PhysicsBody.DEFAULT_ANGULAR_DAMPING, body.getAngularDamping())
         assertEquals(PhysicsBody.DEFAULT_LINEAR_DAMPING, body.getLinearDamping())
@@ -119,8 +140,7 @@ class PhysicsBodyCoverageTest {
         Body(3)
     }
 
-    @Test
-    fun fixtureNullOverloadsRejectBeforeMutation() {
+fun fixtureNullOverloadsRejectBeforeMutation() {
         val body = Body()
         assertFailsWith<ArgumentNullException> { body.addFixture(null as org.dyn4j.geometry.Convex?) }
         assertFailsWith<ArgumentNullException> { body.addFixture(null, 0.2) }
@@ -129,8 +149,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(0, body.getFixtureCount())
     }
 
-    @Test
-    fun appliedForcesAndTorquesAccumulateWithoutChangingInputs() {
+fun appliedForcesAndTorquesAccumulateWithoutChangingInputs() {
         val body = dynamicBody()
         val force = Force(Vector2(1.0, 2.0))
         val forceVector = force.getForce()
@@ -214,8 +233,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(0.0, inertTorque.getAccumulatedTorque())
     }
 
-    @Test
-    fun forceAndImpulseNullOverloadsReject() {
+fun forceAndImpulseNullOverloadsReject() {
         val body = Body()
         assertFailsWith<ArgumentNullException> { body.applyForce(null as Force?) }
         assertFailsWith<ArgumentNullException> { body.applyForce(null as Vector2?) }
@@ -227,8 +245,7 @@ class PhysicsBodyCoverageTest {
         assertFailsWith<ArgumentNullException> { body.applyImpulse(Vector2(), null) }
     }
 
-    @Test
-    fun impulsesUseMassAndInertia() {
+fun impulsesUseMassAndInertia() {
         val body = Body()
         body.addFixture(Geometry.createRectangle(1.0, 1.0))
         body.setMass(MassType.NORMAL)
@@ -257,8 +274,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(0.0, inert.getLinearVelocity().y)
     }
 
-    @Test
-    fun clearMethodsRemoveOnlyTheirOwnState() {
+fun clearMethodsRemoveOnlyTheirOwnState() {
         val body = dynamicBody()
         body.applyForce(Vector2(0.0, 1.0))
         body.applyTorque(0.4)
@@ -279,8 +295,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(0.0, body.getAccumulatedTorque())
     }
 
-    @Test
-    fun velocityDampingGravityAndBulletAreObservable() {
+fun velocityDampingGravityAndBulletAreObservable() {
         val body = Body()
         body.setLinearDamping(1.0)
         body.setAngularDamping(2.0)
@@ -313,8 +328,7 @@ class PhysicsBodyCoverageTest {
         assertFalse(body.isBullet())
     }
 
-    @Test
-    fun sweptBoundsAndPreviousTransformTrackTranslation() {
+fun sweptBoundsAndPreviousTransformTrackTranslation() {
         val body = Body()
         body.addFixture(Circle(0.5))
         body.setMass(MassType.INFINITE)
@@ -338,8 +352,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(1.0, body.getChangeInPosition().y)
     }
 
-    @Test
-    fun orientationChangePreservesDirectionAcrossWraparound() {
+fun orientationChangePreservesDirectionAcrossWraparound() {
         val body = Body()
         body.addFixture(Circle(0.5))
         body.rotate(PI / 6.0)
@@ -392,8 +405,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(0.0, Body().getChangeInOrientation())
     }
 
-    @Test
-    fun massIdentityAndTypeTransitions() {
+fun massIdentityAndTypeTransitions() {
         val body = Body()
         assertTrue(body.isStatic())
         body.setMass(MassType.INFINITE)
@@ -430,8 +442,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(0.0, body.getMass().getMass())
     }
 
-    @Test
-    fun fixtureMassCompositionIgnoresZeroDensity() {
+fun fixtureMassCompositionIgnoresZeroDensity() {
         val body = Body()
         val first = body.addFixture(Geometry.createUnitCirclePolygon(5, 0.5))
         val second = body.addFixture(Geometry.createIsoscelesTriangle(1.0, 1.0))
@@ -474,8 +485,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(0.0, body.getMass().getCenter().y)
     }
 
-    @Test
-    fun staticKinematicDynamicAndRestStateTransitions() {
+fun staticKinematicDynamicAndRestStateTransitions() {
         val body = Body()
         assertTrue(body.isStatic())
         body.setLinearVelocity(0.0, 2.0)
@@ -509,8 +519,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(1.2, body.getTorque())
     }
 
-    @Test
-    fun fixtureViewAndMassAreLiveAcrossRemoval() {
+fun fixtureViewAndMassAreLiveAcrossRemoval() {
         val body = Body()
         val fixtures = body.getFixtures()
         val first = body.addFixture(Circle(1.0))
@@ -530,8 +539,7 @@ class PhysicsBodyCoverageTest {
         assertTrue(fixtures.isEmpty())
     }
 
-    @Test
-    fun sleepThresholdsCallGettersInOrder() {
+fun sleepThresholdsCallGettersInOrder() {
         val body = dynamicBody()
         body.setLinearVelocity(10.0, 0.0)
         val calls = StringBuilder()
@@ -556,8 +564,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(-1.0, body.updateAtRestTime(TimeStep(0.1), Settings()))
     }
 
-    @Test
-    fun velocityAndPositionIntegrationUseStepAndLimits() {
+fun velocityAndPositionIntegrationUseStepAndLimits() {
         val body = Body()
         body.addFixture(Circle(0.5))
         body.setMass(MassType.NORMAL)
@@ -606,8 +613,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(0.0, infiniteMass.getTransform().getRotationAngle())
     }
 
-    @Test
-    fun localCenterAndPointVelocityUseLiveMassAndVelocity() {
+fun localCenterAndPointVelocityUseLiveMassAndVelocity() {
         val body = Body()
         assertEquals(0.0, body.getLocalCenter().x)
         assertEquals(0.0, body.getLocalCenter().y)
@@ -632,8 +638,7 @@ class PhysicsBodyCoverageTest {
         assertTrue(body.toString().isNotEmpty())
     }
 
-    @Test
-    fun bodyCopyKeepsStateButReplacesMutableObjects() {
+fun bodyCopyKeepsStateButReplacesMutableObjects() {
         val body = dynamicBody()
         val originalFixture = body.getFixture(0)
         val appliedForce = Force(2.0, 3.0)
@@ -690,8 +695,7 @@ class PhysicsBodyCoverageTest {
         assertEquals(BodyFixture.DEFAULT_FRICTION, originalFixture.getFriction())
     }
 
-    @Test
-    fun bodyCopyDuplicatesProtectedStateAndPendingCollections() {
+fun bodyCopyDuplicatesProtectedStateAndPendingCollections() {
         val body = BodyCopyProbe()
         body.addFixture(Circle(1.0))
         body.setMass(MassType.NORMAL)
@@ -780,8 +784,7 @@ class PhysicsBodyCoverageTest {
         assertTrue(sleepingCopy.isAtRest())
     }
 
-    @Test
-    fun atRestTimeResetsAndDisabledDetectionKeepsBodyAwake() {
+fun atRestTimeResetsAndDisabledDetectionKeepsBodyAwake() {
         val body = dynamicBody()
         val step = TimeStep(0.1)
         val settings = Settings()

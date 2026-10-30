@@ -25,14 +25,21 @@
 
 package org.dyn4j.geometry.simplify
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.geometry.simplify.SegmentTreeLeaf
 import org.dyn4j.geometry.simplify.SegmentTreeNode
 import org.dyn4j.geometry.simplify.SimplePolygonVertex
 import kotlin.test.*
 
-class UpstreamSimplificationSupportCoverageTest {
-    @Test fun SegmentTreeTest_createLeaf() {
+val UpstreamSimplificationSupportCoverageTest by testSuite {
+    test("SegmentTreeTest_createLeaf") { UpstreamSimplificationSupportCoverageTestFixture().run { SegmentTreeTest_createLeaf() } }
+    test("SegmentTreeTest_createNode") { UpstreamSimplificationSupportCoverageTestFixture().run { SegmentTreeTest_createNode() } }
+    test("SimplePolygonVertexTest_create") { UpstreamSimplificationSupportCoverageTestFixture().run { SimplePolygonVertexTest_create() } }
+}
+
+private class UpstreamSimplificationSupportCoverageTestFixture  {
+fun SegmentTreeTest_createLeaf() {
         val first = Vector2(1.0, 2.0)
         val second = Vector2(3.0, 4.0)
         val leaf = SegmentTreeLeaf(first, second, 6, 8)
@@ -48,7 +55,7 @@ class UpstreamSimplificationSupportCoverageTest {
         assertNotNull(leaf.toString())
     }
 
-    @Test fun SegmentTreeTest_createNode() {
+fun SegmentTreeTest_createNode() {
         val node = SegmentTreeNode()
         assertNotNull(node.aabb)
         assertEquals(0, node.height)
@@ -58,7 +65,7 @@ class UpstreamSimplificationSupportCoverageTest {
         assertNotNull(node.toString())
     }
 
-    @Test fun SimplePolygonVertexTest_create() {
+fun SimplePolygonVertexTest_create() {
         val point = Vector2(1.0, 2.0)
         val vertex = SimplePolygonVertex(2, point)
         assertSame(point, vertex.point)

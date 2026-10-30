@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.collision.shapes.b
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.collision.manifold.ClippingManifoldSolver
 import org.dyn4j.collision.manifold.Manifold
 import org.dyn4j.collision.manifold.ManifoldPoint
@@ -34,30 +35,33 @@ import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.geometry.Rectangle
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
-import kotlin.test.BeforeTest
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
+val RectangleRectangleTest by testSuite {
+    test("detectSat") { RectangleRectangleTestFixture().apply { setup() }.run { detectSat() } }
+    test("detectGjk") { RectangleRectangleTestFixture().apply { setup() }.run { detectGjk() } }
+    test("gjkDistance") { RectangleRectangleTestFixture().apply { setup() }.run { gjkDistance() } }
+    test("getClipManifold") { RectangleRectangleTestFixture().apply { setup() }.run { getClipManifold() } }
+}
 
 
 
-class RectangleRectangleTest : AbstractNarrowphaseShapeTest() {
+
+private class RectangleRectangleTestFixture : AbstractNarrowphaseShapeTest()  {
 
     private lateinit var rect1: Rectangle
 
     private lateinit var rect2: Rectangle
 
-    @BeforeTest
     fun setup() {
         this.rect1 = Rectangle(1.0, 1.0)
         this.rect2 = Rectangle(0.5, 0.5)
     }
 
-    @Test
-    fun detectSat() {
+fun detectSat() {
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
@@ -112,8 +116,7 @@ class RectangleRectangleTest : AbstractNarrowphaseShapeTest() {
         assertFalse(this.sat.detect(rect2, t2, rect1, t1))
     }
 
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
@@ -168,8 +171,7 @@ class RectangleRectangleTest : AbstractNarrowphaseShapeTest() {
         assertFalse(this.gjk.detect(rect2, t2, rect1, t1))
     }
 
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         val s = Separation()
 
         val t1 = Transform()
@@ -254,8 +256,7 @@ class RectangleRectangleTest : AbstractNarrowphaseShapeTest() {
         assertClose(0.300, p2.y, 1.0e-3)
     }
 
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         val m = Manifold()
         val p = Penetration()
 

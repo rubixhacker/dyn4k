@@ -24,7 +24,7 @@
  */
 package org.dyn4j.coverage.world.support
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -51,7 +51,36 @@ import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.ConstraintGraph
 
-class ConstraintGraphCoverageTest {
+val ConstraintGraphCoverageTest by testSuite {
+    test("create") { ConstraintGraphCoverageTestFixture().run { create() } }
+    test("addBody") { ConstraintGraphCoverageTestFixture().run { addBody() } }
+    test("addContactConstraint") { ConstraintGraphCoverageTestFixture().run { addContactConstraint() } }
+    test("addContactConstraintBodiesNotAdded") { ConstraintGraphCoverageTestFixture().run { addContactConstraintBodiesNotAdded() } }
+    test("addJoint") { ConstraintGraphCoverageTestFixture().run { addJoint() } }
+    test("addJointBodiesNotAdded") { ConstraintGraphCoverageTestFixture().run { addJointBodiesNotAdded() } }
+    test("savedNodeViewIteratorsFailFastAfterStructuralMutation") { ConstraintGraphCoverageTestFixture().run { savedNodeViewIteratorsFailFastAfterStructuralMutation() } }
+    test("removeAllContactConstraints") { ConstraintGraphCoverageTestFixture().run { removeAllContactConstraints() } }
+    test("removeAllJoints") { ConstraintGraphCoverageTestFixture().run { removeAllJoints() } }
+    test("removeBody") { ConstraintGraphCoverageTestFixture().run { removeBody() } }
+    test("clear") { ConstraintGraphCoverageTestFixture().run { clear() } }
+    test("removeJoint") { ConstraintGraphCoverageTestFixture().run { removeJoint() } }
+    test("removeContactConstraint") { ConstraintGraphCoverageTestFixture().run { removeContactConstraint() } }
+    test("size") { ConstraintGraphCoverageTestFixture().run { size() } }
+    test("isJoined") { ConstraintGraphCoverageTestFixture().run { isJoined() } }
+    test("isJointCollisionAllowed") { ConstraintGraphCoverageTestFixture().run { isJointCollisionAllowed() } }
+    test("getJoinedBodies") { ConstraintGraphCoverageTestFixture().run { getJoinedBodies() } }
+    test("getJointsForBody") { ConstraintGraphCoverageTestFixture().run { getJointsForBody() } }
+    test("getInContactBodies") { ConstraintGraphCoverageTestFixture().run { getInContactBodies() } }
+    test("getContacts") { ConstraintGraphCoverageTestFixture().run { getContacts() } }
+    test("isInContact") { ConstraintGraphCoverageTestFixture().run { isInContact() } }
+    test("getJoinedBodiesMulti") { ConstraintGraphCoverageTestFixture().run { getJoinedBodiesMulti() } }
+    test("getInContactBodiesMulti") { ConstraintGraphCoverageTestFixture().run { getInContactBodiesMulti() } }
+    test("multiCollision") { ConstraintGraphCoverageTestFixture().run { multiCollision() } }
+    test("testRemoveBodyWithUnaryJoint") { ConstraintGraphCoverageTestFixture().run { testRemoveBodyWithUnaryJoint() } }
+    test("removeBodyWithQuadrupleJoint") { ConstraintGraphCoverageTestFixture().run { removeBodyWithQuadrupleJoint() } }
+}
+
+private class ConstraintGraphCoverageTestFixture  {
     private fun body(): Body = Body().also {
         it.addFixture(Geometry.createCircle(0.5)); it.setMass(MassType.NORMAL)
     }
@@ -90,14 +119,14 @@ class ConstraintGraphCoverageTest {
         assertSame(expected, actual[0])
     }
 
-    @Test fun create() {
+fun create() {
         for (graph in listOf(ConstraintGraph<Body>(), ConstraintGraph(10, 5),
             ConstraintGraph(-1, 5), ConstraintGraph(0, 5), ConstraintGraph(5, -5), ConstraintGraph(10, 0))) {
             assertEquals(0, graph.size())
         }
     }
 
-    @Test fun addBody() {
+fun addBody() {
         val graph = ConstraintGraph<Body>(); val body = body()
         graph.addBody(body)
         val node = assertNotNull(graph.getNode(body))
@@ -109,7 +138,7 @@ class ConstraintGraphCoverageTest {
         assertEquals(1, graph.size())
     }
 
-    @Test fun addContactConstraint() {
+fun addContactConstraint() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         graph.addBody(a); graph.addBody(b)
         val contact = constraint(a, b); graph.addContactConstraint(contact)
@@ -119,7 +148,7 @@ class ConstraintGraphCoverageTest {
         assertFalse(graph.containsContactConstraint(constraint(a, b)))
     }
 
-    @Test fun addContactConstraintBodiesNotAdded() {
+fun addContactConstraintBodiesNotAdded() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         val contact = constraint(a, b); graph.addContactConstraint(contact)
         assertEquals(2, graph.size())
@@ -128,7 +157,7 @@ class ConstraintGraphCoverageTest {
         assertSame(contact, graph.getNode(b)!!.getContactConstraints().single())
     }
 
-    @Test fun addJoint() {
+fun addJoint() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         graph.addBody(a); graph.addBody(b)
         val joint = AngleJoint(a, b); graph.addJoint(joint)
@@ -138,7 +167,7 @@ class ConstraintGraphCoverageTest {
         assertFalse(graph.containsJoint(AngleJoint(a, b)))
     }
 
-    @Test fun addJointBodiesNotAdded() {
+fun addJointBodiesNotAdded() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         val joint = AngleJoint(a, b); graph.addJoint(joint)
         assertEquals(2, graph.size())
@@ -147,7 +176,7 @@ class ConstraintGraphCoverageTest {
         assertTrue(graph.isJoined(a, b)); assertFalse(graph.containsJoint(AngleJoint(a, b)))
     }
 
-    @Test fun savedNodeViewIteratorsFailFastAfterStructuralMutation() {
+fun savedNodeViewIteratorsFailFastAfterStructuralMutation() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         graph.addContactConstraint(constraint(a, b))
         graph.addJoint(AngleJoint(a, b))
@@ -168,7 +197,7 @@ class ConstraintGraphCoverageTest {
             "contact=$contactFailure, joint=$jointFailure")
     }
 
-    @Test fun removeAllContactConstraints() {
+fun removeAllContactConstraints() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         val first = constraint(a, b); val second = constraint(a, b)
         graph.addContactConstraint(first); graph.addContactConstraint(second)
@@ -182,7 +211,7 @@ class ConstraintGraphCoverageTest {
         assertTrue(graph.containsBody(a)); assertTrue(graph.containsBody(b))
     }
 
-    @Test fun removeAllJoints() {
+fun removeAllJoints() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         val first = AngleJoint(a, b); val second = AngleJoint(a, b)
         graph.addJoint(first); graph.addJoint(second)
@@ -195,7 +224,7 @@ class ConstraintGraphCoverageTest {
         assertFalse(graph.containsJoint(second)); assertTrue(graph.containsBody(a)); assertTrue(graph.containsBody(b))
     }
 
-    @Test fun removeBody() {
+fun removeBody() {
         val t = triangle()
         val nodeA = assertNotNull(t.graph.getNode(t.a))
         val nodeB = assertNotNull(t.graph.getNode(t.b))
@@ -241,7 +270,7 @@ class ConstraintGraphCoverageTest {
         assertTrue(t.graph.isInContact(t.b, t.c)); assertTrue(t.graph.isJoined(t.b, t.c))
     }
 
-    @Test fun clear() {
+fun clear() {
         val t = triangle()
         assertEquals(3, t.graph.size())
         val nodeA = assertNotNull(t.graph.getNode(t.a))
@@ -274,7 +303,7 @@ class ConstraintGraphCoverageTest {
         assertFalse(t.graph.containsJoint(t.jbc))
     }
 
-    @Test fun removeJoint() {
+fun removeJoint() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         val first = AngleJoint(a, b); val second = AngleJoint(a, b)
         graph.addJoint(first); graph.addJoint(second)
@@ -285,7 +314,7 @@ class ConstraintGraphCoverageTest {
         assertTrue(graph.containsBody(a)); assertTrue(graph.containsBody(b))
     }
 
-    @Test fun removeContactConstraint() {
+fun removeContactConstraint() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         val first = constraint(a, b); val second = constraint(a, b)
         graph.addContactConstraint(first); graph.addContactConstraint(second)
@@ -296,7 +325,7 @@ class ConstraintGraphCoverageTest {
         assertEquals(listOf(second), graph.getContacts(b))
     }
 
-    @Test fun size() {
+fun size() {
         val t = triangle()
         assertEquals(3, t.graph.size())
         t.graph.removeBody(t.a)
@@ -308,7 +337,7 @@ class ConstraintGraphCoverageTest {
         t.graph.clear(); assertEquals(0, t.graph.size())
     }
 
-    @Test fun isJoined() {
+fun isJoined() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body(); val c = body()
         graph.addBody(a); graph.addBody(b); graph.addBody(c)
         assertFalse(graph.isJoined(a, null)); assertFalse(graph.isJoined(a, b))
@@ -316,7 +345,7 @@ class ConstraintGraphCoverageTest {
         assertFalse(graph.isJoined(a, c)); assertTrue(graph.isJoined(a, b))
     }
 
-    @Test fun isJointCollisionAllowed() {
+fun isJointCollisionAllowed() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         graph.addBody(a); graph.addBody(b)
         val first = AngleJoint(a, b); val second = AngleJoint(a, b)
@@ -333,7 +362,7 @@ class ConstraintGraphCoverageTest {
         assertTrue(graph.isJointCollisionAllowed(c, a))
     }
 
-    @Test fun getJoinedBodies() {
+fun getJoinedBodies() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         graph.addBody(a); graph.addBody(b)
         assertTrue(graph.getJoinedBodies(a).isEmpty())
@@ -341,7 +370,7 @@ class ConstraintGraphCoverageTest {
         assertSame(b, graph.getJoinedBodies(a).single())
     }
 
-    @Test fun getJointsForBody() {
+fun getJointsForBody() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         graph.addBody(a); graph.addBody(b)
         val view = graph.getJoints(a)
@@ -360,7 +389,7 @@ class ConstraintGraphCoverageTest {
         override fun end(contact: Contact) {}
     }
 
-    @Test fun getInContactBodies() {
+fun getInContactBodies() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         graph.addBody(a); graph.addBody(b)
         assertTrue(graph.getInContactBodies(a, false).isEmpty())
@@ -373,7 +402,7 @@ class ConstraintGraphCoverageTest {
         assertSame(b, graph.getInContactBodies(a, true).single())
     }
 
-    @Test fun getContacts() {
+fun getContacts() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         graph.addBody(a); graph.addBody(b)
         val view = graph.getContacts(a)
@@ -383,7 +412,7 @@ class ConstraintGraphCoverageTest {
         assertTrue(graph.getContacts(null).isEmpty())
     }
 
-    @Test fun isInContact() {
+fun isInContact() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         graph.addBody(a); graph.addBody(b)
         assertFalse(graph.isInContact(a, b))
@@ -391,13 +420,13 @@ class ConstraintGraphCoverageTest {
         assertTrue(graph.isInContact(a, b))
     }
 
-    @Test fun getJoinedBodiesMulti() {
+fun getJoinedBodiesMulti() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         graph.addJoint(AngleJoint(a, b)); graph.addJoint(AngleJoint(a, b))
         assertEquals(listOf(b), graph.getJoinedBodies(a))
     }
 
-    @Test fun getInContactBodiesMulti() {
+fun getInContactBodiesMulti() {
         val graph = ConstraintGraph<Body>(); val a = body(); val b = body()
         val extra = b.addFixture(Geometry.createCircle(0.25))
         graph.addContactConstraint(constraint(a, b))
@@ -414,7 +443,7 @@ class ConstraintGraphCoverageTest {
         }
     }
 
-    @Test fun multiCollision() {
+fun multiCollision() {
         val graph = ConstraintGraph<Body>()
         val bodies = List(4) { CountingBody().also { it.addFixture(Geometry.createCircle(0.5)); it.setMass(MassType.NORMAL) } }
         bodies.forEach(graph::addBody)
@@ -426,7 +455,7 @@ class ConstraintGraphCoverageTest {
         bodies.forEach { assertEquals(1, it.integrations) }
     }
 
-    @Test fun testRemoveBodyWithUnaryJoint() {
+fun testRemoveBodyWithUnaryJoint() {
         val graph = ConstraintGraph<Body>(); val body = body()
         graph.addBody(body)
         val joint = PinJoint(body, body.getWorldCenter()); graph.addJoint(joint)
@@ -445,7 +474,7 @@ class ConstraintGraphCoverageTest {
         override fun copy(): FourBodyJoint = FourBodyJoint(getBodies().toList())
     }
 
-    @Test fun removeBodyWithQuadrupleJoint() {
+fun removeBodyWithQuadrupleJoint() {
         val graph = ConstraintGraph<Body>()
         val bodies = List(4) { body().also(graph::addBody) }
         val joint = FourBodyJoint(bodies)

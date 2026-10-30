@@ -1,6 +1,6 @@
 package org.dyn4j.dynamics.contact
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
@@ -21,9 +21,16 @@ import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
-class ContactConsumerJourneyTest {
-    @Test
-    fun subclassedSolverReceivesWarmStartDispatch() {
+val ContactConsumerJourneyTest by testSuite {
+    test("subclassedSolverReceivesWarmStartDispatch") { ContactConsumerJourneyTestFixture().run { subclassedSolverReceivesWarmStartDispatch() } }
+    test("twoBodiesExchangeAnImpulseThroughThePublicSolver") { ContactConsumerJourneyTestFixture().run { twoBodiesExchangeAnImpulseThroughThePublicSolver() } }
+    test("callbackCanChangeConstraintStateBeforeUpdateReturns") { ContactConsumerJourneyTestFixture().run { callbackCanChangeConstraintStateBeforeUpdateReturns() } }
+    test("timeOfImpactSolverMovesOnlyTheFiniteMassBody") { ContactConsumerJourneyTestFixture().run { timeOfImpactSolverMovesOnlyTheFiniteMassBody() } }
+    test("pairLookupUsesBodyIdentityEvenWhenEqualityIsOverridden") { ContactConsumerJourneyTestFixture().run { pairLookupUsesBodyIdentityEvenWhenEqualityIsOverridden() } }
+}
+
+private class ContactConsumerJourneyTestFixture  {
+fun subclassedSolverReceivesWarmStartDispatch() {
         val solver = object : SequentialImpulses<Body>() {
             var calls = 0
 
@@ -37,8 +44,7 @@ class ContactConsumerJourneyTest {
         assertEquals(1, solver.calls)
     }
 
-    @Test
-    fun twoBodiesExchangeAnImpulseThroughThePublicSolver() {
+fun twoBodiesExchangeAnImpulseThroughThePublicSolver() {
         val first = Body()
         val second = Body()
         val fixture1 = first.addFixture(Circle(0.5))
@@ -75,8 +81,7 @@ class ContactConsumerJourneyTest {
         assertEquals(true, constraint.getContacts().single().isSolved())
     }
 
-    @Test
-    fun callbackCanChangeConstraintStateBeforeUpdateReturns() {
+fun callbackCanChangeConstraintStateBeforeUpdateReturns() {
         val first = Body()
         val second = Body()
         val fixture1 = first.addFixture(Circle(0.5))
@@ -121,8 +126,7 @@ class ContactConsumerJourneyTest {
         assertTrue(liveContacts.isEmpty())
     }
 
-    @Test
-    fun timeOfImpactSolverMovesOnlyTheFiniteMassBody() {
+fun timeOfImpactSolverMovesOnlyTheFiniteMassBody() {
         val first = Body()
         val second = Body()
         first.addFixture(Circle(1.0))
@@ -140,8 +144,7 @@ class ContactConsumerJourneyTest {
         assertEquals(2.5, second.getTransform().getTranslationX())
     }
 
-    @Test
-    fun pairLookupUsesBodyIdentityEvenWhenEqualityIsOverridden() {
+fun pairLookupUsesBodyIdentityEvenWhenEqualityIsOverridden() {
         val first = object : Body() {
             override fun equals(other: Any?) = other is Body
             override fun hashCode() = 1

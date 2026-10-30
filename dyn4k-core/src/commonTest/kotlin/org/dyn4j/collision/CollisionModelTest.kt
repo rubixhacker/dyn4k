@@ -1,6 +1,6 @@
 package org.dyn4j.collision
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertFalse
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -16,13 +16,38 @@ import org.dyn4j.Unsafe
 import org.dyn4j.exception.ArgumentNullException
 import org.dyn4j.exception.CopyException
 
-class CollisionModelTest {
+val CollisionModelTest by testSuite {
+    test("typeFilterChecksBothDirectionsOfSubclassHierarchy") { CollisionModelTestFixture().run { typeFilterChecksBothDirectionsOfSubclassHierarchy() } }
+    test("filtersAndFixtureCopyPreserveBaselineBehavior") { CollisionModelTestFixture().run { filtersAndFixtureCopyPreserveBaselineBehavior() } }
+    test("nullableShapeOverrideReceivesNullThroughCollisionBody") { CollisionModelTestFixture().run { nullableShapeOverrideReceivesNullThroughCollisionBody() } }
+    test("nullPointFailsWhenAFixtureUsesItsShape") { CollisionModelTestFixture().run { nullPointFailsWhenAFixtureUsesItsShape() } }
+    test("fixtureViewsAndIteratorStayLive") { CollisionModelTestFixture().run { fixtureViewsAndIteratorStayLive() } }
+    test("boundsAndPairsUseLiveObjects") { CollisionModelTestFixture().run { boundsAndPairsUseLiveObjects() } }
+    test("collisionEstimatesAndUnitConversionsMatchBaseline") { CollisionModelTestFixture().run { collisionEstimatesAndUnitConversionsMatchBaseline() } }
+    test("failuresPreservePublicBehavior") { CollisionModelTestFixture().run { failuresPreservePublicBehavior() } }
+    test("copyExceptionFromNamesPreservesMessage") { CollisionModelTestFixture().run { copyExceptionFromNamesPreservesMessage() } }
+    test("nullFirstPairThrowsDuringEquality") { CollisionModelTestFixture().run { nullFirstPairThrowsDuringEquality() } }
+    test("nullCollisionItemCanBeCopied") { CollisionModelTestFixture().run { nullCollisionItemCanBeCopied() } }
+    test("bodyCopyUsesOverriddenFixtureGetter") { CollisionModelTestFixture().run { bodyCopyUsesOverriddenFixtureGetter() } }
+    test("fixtureViewIteratorFailsAfterBodyMutation") { CollisionModelTestFixture().run { fixtureViewIteratorFailsAfterBodyMutation() } }
+    test("protectedFixtureIteratorFailsAfterBodyMutation") { CollisionModelTestFixture().run { protectedFixtureIteratorFailsAfterBodyMutation() } }
+    test("fixtureViewSubListFailsAfterBodyMutation") { CollisionModelTestFixture().run { fixtureViewSubListFailsAfterBodyMutation() } }
+    test("protectedFixtureSubListFailsAfterBodyMutation") { CollisionModelTestFixture().run { protectedFixtureSubListFailsAfterBodyMutation() } }
+    test("nestedViewAndProtectedSubListIteratorsFailAfterMutation") { CollisionModelTestFixture().run { nestedViewAndProtectedSubListIteratorsFailAfterMutation() } }
+    test("protectedSubListMutationsRemainLiveAndInvalidateIterators") { CollisionModelTestFixture().run { protectedSubListMutationsRemainLiveAndInvalidateIterators() } }
+    test("nullPointOperationsOnEmptyBodyReturnEmptyResults") { CollisionModelTestFixture().run { nullPointOperationsOnEmptyBodyReturnEmptyResults() } }
+    test("collisionItemEqualityCallsOtherGettersFirst") { CollisionModelTestFixture().run { collisionItemEqualityCallsOtherGettersFirst() } }
+    test("emptyBodyDefersNullCenterAndTransformChecks") { CollisionModelTestFixture().run { emptyBodyDefersNullCenterAndTransformChecks() } }
+    test("pairHashCallsEarlierObjectBeforeNullFailure") { CollisionModelTestFixture().run { pairHashCallsEarlierObjectBeforeNullFailure() } }
+    test("fixtureCallbacksKeepInitialTraversalExtent") { CollisionModelTestFixture().run { fixtureCallbacksKeepInitialTraversalExtent() } }
+}
+
+private class CollisionModelTestFixture  {
     private open class RootFilter : TypeFilter()
     private class ChildFilter : RootFilter()
     private class OtherFilter : TypeFilter()
 
-    @Test
-    fun typeFilterChecksBothDirectionsOfSubclassHierarchy() {
+fun typeFilterChecksBothDirectionsOfSubclassHierarchy() {
         val parent = RootFilter()
         val child = ChildFilter()
         assertTrue(parent.isAllowed(child))
@@ -32,8 +57,7 @@ class CollisionModelTest {
         assertSame(child, child.copy())
     }
 
-    @Test
-    fun filtersAndFixtureCopyPreserveBaselineBehavior() {
+fun filtersAndFixtureCopyPreserveBaselineBehavior() {
         val first = CategoryFilter(1, 2)
         val second = CategoryFilter(2, 1)
         val blocked = CategoryFilter(4, 1)
@@ -74,8 +98,7 @@ class CollisionModelTest {
         override fun copy() = NullableShapeBody()
     }
 
-    @Test
-    fun nullableShapeOverrideReceivesNullThroughCollisionBody() {
+fun nullableShapeOverrideReceivesNullThroughCollisionBody() {
         val body: CollisionBody<Fixture> = NullableShapeBody()
         val failure = assertFailsWith<ArgumentNullException> { body.addFixture(null as Convex?) }
         assertEquals("convex cannot be null", failure.message)
@@ -85,8 +108,7 @@ class CollisionModelTest {
         assertSame(fixture, body.getFixture(0))
     }
 
-    @Test
-    fun nullPointFailsWhenAFixtureUsesItsShape() {
+fun nullPointFailsWhenAFixtureUsesItsShape() {
         val empty = TestBody()
         assertEquals(null, empty.getFixture(null))
         assertTrue(empty.getFixtures(null).isEmpty())
@@ -120,8 +142,7 @@ class CollisionModelTest {
         assertSame(fixture, body.getFixture(0))
     }
 
-    @Test
-    fun fixtureViewsAndIteratorStayLive() {
+fun fixtureViewsAndIteratorStayLive() {
         val body = TestBody()
         val events = mutableListOf<String>()
         body.setFixtureModificationHandler(object : FixtureModificationHandler<Fixture> {
@@ -144,8 +165,7 @@ class CollisionModelTest {
         assertEquals(null, copy.getFixtureModificationHandler())
     }
 
-    @Test
-    fun boundsAndPairsUseLiveObjects() {
+fun boundsAndPairsUseLiveObjects() {
         val bounds = AxisAlignedBounds(4.0, 4.0)
         assertTrue(bounds.isOutside(org.dyn4j.geometry.AABB(3.0, 3.0, 4.0, 4.0)))
         bounds.translate(3.0, 3.0)
@@ -155,8 +175,7 @@ class CollisionModelTest {
         assertSame(first.getFirst(), first.copy().getFirst())
     }
 
-    @Test
-    fun collisionEstimatesAndUnitConversionsMatchBaseline() {
+fun collisionEstimatesAndUnitConversionsMatchBaseline() {
         assertEquals(20, Collisions.getEstimatedCollisionPairs(5))
         assertEquals(1, Collisions.getEstimatedRaycastCollisions(20))
         assertEquals(0.3048, UnitConversion.feetToMeters(1.0), 1.0e-12)
@@ -165,8 +184,7 @@ class CollisionModelTest {
 
     private class BadFixture : Fixture(Circle(1.0))
 
-    @Test
-    fun failuresPreservePublicBehavior() {
+fun failuresPreservePublicBehavior() {
         assertFailsWith<org.dyn4j.exception.ArgumentNullException> { Fixture(null) }
         assertFailsWith<org.dyn4j.exception.ArgumentNullException> { Fixture(Circle(1.0)).setFilter(null) }
         assertFailsWith<org.dyn4j.exception.ValueOutOfRangeException> { AxisAlignedBounds(0.0, 2.0) }
@@ -175,8 +193,7 @@ class CollisionModelTest {
         assertFailsWith<IndexOutOfBoundsException> { iterator.next() }
     }
 
-    @Test
-    fun copyExceptionFromNamesPreservesMessage() {
+fun copyExceptionFromNamesPreservesMessage() {
         val exception = CopyException("Source", "Copy")
         assertEquals(
             "The copy method on class 'Source' returns an object of class 'Copy'. " +
@@ -185,23 +202,20 @@ class CollisionModelTest {
         )
     }
 
-    @Test
-    fun nullFirstPairThrowsDuringEquality() {
+fun nullFirstPairThrowsDuringEquality() {
         val first = BasicCollisionPair<Any?>(null, "x")
         val second = BasicCollisionPair<Any?>(null, "x")
         assertFailsWith<NullPointerException> { first == second }
     }
 
-    @Test
-    fun nullCollisionItemCanBeCopied() {
+fun nullCollisionItemCanBeCopied() {
         val item = BasicCollisionItem<TestBody, Fixture>(null, null)
         assertSame(null, item.getBody())
         assertSame(null, item.getFixture())
         assertSame(null, item.copy().getBody())
     }
 
-    @Test
-    fun bodyCopyUsesOverriddenFixtureGetter() {
+fun bodyCopyUsesOverriddenFixtureGetter() {
         val replacement = Fixture(Circle(2.0))
         class SubstitutingBody : AbstractCollisionBody<Fixture> {
             constructor() : super()
@@ -217,8 +231,7 @@ class CollisionModelTest {
         assertEquals(2.0, copy.getFixtures()[0].getShape().getRadius(Vector2()))
     }
 
-    @Test
-    fun fixtureViewIteratorFailsAfterBodyMutation() {
+fun fixtureViewIteratorFailsAfterBodyMutation() {
         val body = TestBody()
         body.addFixture(Circle(1.0))
         val iterator = body.getFixtures().iterator()
@@ -233,8 +246,7 @@ class CollisionModelTest {
         assertFailsWith<ConcurrentModificationException> { emptyIterator.next() }
     }
 
-    @Test
-    fun protectedFixtureIteratorFailsAfterBodyMutation() {
+fun protectedFixtureIteratorFailsAfterBodyMutation() {
         val body = TestBody()
         body.addFixture(Circle(1.0))
         val iterator = body.protectedIterator()
@@ -242,8 +254,7 @@ class CollisionModelTest {
         assertFailsWith<ConcurrentModificationException> { iterator.next() }
     }
 
-    @Test
-    fun fixtureViewSubListFailsAfterBodyMutation() {
+fun fixtureViewSubListFailsAfterBodyMutation() {
         val body = TestBody()
         body.addFixture(Circle(1.0))
         val subList = body.getFixtures().subList(0, 1)
@@ -251,8 +262,7 @@ class CollisionModelTest {
         assertFailsWith<ConcurrentModificationException> { subList[0] }
     }
 
-    @Test
-    fun protectedFixtureSubListFailsAfterBodyMutation() {
+fun protectedFixtureSubListFailsAfterBodyMutation() {
         val body = TestBody()
         body.addFixture(Circle(1.0))
         val subList = body.protectedSubList()
@@ -260,8 +270,7 @@ class CollisionModelTest {
         assertFailsWith<ConcurrentModificationException> { subList[0] }
     }
 
-    @Test
-    fun nestedViewAndProtectedSubListIteratorsFailAfterMutation() {
+fun nestedViewAndProtectedSubListIteratorsFailAfterMutation() {
         val body = TestBody()
         body.addFixture(Circle(1.0))
         val nested = body.getFixtures().subList(0, 1).subList(0, 1)
@@ -271,8 +280,7 @@ class CollisionModelTest {
         assertFailsWith<ConcurrentModificationException> { protectedIterator.next() }
     }
 
-    @Test
-    fun protectedSubListMutationsRemainLiveAndInvalidateIterators() {
+fun protectedSubListMutationsRemainLiveAndInvalidateIterators() {
         val body = TestBody()
         body.addFixture(Circle(1.0))
         val subList = body.protectedSubList()
@@ -286,8 +294,7 @@ class CollisionModelTest {
         assertSame(added, body.getFixtures().single())
     }
 
-    @Test
-    fun nullPointOperationsOnEmptyBodyReturnEmptyResults() {
+fun nullPointOperationsOnEmptyBodyReturnEmptyResults() {
         val body = TestBody()
         assertEquals(null, body.getFixture(null))
         assertTrue(body.getFixtures(null).isEmpty())
@@ -296,8 +303,7 @@ class CollisionModelTest {
         assertFalse(body.contains(null))
     }
 
-    @Test
-    fun collisionItemEqualityCallsOtherGettersFirst() {
+fun collisionItemEqualityCallsOtherGettersFirst() {
         val calls = StringBuilder()
         class ObservedItem(private val tag: String) : CollisionItem<TestBody, Fixture> {
             override fun getBody(): TestBody? { calls.append(tag).append("body,"); return null }
@@ -308,8 +314,7 @@ class CollisionModelTest {
         assertEquals("Bbody,Abody,Bfixture,Afixture,", calls.toString())
     }
 
-    @Test
-    fun emptyBodyDefersNullCenterAndTransformChecks() {
+fun emptyBodyDefersNullCenterAndTransformChecks() {
         val body = TestBody()
         assertEquals(0.0, body.updateRadiusWith(null))
         assertEquals(AABB(0.0, 0.0, 0.0, 0.0), body.createAABB(null))
@@ -318,8 +323,7 @@ class CollisionModelTest {
         assertEquals(AABB(0.0, 0.0, 0.0, 0.0), result)
     }
 
-    @Test
-    fun pairHashCallsEarlierObjectBeforeNullFailure() {
+fun pairHashCallsEarlierObjectBeforeNullFailure() {
         class HashToken(private val calls: StringBuilder) {
             override fun hashCode(): Int { calls.append("first,"); return 7 }
         }
@@ -335,8 +339,7 @@ class CollisionModelTest {
         assertEquals("first,", pairCalls.toString())
     }
 
-    @Test
-    fun fixtureCallbacksKeepInitialTraversalExtent() {
+fun fixtureCallbacksKeepInitialTraversalExtent() {
         class MutatingFixture(private val body: TestBody) : Fixture(Circle(1.0)) {
             private var added = false
             override fun getShape(): Convex {

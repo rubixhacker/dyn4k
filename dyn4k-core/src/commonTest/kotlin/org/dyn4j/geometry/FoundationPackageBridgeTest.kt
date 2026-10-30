@@ -1,13 +1,17 @@
 package org.dyn4j.geometry
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 
-class FoundationPackageBridgeTest {
-    @Test
-    fun rotationHelpersKeepIdentityAndReturnIndependentCopies() {
+val FoundationPackageBridgeTest by testSuite {
+    test("rotationHelpersKeepIdentityAndReturnIndependentCopies") { FoundationPackageBridgeTestFixture().run { rotationHelpersKeepIdentityAndReturnIndependentCopies() } }
+    test("componentRotationsAndAxisConstantsMatchBaseline") { FoundationPackageBridgeTestFixture().run { componentRotationsAndAxisConstantsMatchBaseline() } }
+}
+
+private class FoundationPackageBridgeTestFixture  {
+fun rotationHelpersKeepIdentityAndReturnIndependentCopies() {
         val rotation = Rotation()
         assertSame(rotation, rotation.rotate(0.0, 1.0))
         assertEquals(0.0, rotation.getCost(), 1e-12)
@@ -21,8 +25,7 @@ class FoundationPackageBridgeTest {
         assertEquals(copy.getSint(), rotation.getSint(), 1e-12)
     }
 
-    @Test
-    fun componentRotationsAndAxisConstantsMatchBaseline() {
+fun componentRotationsAndAxisConstantsMatchBaseline() {
         val vector = Vector2(1.0, 0.0)
         assertSame(vector, vector.rotate(0.0, 1.0))
         assertEquals(1.0, vector.y, 1e-12)

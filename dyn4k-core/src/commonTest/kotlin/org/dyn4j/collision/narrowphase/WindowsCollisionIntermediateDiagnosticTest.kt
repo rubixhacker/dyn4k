@@ -1,7 +1,7 @@
 package org.dyn4j.collision.narrowphase
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
-import kotlin.test.Test
 import org.dyn4j.collision.manifold.ClippingManifoldSolver
 import org.dyn4j.collision.manifold.IndexedManifoldPointId
 import org.dyn4j.collision.manifold.Manifold
@@ -14,13 +14,22 @@ import org.dyn4j.geometry.Slice
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 
-class WindowsCollisionIntermediateDiagnosticTest {
-    @Test fun capsuleSlice() = fixture("CapsuleSlice", Capsule(1.0, 0.5), Slice(0.5, 50.0 / 180.0 * PI), -0.25, "gjk")
-    @Test fun circlePolygon() = fixture("CirclePolygon", Circle(1.0), Geometry.createUnitCirclePolygon(6, 0.5), -1.0, "gjk")
-    @Test fun circleSegment() = fixture("CircleSegment", Circle(1.0), Segment(Vector2(-0.5, 0.0), Vector2(0.5, 0.0)), -1.0, "gjk")
-    @Test fun circleSlice() = fixture("CircleSlice", Circle(0.5), Slice(0.5, 50.0 / 180.0 * PI), -0.25, "gjk")
-    @Test fun polygonCapsule() = fixture("PolygonCapsule", Geometry.createUnitCirclePolygon(5, 0.5), Capsule(1.0, 0.5), -0.5, "sat")
-    @Test fun polygonPolygon() = fixture("PolygonPolygon", Geometry.createUnitCirclePolygon(5, 1.0), Geometry.createUnitCirclePolygon(6, 0.5), -1.0, "sat")
+val WindowsCollisionIntermediateDiagnosticTest by testSuite {
+    test("capsuleSlice") { WindowsCollisionIntermediateDiagnosticTestFixture().run { capsuleSlice() } }
+    test("circlePolygon") { WindowsCollisionIntermediateDiagnosticTestFixture().run { circlePolygon() } }
+    test("circleSegment") { WindowsCollisionIntermediateDiagnosticTestFixture().run { circleSegment() } }
+    test("circleSlice") { WindowsCollisionIntermediateDiagnosticTestFixture().run { circleSlice() } }
+    test("polygonCapsule") { WindowsCollisionIntermediateDiagnosticTestFixture().run { polygonCapsule() } }
+    test("polygonPolygon") { WindowsCollisionIntermediateDiagnosticTestFixture().run { polygonPolygon() } }
+}
+
+private class WindowsCollisionIntermediateDiagnosticTestFixture  {
+fun capsuleSlice() = fixture("CapsuleSlice", Capsule(1.0, 0.5), Slice(0.5, 50.0 / 180.0 * PI), -0.25, "gjk")
+fun circlePolygon() = fixture("CirclePolygon", Circle(1.0), Geometry.createUnitCirclePolygon(6, 0.5), -1.0, "gjk")
+fun circleSegment() = fixture("CircleSegment", Circle(1.0), Segment(Vector2(-0.5, 0.0), Vector2(0.5, 0.0)), -1.0, "gjk")
+fun circleSlice() = fixture("CircleSlice", Circle(0.5), Slice(0.5, 50.0 / 180.0 * PI), -0.25, "gjk")
+fun polygonCapsule() = fixture("PolygonCapsule", Geometry.createUnitCirclePolygon(5, 0.5), Capsule(1.0, 0.5), -0.5, "sat")
+fun polygonPolygon() = fixture("PolygonPolygon", Geometry.createUnitCirclePolygon(5, 1.0), Geometry.createUnitCirclePolygon(6, 0.5), -1.0, "sat")
 
     private fun fixture(name: String, first: Convex, second: Convex, shiftX: Double, detector: String) {
         val t1 = Transform()

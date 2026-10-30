@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.simulation
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.dynamics.joint.WheelJoint
@@ -31,13 +32,18 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class WheelJointSimulationTest {
-    @Test
-    fun noLimitsNoMotor() {
+val WheelJointSimulationTest by testSuite {
+    test("noLimitsNoMotor") { WheelJointSimulationTestFixture().run { noLimitsNoMotor() } }
+    test("limitsOnly") { WheelJointSimulationTestFixture().run { limitsOnly() } }
+    test("springDamperWithLimits") { WheelJointSimulationTestFixture().run { springDamperWithLimits() } }
+    test("motorOnly") { WheelJointSimulationTestFixture().run { motorOnly() } }
+}
+
+private class WheelJointSimulationTestFixture  {
+fun noLimitsNoMotor() {
         val w = World<Body>()
         var g = Body()
         var gf = g.addFixture(Geometry.createRectangle(10.0, 0.5))
@@ -80,8 +86,7 @@ class WheelJointSimulationTest {
         assertEquals(7.89277, dj.getReactionForce(invdt).getMagnitude(), 1e-5)
         assertEquals(0.0, dj.getReactionTorque(invdt), 1e-5)
     }
-    @Test
-    fun limitsOnly() {
+fun limitsOnly() {
         val w = World<Body>()
         var g = Body()
         var gf = g.addFixture(Geometry.createRectangle(10.0, 0.5))
@@ -132,8 +137,7 @@ class WheelJointSimulationTest {
         assertEquals(400.238, dj.getReactionForce(invdt).getMagnitude(), 1e-3)
         assertEquals(0.0, dj.getReactionTorque(invdt), 1e-3)
     }
-    @Test
-    fun springDamperWithLimits() {
+fun springDamperWithLimits() {
         val w = World<Body>()
         var g = Body()
         var gf = g.addFixture(Geometry.createRectangle(10.0, 0.5))
@@ -184,8 +188,7 @@ class WheelJointSimulationTest {
         assertEquals(200.0, dj.getReactionForce(invdt).getMagnitude(), 1e-3)
         assertEquals(0.0, dj.getReactionTorque(invdt), 1e-3)
     }
-    @Test
-    fun motorOnly() {
+fun motorOnly() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()

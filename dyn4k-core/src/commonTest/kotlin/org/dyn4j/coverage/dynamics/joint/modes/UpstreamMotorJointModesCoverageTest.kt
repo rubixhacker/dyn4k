@@ -24,10 +24,10 @@
  */
 package org.dyn4j.coverage.dynamics.joint.modes
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sqrt
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -42,6 +42,23 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
+val UpstreamMotorJointModesCoverageTest by testSuite {
+    test("createWithTwoDifferentBodies") { UpstreamMotorJointModesCoverageTestFixture().run { createWithTwoDifferentBodies() } }
+    test("createWithNullBody2") { UpstreamMotorJointModesCoverageTestFixture().run { createWithNullBody2() } }
+    test("createWithNullBody1") { UpstreamMotorJointModesCoverageTestFixture().run { createWithNullBody1() } }
+    test("createWithSameBody") { UpstreamMotorJointModesCoverageTestFixture().run { createWithSameBody() } }
+    test("setValidCorrectionFactor") { UpstreamMotorJointModesCoverageTestFixture().run { setValidCorrectionFactor() } }
+    test("setNegativeCorrectionFactor") { UpstreamMotorJointModesCoverageTestFixture().run { setNegativeCorrectionFactor() } }
+    test("setCorrectionFactorGreaterThan1") { UpstreamMotorJointModesCoverageTestFixture().run { setCorrectionFactorGreaterThan1() } }
+    test("setMaximumTorque") { UpstreamMotorJointModesCoverageTestFixture().run { setMaximumTorque() } }
+    test("setNegativeMaximumTorque") { UpstreamMotorJointModesCoverageTestFixture().run { setNegativeMaximumTorque() } }
+    test("setMaximumForce") { UpstreamMotorJointModesCoverageTestFixture().run { setMaximumForce() } }
+    test("setNegativeMaximumForce") { UpstreamMotorJointModesCoverageTestFixture().run { setNegativeMaximumForce() } }
+    test("setLinearTargetSleep") { UpstreamMotorJointModesCoverageTestFixture().run { setLinearTargetSleep() } }
+    test("setAngularTargetSleep") { UpstreamMotorJointModesCoverageTestFixture().run { setAngularTargetSleep() } }
+    test("copyFailed") { UpstreamMotorJointModesCoverageTestFixture().run { copyFailed() } }
+}
+
 private fun motorBody() = Body().apply {
     addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
     setMass(MassType.NORMAL)
@@ -51,8 +68,8 @@ private fun motorRadians(degrees: Double) = degrees * PI / 180.0
 
 private class MotorTestBody : Body()
 
-class UpstreamMotorJointModesCoverageTest {
-    @Test fun createWithTwoDifferentBodies() {
+private class UpstreamMotorJointModesCoverageTestFixture  {
+fun createWithTwoDifferentBodies() {
         val b1 = motorBody()
         val b2 = motorBody()
         var mj = MotorJoint<Body>(b1, b2)
@@ -70,7 +87,7 @@ class UpstreamMotorJointModesCoverageTest {
         assertNotNull(mj.toString())
     }
 
-    @Test fun createWithNullBody2() {
+fun createWithNullBody2() {
         val b1 = motorBody()
         val b2 = motorBody()
         assertFailsWith<NullPointerException> {
@@ -78,7 +95,7 @@ class UpstreamMotorJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithNullBody1() {
+fun createWithNullBody1() {
         val b1 = motorBody()
         val b2 = motorBody()
         assertFailsWith<NullPointerException> {
@@ -86,7 +103,7 @@ class UpstreamMotorJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithSameBody() {
+fun createWithSameBody() {
         val b1 = motorBody()
         val b2 = motorBody()
         assertFailsWith<IllegalArgumentException> {
@@ -94,7 +111,7 @@ class UpstreamMotorJointModesCoverageTest {
         }
     }
 
-    @Test fun setValidCorrectionFactor() {
+fun setValidCorrectionFactor() {
         val b1 = motorBody()
         val b2 = motorBody()
         var mj = MotorJoint<Body>(b1, b2)
@@ -106,7 +123,7 @@ class UpstreamMotorJointModesCoverageTest {
         assertEquals(1.0, mj.getCorrectionFactor())
     }
 
-    @Test fun setNegativeCorrectionFactor() {
+fun setNegativeCorrectionFactor() {
         val b1 = motorBody()
         val b2 = motorBody()
         assertFailsWith<IllegalArgumentException> {
@@ -115,7 +132,7 @@ class UpstreamMotorJointModesCoverageTest {
         }
     }
 
-    @Test fun setCorrectionFactorGreaterThan1() {
+fun setCorrectionFactorGreaterThan1() {
         val b1 = motorBody()
         val b2 = motorBody()
         assertFailsWith<IllegalArgumentException> {
@@ -124,7 +141,7 @@ class UpstreamMotorJointModesCoverageTest {
         }
     }
 
-    @Test fun setMaximumTorque() {
+fun setMaximumTorque() {
         val b1 = motorBody()
         val b2 = motorBody()
         var mj = MotorJoint<Body>(b1, b2)
@@ -136,7 +153,7 @@ class UpstreamMotorJointModesCoverageTest {
         assertEquals(2548.0, mj.getMaximumTorque())
     }
 
-    @Test fun setNegativeMaximumTorque() {
+fun setNegativeMaximumTorque() {
         val b1 = motorBody()
         val b2 = motorBody()
         assertFailsWith<IllegalArgumentException> {
@@ -145,7 +162,7 @@ class UpstreamMotorJointModesCoverageTest {
         }
     }
 
-    @Test fun setMaximumForce() {
+fun setMaximumForce() {
         val b1 = motorBody()
         val b2 = motorBody()
         var mj = MotorJoint<Body>(b1, b2)
@@ -157,7 +174,7 @@ class UpstreamMotorJointModesCoverageTest {
         assertEquals(2548.0, mj.getMaximumForce())
     }
 
-    @Test fun setNegativeMaximumForce() {
+fun setNegativeMaximumForce() {
         val b1 = motorBody()
         val b2 = motorBody()
         assertFailsWith<IllegalArgumentException> {
@@ -166,7 +183,7 @@ class UpstreamMotorJointModesCoverageTest {
         }
     }
 
-    @Test fun setLinearTargetSleep() {
+fun setLinearTargetSleep() {
         val b1 = motorBody()
         val b2 = motorBody()
         var mj = MotorJoint<Body>(b1, b2)
@@ -193,7 +210,7 @@ class UpstreamMotorJointModesCoverageTest {
         assertTrue(target.equals(mj.getLinearTarget()))
     }
 
-    @Test fun setAngularTargetSleep() {
+fun setAngularTargetSleep() {
         val b1 = motorBody()
         val b2 = motorBody()
         var mj = MotorJoint<Body>(b1, b2)
@@ -219,7 +236,7 @@ class UpstreamMotorJointModesCoverageTest {
         assertEquals(1.0, mj.getAngularTarget())
     }
 
-    @Test fun copyFailed() {
+fun copyFailed() {
         val b1 = motorBody()
         val b2 = motorBody()
         assertFailsWith<ClassCastException> {

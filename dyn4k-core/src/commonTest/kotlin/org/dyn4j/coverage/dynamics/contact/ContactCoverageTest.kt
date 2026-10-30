@@ -24,7 +24,7 @@
  */
 package org.dyn4j.coverage.dynamics.contact
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -58,6 +58,30 @@ import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.ValueMixer
 
+val ContactConstraintCoverageTest by testSuite {
+    test("create") { ContactConstraintCoverageTestFixture().run { create() } }
+    test("update") { ContactConstraintCoverageTestFixture().run { update() } }
+    test("getSetEnabled") { ContactConstraintCoverageTestFixture().run { getSetEnabled() } }
+    test("getSetTangentSpeed") { ContactConstraintCoverageTestFixture().run { getSetTangentSpeed() } }
+    test("tostring") { ContactConstraintCoverageTestFixture().run { tostring() } }
+    test("shift") { ContactConstraintCoverageTestFixture().run { shift() } }
+}
+
+val ForceCollisionTimeOfImpactSolverCoverageTest by testSuite {
+    test("simpleScenario1") { ForceCollisionTimeOfImpactSolverCoverageTestFixture().run { simpleScenario1() } }
+    test("simpleScenario2") { ForceCollisionTimeOfImpactSolverCoverageTestFixture().run { simpleScenario2() } }
+}
+
+val SequentialImpulsesCoverageTest by testSuite {
+    test("restitutionVelocity") { SequentialImpulsesCoverageTestFixture().run { restitutionVelocity() } }
+    test("illConditioned") { SequentialImpulsesCoverageTestFixture().run { illConditioned() } }
+}
+
+val SolvableContactCoverageTest by testSuite {
+    test("create") { SolvableContactCoverageTestFixture().run { create() } }
+    test("isSolved") { SolvableContactCoverageTestFixture().run { isSolved() } }
+}
+
 private class ContactScene(square: Boolean = false) {
     val first = Body()
     val second = Body()
@@ -89,7 +113,7 @@ private fun manifold(vararg points: ManifoldPoint): Manifold = Manifold().also {
     it.getPoints().addAll(points)
 }
 
-class ContactConstraintCoverageTest {
+private class ContactConstraintCoverageTestFixture  {
     private fun assertUpdatedState(scene: ContactScene, expectedCount: Int, expectedSensor: Boolean) {
         val contact = scene.constraint
         assertEquals(expectedCount, contact.getContacts().size)
@@ -118,7 +142,7 @@ class ContactConstraintCoverageTest {
         assertNull(contact.getOtherBody(alien)); assertNull(contact.getOtherFixture(alien))
     }
 
-    @Test fun create() {
+fun create() {
         val scene = ContactScene(); val contact = scene.constraint
         val view = contact.getContacts()
         assertTrue(view.isEmpty()); assertEquals(0, contact.solverContacts().size)
@@ -145,7 +169,7 @@ class ContactConstraintCoverageTest {
         assertNull(contact.getOtherBody(alien)); assertNull(contact.getOtherFixture(alien))
     }
 
-    @Test fun update() {
+fun update() {
         val scene = ContactScene(); val contact = scene.constraint
         val handler = CountingHandler(); val settings = Settings()
         val distance = point(ManifoldPointId.DISTANCE, 2.0, 2.0, 1.0)
@@ -183,21 +207,21 @@ class ContactConstraintCoverageTest {
         assertUpdatedState(scene, 2, false)
     }
 
-    @Test fun getSetEnabled() {
+fun getSetEnabled() {
         val contact = ContactScene().constraint
         contact.setEnabled(true); assertTrue(contact.isEnabled())
         contact.setEnabled(false); assertFalse(contact.isEnabled())
         contact.setEnabled(true); assertTrue(contact.isEnabled())
     }
 
-    @Test fun getSetTangentSpeed() {
+fun getSetTangentSpeed() {
         val contact = ContactScene().constraint
         for (speed in listOf(0.5, 0.0, 50.0, -0.5)) {
             contact.setTangentSpeed(speed); assertEquals(speed, contact.getTangentSpeed())
         }
     }
 
-    @Test fun tostring() {
+fun tostring() {
         val contact = ContactScene().constraint
         assertTrue(contact.toString().isNotEmpty())
         val points = manifold(point(ManifoldPointId.DISTANCE, 2.0, 2.0, 1.0),
@@ -206,7 +230,7 @@ class ContactConstraintCoverageTest {
         assertTrue(contact.toString().isNotEmpty())
     }
 
-    @Test fun shift() {
+fun shift() {
         val contact = ContactScene().constraint
         contact.update(manifold(point(ManifoldPointId.DISTANCE, 2.0, 2.0, 1.0),
             point(ManifoldPointId.DISTANCE, 3.0, 2.0, 2.0)), Settings(), CountingHandler())
@@ -224,7 +248,7 @@ class ContactConstraintCoverageTest {
     }
 }
 
-class ForceCollisionTimeOfImpactSolverCoverageTest {
+private class ForceCollisionTimeOfImpactSolverCoverageTestFixture  {
     private fun toi(distance: Double, secondX: Double, time: Double): TimeOfImpact {
         val separation = Separation().also {
             it.setDistance(distance); it.setNormal(Vector2(1.0, 0.0))
@@ -233,7 +257,7 @@ class ForceCollisionTimeOfImpactSolverCoverageTest {
         return TimeOfImpact().also { it.setSeparation(separation); it.setTime(time) }
     }
 
-    @Test fun simpleScenario1() {
+fun simpleScenario1() {
         val first = Body().also { it.addFixture(Geometry.createCircle(1.0)); it.setMass(MassType.NORMAL) }
         val second = Body().also {
             it.addFixture(Geometry.createCircle(1.0)); it.translate(2.5, 0.0); it.setMass(MassType.INFINITE)
@@ -245,7 +269,7 @@ class ForceCollisionTimeOfImpactSolverCoverageTest {
         assertEquals(0.0, second.getTransform().getTranslationY())
     }
 
-    @Test fun simpleScenario2() {
+fun simpleScenario2() {
         val first = Body().also { it.addFixture(Geometry.createCircle(1.0)); it.setMass(MassType.NORMAL) }
         val second = Body().also {
             it.addFixture(Geometry.createCircle(1.0)); it.translate(2.0001, 0.0); it.setMass(MassType.NORMAL)
@@ -258,7 +282,7 @@ class ForceCollisionTimeOfImpactSolverCoverageTest {
     }
 }
 
-class SequentialImpulsesCoverageTest {
+private class SequentialImpulsesCoverageTestFixture  {
     private fun prepared(squareTranslationX: Double, squareTranslationY: Double):
         Triple<ContactScene, Manifold, Settings> {
         val scene = ContactScene(square = true)
@@ -273,7 +297,7 @@ class SequentialImpulsesCoverageTest {
         return Triple(scene, manifold, Settings())
     }
 
-    @Test fun restitutionVelocity() {
+fun restitutionVelocity() {
         val (scene, manifold, settings) = prepared(0.0, 0.45)
         scene.first.setLinearVelocity(0.0, -1.5)
         val handler = CountingHandler(); val solver = SequentialImpulses<Body>()
@@ -288,7 +312,7 @@ class SequentialImpulsesCoverageTest {
         scene.constraint.solverContacts().forEach { assertEquals(0.0, it.vb) }
     }
 
-    @Test fun illConditioned() {
+fun illConditioned() {
         val (scene, manifold, settings) = prepared(0.49995, 0.49995)
         scene.first.setMass(MassType.NORMAL); scene.second.setMass(MassType.NORMAL)
         scene.first.setLinearVelocity(0.0, -1.5)
@@ -310,11 +334,11 @@ class SequentialImpulsesCoverageTest {
     }
 }
 
-class SolvableContactCoverageTest {
+private class SolvableContactCoverageTestFixture  {
     private fun contact() = SolvableContact(ManifoldPointId.DISTANCE, Vector2(1.0, 3.0), 5.0,
         Vector2(3.0, 4.0), Vector2(5.0, 6.0))
 
-    @Test fun create() {
+fun create() {
         val contact = contact()
         assertSame(ManifoldPointId.DISTANCE, contact.getId())
         assertEquals(1.0, contact.getPoint().x); assertEquals(3.0, contact.getPoint().y)
@@ -328,7 +352,7 @@ class SolvableContactCoverageTest {
         assertNull(contact.r1); assertNull(contact.r2)
     }
 
-    @Test fun isSolved() {
+fun isSolved() {
         val contact = contact()
         assertFalse(contact.isIgnored()); assertFalse(contact.isSolved())
         contact.ignored = true

@@ -24,7 +24,7 @@
  */
 package org.dyn4j.coverage.dynamics.body
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -43,7 +43,20 @@ import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
-class BodyValueCoverageTest {
+val BodyValueCoverageTest by testSuite {
+    test("controlledWrongForceGetterFailsThePortableOracle") { BodyValueCoverageTestFixture().run { controlledWrongForceGetterFailsThePortableOracle() } }
+    test("forceConstructionSetCopyAndLiveVector") { BodyValueCoverageTestFixture().run { forceConstructionSetCopyAndLiveVector() } }
+    test("forceNullOverloadsRejectTheirArgument") { BodyValueCoverageTestFixture().run { forceNullOverloadsRejectTheirArgument() } }
+    test("torqueConstructionSetCopyAndCompletion") { BodyValueCoverageTestFixture().run { torqueConstructionSetCopyAndCompletion() } }
+    test("torqueNullOverloadsRejectTheirArgument") { BodyValueCoverageTestFixture().run { torqueNullOverloadsRejectTheirArgument() } }
+    test("timestepTracksPreviousValuesAndRejectsInvalidUpdates") { BodyValueCoverageTestFixture().run { timestepTracksPreviousValuesAndRejectsInvalidUpdates() } }
+    test("fixturePropertiesMassAndErrors") { BodyValueCoverageTestFixture().run { fixturePropertiesMassAndErrors() } }
+    test("settingsValidateScalarsAndKeepDerivedSquares") { BodyValueCoverageTestFixture().run { settingsValidateScalarsAndKeepDerivedSquares() } }
+    test("settingsValidateIterationsAndFlags") { BodyValueCoverageTestFixture().run { settingsValidateIterationsAndFlags() } }
+    test("settingsCopySetAndResetPreserveValues") { BodyValueCoverageTestFixture().run { settingsCopySetAndResetPreserveValues() } }
+}
+
+private class BodyValueCoverageTestFixture  {
     private fun assertChangedSettings(settings: Settings) {
         assertEquals(Settings.DEFAULT_STEP_FREQUENCY * 2.0, settings.getStepFrequency())
         assertEquals(Settings.DEFAULT_ANGULAR_TOLERANCE * 2.0, settings.getAngularTolerance())
@@ -69,8 +82,7 @@ class BodyValueCoverageTest {
         assertEquals(3.0, force.getForce().y)
     }
 
-    @Test
-    fun controlledWrongForceGetterFailsThePortableOracle() {
+fun controlledWrongForceGetterFailsThePortableOracle() {
         assertAppliedForce(Force(2.0, 3.0))
         val wrong = object : Force(2.0, 3.0) {
             override fun getForce() = Vector2(0.0, 0.0)
@@ -78,8 +90,7 @@ class BodyValueCoverageTest {
         assertFailsWith<AssertionError> { assertAppliedForce(wrong) }
     }
 
-    @Test
-    fun forceConstructionSetCopyAndLiveVector() {
+fun forceConstructionSetCopyAndLiveVector() {
         val force = Force(0.3, 2.0)
         assertEquals(0.3, force.getForce().x)
         assertEquals(2.0, force.getForce().y)
@@ -106,8 +117,7 @@ class BodyValueCoverageTest {
         assertEquals(0.0, Force().getForce().x)
     }
 
-    @Test
-    fun forceNullOverloadsRejectTheirArgument() {
+fun forceNullOverloadsRejectTheirArgument() {
         assertFailsWith<ArgumentNullException> { Force(null as Force?) }
         assertFailsWith<ArgumentNullException> { Force(null as Vector2?) }
         val force = Force()
@@ -115,8 +125,7 @@ class BodyValueCoverageTest {
         assertFailsWith<ArgumentNullException> { force.set(null as Vector2?) }
     }
 
-    @Test
-    fun torqueConstructionSetCopyAndCompletion() {
+fun torqueConstructionSetCopyAndCompletion() {
         val torque = Torque(-3.5)
         assertEquals(-3.5, torque.getTorque())
         torque.set(0.32)
@@ -132,14 +141,12 @@ class BodyValueCoverageTest {
         assertTrue(torque.toString().isNotEmpty())
     }
 
-    @Test
-    fun torqueNullOverloadsRejectTheirArgument() {
+fun torqueNullOverloadsRejectTheirArgument() {
         assertFailsWith<ArgumentNullException> { Torque(null as Torque?) }
         assertFailsWith<ArgumentNullException> { Torque().set(null as Torque?) }
     }
 
-    @Test
-    fun timestepTracksPreviousValuesAndRejectsInvalidUpdates() {
+fun timestepTracksPreviousValuesAndRejectsInvalidUpdates() {
         val step = TimeStep(0.3)
         assertEquals(0.3, step.getDeltaTime())
         assertEquals(0.3, step.getPrevousDeltaTime())
@@ -163,8 +170,7 @@ class BodyValueCoverageTest {
         assertTrue(step.toString().contains("0.2"))
     }
 
-    @Test
-    fun fixturePropertiesMassAndErrors() {
+fun fixturePropertiesMassAndErrors() {
         assertFailsWith<ArgumentNullException> { BodyFixture(null) }
         val shape = Circle(0.5)
         val fixture = BodyFixture(shape)
@@ -204,8 +210,7 @@ class BodyValueCoverageTest {
         assertTrue(fixture.toString().isNotEmpty())
     }
 
-    @Test
-    fun settingsValidateScalarsAndKeepDerivedSquares() {
+fun settingsValidateScalarsAndKeepDerivedSquares() {
         val settings = Settings()
         settings.setStepFrequency(1.0 / 70.0)
         assertEquals(1.0 / 70.0, settings.getStepFrequency())
@@ -237,8 +242,7 @@ class BodyValueCoverageTest {
         assertFailsWith<ValueOutOfRangeException> { settings.setBaumgarte(-0.3) }
     }
 
-    @Test
-    fun settingsValidateIterationsAndFlags() {
+fun settingsValidateIterationsAndFlags() {
         val settings = Settings()
         settings.setVelocityConstraintSolverIterations(17)
         assertEquals(17, settings.getVelocityConstraintSolverIterations())
@@ -266,8 +270,7 @@ class BodyValueCoverageTest {
         assertTrue(settings.toString().isNotEmpty())
     }
 
-    @Test
-    fun settingsCopySetAndResetPreserveValues() {
+fun settingsCopySetAndResetPreserveValues() {
         val settings = Settings()
         settings.setStepFrequency(Settings.DEFAULT_STEP_FREQUENCY * 2.0)
         settings.setAngularTolerance(Settings.DEFAULT_ANGULAR_TOLERANCE * 2.0)

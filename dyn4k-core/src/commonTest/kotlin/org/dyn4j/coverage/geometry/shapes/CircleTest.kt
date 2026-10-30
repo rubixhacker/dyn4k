@@ -24,14 +24,32 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class CircleTest {
+val CircleTest by testSuite {
+    test("createZeroRadius") { CircleTestFixture().run { createZeroRadius() } }
+    test("createNegativeRadius") { CircleTestFixture().run { createNegativeRadius() } }
+    test("createSuccess") { CircleTestFixture().run { createSuccess() } }
+    test("contains") { CircleTestFixture().run { contains() } }
+    test("project") { CircleTestFixture().run { project() } }
+    test("getFarthest") { CircleTestFixture().run { getFarthest() } }
+    test("getAxes") { CircleTestFixture().run { getAxes() } }
+    test("getFoci") { CircleTestFixture().run { getFoci() } }
+    test("rotate") { CircleTestFixture().run { rotate() } }
+    test("translate") { CircleTestFixture().run { translate() } }
+    test("createAABB") { CircleTestFixture().run { createAABB() } }
+    test("getRadius") { CircleTestFixture().run { getRadius() } }
+    test("createMass") { CircleTestFixture().run { createMass() } }
+    test("getArea") { CircleTestFixture().run { getArea() } }
+    test("copy") { CircleTestFixture().run { copy() } }
+}
+
+private class CircleTestFixture  {
     private val IDENTITY = Transform()
-    @Test
-    fun createZeroRadius() {
+fun createZeroRadius() {
         assertFailsWith<IllegalArgumentException> {
 
 		Circle(0.0);
@@ -39,8 +57,7 @@ class CircleTest {
         }
     }
 
-    @Test
-    fun createNegativeRadius() {
+fun createNegativeRadius() {
         assertFailsWith<IllegalArgumentException> {
 
 		Circle(-1.0);
@@ -48,16 +65,14 @@ class CircleTest {
         }
     }
 
-    @Test
-    fun createSuccess() {
+fun createSuccess() {
 
 		var c = Circle(1.0);
 		assertNotNull(c.toString());
 
     }
 
-    @Test
-    fun contains() {
+fun contains() {
 
 		var c = Circle(2.0);
 		var t = Transform();
@@ -78,8 +93,7 @@ class CircleTest {
 
     }
 
-    @Test
-    fun project() {
+fun project() {
 
 		var c = Circle(1.5);
 		var t = Transform();
@@ -102,8 +116,7 @@ class CircleTest {
 
     }
 
-    @Test
-    fun getFarthest() {
+fun getFarthest() {
 
 		var c = Circle(1.5);
 		var t = Transform();
@@ -129,8 +142,7 @@ class CircleTest {
 
     }
 
-    @Test
-    fun getAxes() {
+fun getAxes() {
 
 		var c = Circle(1.5);
 		var t = Transform();
@@ -140,8 +152,7 @@ class CircleTest {
 
     }
 
-    @Test
-    fun getFoci() {
+fun getFoci() {
 
 		var c = Circle(1.5);
 		var t = Transform();
@@ -151,8 +162,7 @@ class CircleTest {
 
     }
 
-    @Test
-    fun rotate() {
+fun rotate() {
 
 		var c = Circle(1.0);
 
@@ -172,8 +182,7 @@ class CircleTest {
 
     }
 
-    @Test
-    fun translate() {
+fun translate() {
 
 		var c = Circle(1.0);
 
@@ -184,8 +193,7 @@ class CircleTest {
 
     }
 
-    @Test
-    fun createAABB() {
+fun createAABB() {
 
 		var c = Circle(1.2);
 
@@ -213,8 +221,7 @@ class CircleTest {
 
     }
 
-    @Test
-    fun getRadius() {
+fun getRadius() {
 
 		var c = Circle(3.0);
 		assertEquals(3.0, c.getRadius());
@@ -223,8 +230,7 @@ class CircleTest {
 
     }
 
-    @Test
-    fun createMass() {
+fun createMass() {
 
 		var c = Circle(3.0);
 		var mass = c.createMass(2.0);
@@ -248,16 +254,14 @@ class CircleTest {
 
     }
 
-    @Test
-    fun getArea() {
+fun getArea() {
 
 		var c = Circle(3.0);
 		assertEquals(28.274, c.getArea(), 1e-3);
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var circ = Circle(3.0);
 		circ.setUserData(Any());

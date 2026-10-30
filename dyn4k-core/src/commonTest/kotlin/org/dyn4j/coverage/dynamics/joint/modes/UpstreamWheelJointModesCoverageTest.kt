@@ -24,10 +24,10 @@
  */
 package org.dyn4j.coverage.dynamics.joint.modes
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sqrt
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -42,6 +42,53 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
+val UpstreamWheelJointModesCoverageTest by testSuite {
+    test("createSuccess") { UpstreamWheelJointModesCoverageTestFixture().run { createSuccess() } }
+    test("createWithNullBody1") { UpstreamWheelJointModesCoverageTestFixture().run { createWithNullBody1() } }
+    test("createWithNullBody2") { UpstreamWheelJointModesCoverageTestFixture().run { createWithNullBody2() } }
+    test("createWithNullAnchor") { UpstreamWheelJointModesCoverageTestFixture().run { createWithNullAnchor() } }
+    test("createWithNullAxis") { UpstreamWheelJointModesCoverageTestFixture().run { createWithNullAxis() } }
+    test("isSpringEnabled") { UpstreamWheelJointModesCoverageTestFixture().run { isSpringEnabled() } }
+    test("isSpringDamperEnabled") { UpstreamWheelJointModesCoverageTestFixture().run { isSpringDamperEnabled() } }
+    test("setSpringRestOffset") { UpstreamWheelJointModesCoverageTestFixture().run { setSpringRestOffset() } }
+    test("setSpringDampingRatio") { UpstreamWheelJointModesCoverageTestFixture().run { setSpringDampingRatio() } }
+    test("setNegativeDampingRatio") { UpstreamWheelJointModesCoverageTestFixture().run { setNegativeDampingRatio() } }
+    test("setDampingRatioGreaterThan1") { UpstreamWheelJointModesCoverageTestFixture().run { setDampingRatioGreaterThan1() } }
+    test("setSpringFrequency") { UpstreamWheelJointModesCoverageTestFixture().run { setSpringFrequency() } }
+    test("setSpringMode") { UpstreamWheelJointModesCoverageTestFixture().run { setSpringMode() } }
+    test("setSpringStiffnessNegative") { UpstreamWheelJointModesCoverageTestFixture().run { setSpringStiffnessNegative() } }
+    test("setSpringStiffness") { UpstreamWheelJointModesCoverageTestFixture().run { setSpringStiffness() } }
+    test("setSpringFrequencyNegative") { UpstreamWheelJointModesCoverageTestFixture().run { setSpringFrequencyNegative() } }
+    test("setSpringMaximumForceNegative") { UpstreamWheelJointModesCoverageTestFixture().run { setSpringMaximumForceNegative() } }
+    test("setSpringMaximumForce") { UpstreamWheelJointModesCoverageTestFixture().run { setSpringMaximumForce() } }
+    test("setSpringRestOffsetAtRest") { UpstreamWheelJointModesCoverageTestFixture().run { setSpringRestOffsetAtRest() } }
+    test("setMotorMaximumTorque") { UpstreamWheelJointModesCoverageTestFixture().run { setMotorMaximumTorque() } }
+    test("setMaximumMotorTorqueNegative") { UpstreamWheelJointModesCoverageTestFixture().run { setMaximumMotorTorqueNegative() } }
+    test("setMaximumMotorTorqueSleep") { UpstreamWheelJointModesCoverageTestFixture().run { setMaximumMotorTorqueSleep() } }
+    test("setMaximumMotorTorqueEnabledSleep") { UpstreamWheelJointModesCoverageTestFixture().run { setMaximumMotorTorqueEnabledSleep() } }
+    test("setMotorEnabled") { UpstreamWheelJointModesCoverageTestFixture().run { setMotorEnabled() } }
+    test("setMotorEnabledSleep") { UpstreamWheelJointModesCoverageTestFixture().run { setMotorEnabledSleep() } }
+    test("setMotorSpeed") { UpstreamWheelJointModesCoverageTestFixture().run { setMotorSpeed() } }
+    test("setMotorSpeedSleep") { UpstreamWheelJointModesCoverageTestFixture().run { setMotorSpeedSleep() } }
+    test("setUpperLimitSuccess") { UpstreamWheelJointModesCoverageTestFixture().run { setUpperLimitSuccess() } }
+    test("setUpperLimitInvalid") { UpstreamWheelJointModesCoverageTestFixture().run { setUpperLimitInvalid() } }
+    test("setLowerLimit") { UpstreamWheelJointModesCoverageTestFixture().run { setLowerLimit() } }
+    test("setLowerLimitInvalid") { UpstreamWheelJointModesCoverageTestFixture().run { setLowerLimitInvalid() } }
+    test("setUpperAndLowerLimits") { UpstreamWheelJointModesCoverageTestFixture().run { setUpperAndLowerLimits() } }
+    test("setUpperAndLowerLimitsInvalid1") { UpstreamWheelJointModesCoverageTestFixture().run { setUpperAndLowerLimitsInvalid1() } }
+    test("setUpperAndLowerLimitsInvalid2") { UpstreamWheelJointModesCoverageTestFixture().run { setUpperAndLowerLimitsInvalid2() } }
+    test("setSameLimitValid") { UpstreamWheelJointModesCoverageTestFixture().run { setSameLimitValid() } }
+    test("setLimitsEnabledSleep") { UpstreamWheelJointModesCoverageTestFixture().run { setLimitsEnabledSleep() } }
+    test("setLimitsSameSleep") { UpstreamWheelJointModesCoverageTestFixture().run { setLimitsSameSleep() } }
+    test("setLimitsDifferentSleep") { UpstreamWheelJointModesCoverageTestFixture().run { setLimitsDifferentSleep() } }
+    test("setLowerLimitSleep") { UpstreamWheelJointModesCoverageTestFixture().run { setLowerLimitSleep() } }
+    test("setUpperLimitSleep") { UpstreamWheelJointModesCoverageTestFixture().run { setUpperLimitSleep() } }
+    test("setLimitsEnabledSameSleep") { UpstreamWheelJointModesCoverageTestFixture().run { setLimitsEnabledSameSleep() } }
+    test("setLimitsEnabledDifferentSleep") { UpstreamWheelJointModesCoverageTestFixture().run { setLimitsEnabledDifferentSleep() } }
+    test("shift") { UpstreamWheelJointModesCoverageTestFixture().run { shift() } }
+    test("copyFailed") { UpstreamWheelJointModesCoverageTestFixture().run { copyFailed() } }
+}
+
 private fun wheelBody() = Body().apply {
     addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
     setMass(MassType.NORMAL)
@@ -51,8 +98,8 @@ private fun wheelRadians(degrees: Double) = degrees * PI / 180.0
 
 private class WheelTestBody : Body()
 
-class UpstreamWheelJointModesCoverageTest {
-    @Test fun createSuccess() {
+private class UpstreamWheelJointModesCoverageTestFixture  {
+fun createSuccess() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var p = Vector2(1.0, 1.0)
@@ -92,7 +139,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertNotNull(wj.toString())
     }
 
-    @Test fun createWithNullBody1() {
+fun createWithNullBody1() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<NullPointerException> {
@@ -100,7 +147,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithNullBody2() {
+fun createWithNullBody2() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<NullPointerException> {
@@ -108,7 +155,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithNullAnchor() {
+fun createWithNullAnchor() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<NullPointerException> {
@@ -116,7 +163,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithNullAxis() {
+fun createWithNullAxis() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<NullPointerException> {
@@ -124,7 +171,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun isSpringEnabled() {
+fun isSpringEnabled() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -141,7 +188,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertTrue(wj.isSpringEnabled())
     }
 
-    @Test fun isSpringDamperEnabled() {
+fun isSpringDamperEnabled() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -165,7 +212,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertFalse(wj.isSpringDamperEnabled())
     }
 
-    @Test fun setSpringRestOffset() {
+fun setSpringRestOffset() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -177,7 +224,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(-1.0, wj.getSpringRestOffset())
     }
 
-    @Test fun setSpringDampingRatio() {
+fun setSpringDampingRatio() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -210,7 +257,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setNegativeDampingRatio() {
+fun setNegativeDampingRatio() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<IllegalArgumentException> {
@@ -219,7 +266,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun setDampingRatioGreaterThan1() {
+fun setDampingRatioGreaterThan1() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<IllegalArgumentException> {
@@ -228,7 +275,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun setSpringFrequency() {
+fun setSpringFrequency() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -266,7 +313,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setSpringMode() {
+fun setSpringMode() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -277,7 +324,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(Joint.SPRING_MODE_FREQUENCY, wj.getSpringMode())
     }
 
-    @Test fun setSpringStiffnessNegative() {
+fun setSpringStiffnessNegative() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<IllegalArgumentException> {
@@ -286,7 +333,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun setSpringStiffness() {
+fun setSpringStiffness() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -323,7 +370,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setSpringFrequencyNegative() {
+fun setSpringFrequencyNegative() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<IllegalArgumentException> {
@@ -332,7 +379,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun setSpringMaximumForceNegative() {
+fun setSpringMaximumForceNegative() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<IllegalArgumentException> {
@@ -341,7 +388,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun setSpringMaximumForce() {
+fun setSpringMaximumForce() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -379,7 +426,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setSpringRestOffsetAtRest() {
+fun setSpringRestOffsetAtRest() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -399,7 +446,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(10.0, wj.getSpringRestOffset())
     }
 
-    @Test fun setMotorMaximumTorque() {
+fun setMotorMaximumTorque() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -411,7 +458,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(2548.0, wj.getMaximumMotorTorque())
     }
 
-    @Test fun setMaximumMotorTorqueNegative() {
+fun setMaximumMotorTorqueNegative() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<IllegalArgumentException> {
@@ -420,7 +467,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun setMaximumMotorTorqueSleep() {
+fun setMaximumMotorTorqueSleep() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -448,7 +495,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertTrue(b2.isAtRest())
     }
 
-    @Test fun setMaximumMotorTorqueEnabledSleep() {
+fun setMaximumMotorTorqueEnabledSleep() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -478,7 +525,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertTrue(b2.isAtRest())
     }
 
-    @Test fun setMotorEnabled() {
+fun setMotorEnabled() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -489,7 +536,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertFalse(wj.isMotorEnabled())
     }
 
-    @Test fun setMotorEnabledSleep() {
+fun setMotorEnabledSleep() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -518,7 +565,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setMotorSpeed() {
+fun setMotorSpeed() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -531,7 +578,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(0.0, wj.getMotorSpeed())
     }
 
-    @Test fun setMotorSpeedSleep() {
+fun setMotorSpeedSleep() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -559,7 +606,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertTrue(b2.isAtRest())
     }
 
-    @Test fun setUpperLimitSuccess() {
+fun setUpperLimitSuccess() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -573,7 +620,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(0.0, wj.getUpperLimit(), 1e-6)
     }
 
-    @Test fun setUpperLimitInvalid() {
+fun setUpperLimitInvalid() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<IllegalArgumentException> {
@@ -583,7 +630,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun setLowerLimit() {
+fun setLowerLimit() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -597,7 +644,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(2.0, wj.getLowerLimit(), 1e-6)
     }
 
-    @Test fun setLowerLimitInvalid() {
+fun setLowerLimitInvalid() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<IllegalArgumentException> {
@@ -607,7 +654,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun setUpperAndLowerLimits() {
+fun setUpperAndLowerLimits() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -630,7 +677,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(5.0, wj.getUpperLimit())
     }
 
-    @Test fun setUpperAndLowerLimitsInvalid1() {
+fun setUpperAndLowerLimitsInvalid1() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<IllegalArgumentException> {
@@ -641,7 +688,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun setUpperAndLowerLimitsInvalid2() {
+fun setUpperAndLowerLimitsInvalid2() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<IllegalArgumentException> {
@@ -652,7 +699,7 @@ class UpstreamWheelJointModesCoverageTest {
         }
     }
 
-    @Test fun setSameLimitValid() {
+fun setSameLimitValid() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -666,7 +713,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(-2.0, wj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledSleep() {
+fun setLimitsEnabledSleep() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -705,7 +752,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setLimitsSameSleep() {
+fun setLimitsSameSleep() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -768,7 +815,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(1.0, wj.getUpperLimit())
     }
 
-    @Test fun setLimitsDifferentSleep() {
+fun setLimitsDifferentSleep() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -831,7 +878,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(2.0, wj.getUpperLimit())
     }
 
-    @Test fun setLowerLimitSleep() {
+fun setLowerLimitSleep() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -866,7 +913,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(defaultUpperLimit, wj.getUpperLimit())
     }
 
-    @Test fun setUpperLimitSleep() {
+fun setUpperLimitSleep() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -901,7 +948,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(3.0, wj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledSameSleep() {
+fun setLimitsEnabledSameSleep() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -942,7 +989,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(1.0, wj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledDifferentSleep() {
+fun setLimitsEnabledDifferentSleep() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -1005,7 +1052,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(4.0, wj.getUpperLimit())
     }
 
-    @Test fun shift() {
+fun shift() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         var wj = WheelJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -1020,7 +1067,7 @@ class UpstreamWheelJointModesCoverageTest {
         assertEquals(2.0, wj.getAnchor2().y)
     }
 
-    @Test fun copyFailed() {
+fun copyFailed() {
         val b1 = wheelBody()
         val b2 = wheelBody()
         assertFailsWith<ClassCastException> {

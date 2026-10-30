@@ -24,9 +24,9 @@
  */
 package org.dyn4j.coverage.collision.detection.broadphase.body
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -49,6 +49,134 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.Ray
 import org.dyn4j.geometry.Vector2
 
+val CollisionBodyBroadphaseCoverageTest by testSuite {
+    test("addContainsBody_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { addContainsBody_sap_untracked() } }
+    test("addContainsBody_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { addContainsBody_sap_tracked() } }
+    test("addContainsBody_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { addContainsBody_tree_untracked() } }
+    test("addContainsBody_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { addContainsBody_tree_tracked() } }
+    test("addContainsBody_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { addContainsBody_brute_force() } }
+    test("clear_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { clear_sap_untracked() } }
+    test("clear_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { clear_sap_tracked() } }
+    test("clear_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { clear_tree_untracked() } }
+    test("clear_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { clear_tree_tracked() } }
+    test("clear_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { clear_brute_force() } }
+    test("updateTargeted_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { updateTargeted_sap_untracked() } }
+    test("updateTargeted_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { updateTargeted_sap_tracked() } }
+    test("updateTargeted_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { updateTargeted_tree_untracked() } }
+    test("updateTargeted_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { updateTargeted_tree_tracked() } }
+    test("updateTargeted_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { updateTargeted_brute_force() } }
+    test("update_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { update_sap_untracked() } }
+    test("update_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { update_sap_tracked() } }
+    test("update_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { update_tree_untracked() } }
+    test("update_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { update_tree_tracked() } }
+    test("update_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { update_brute_force() } }
+    test("removeContainsBody_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { removeContainsBody_sap_untracked() } }
+    test("removeContainsBody_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { removeContainsBody_sap_tracked() } }
+    test("removeContainsBody_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { removeContainsBody_tree_untracked() } }
+    test("removeContainsBody_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { removeContainsBody_tree_tracked() } }
+    test("removeContainsBody_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { removeContainsBody_brute_force() } }
+    test("getAABB_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getAABB_sap_untracked() } }
+    test("getAABB_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getAABB_sap_tracked() } }
+    test("getAABB_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getAABB_tree_untracked() } }
+    test("getAABB_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getAABB_tree_tracked() } }
+    test("getAABB_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { getAABB_brute_force() } }
+    test("getAABBExpansionMethod_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getAABBExpansionMethod_sap_untracked() } }
+    test("getAABBExpansionMethod_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getAABBExpansionMethod_sap_tracked() } }
+    test("getAABBExpansionMethod_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getAABBExpansionMethod_tree_untracked() } }
+    test("getAABBExpansionMethod_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getAABBExpansionMethod_tree_tracked() } }
+    test("getAABBExpansionMethod_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { getAABBExpansionMethod_brute_force() } }
+    test("updateSmall_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { updateSmall_sap_untracked() } }
+    test("updateSmall_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { updateSmall_sap_tracked() } }
+    test("updateSmall_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { updateSmall_tree_untracked() } }
+    test("updateSmall_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { updateSmall_tree_tracked() } }
+    test("updateSmall_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { updateSmall_brute_force() } }
+    test("updateLarge_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { updateLarge_sap_untracked() } }
+    test("updateLarge_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { updateLarge_sap_tracked() } }
+    test("updateLarge_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { updateLarge_tree_untracked() } }
+    test("updateLarge_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { updateLarge_tree_tracked() } }
+    test("updateLarge_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { updateLarge_brute_force() } }
+    test("getSetUpdateTrackingEnabled_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getSetUpdateTrackingEnabled_sap_untracked() } }
+    test("getSetUpdateTrackingEnabled_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getSetUpdateTrackingEnabled_sap_tracked() } }
+    test("getSetUpdateTrackingEnabled_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getSetUpdateTrackingEnabled_tree_untracked() } }
+    test("getSetUpdateTrackingEnabled_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getSetUpdateTrackingEnabled_tree_tracked() } }
+    test("getSetUpdateTrackingEnabled_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { getSetUpdateTrackingEnabled_brute_force() } }
+    test("isUpdateTrackingSupported_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { isUpdateTrackingSupported_sap_untracked() } }
+    test("isUpdateTrackingSupported_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { isUpdateTrackingSupported_sap_tracked() } }
+    test("isUpdateTrackingSupported_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { isUpdateTrackingSupported_tree_untracked() } }
+    test("isUpdateTrackingSupported_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { isUpdateTrackingSupported_tree_tracked() } }
+    test("isUpdateTrackingSupported_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { isUpdateTrackingSupported_brute_force() } }
+    test("optimize_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { optimize_sap_untracked() } }
+    test("optimize_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { optimize_sap_tracked() } }
+    test("optimize_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { optimize_tree_untracked() } }
+    test("optimize_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { optimize_tree_tracked() } }
+    test("optimize_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { optimize_brute_force() } }
+    test("setUpdated_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { setUpdated_sap_untracked() } }
+    test("setUpdated_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { setUpdated_sap_tracked() } }
+    test("setUpdated_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { setUpdated_tree_untracked() } }
+    test("setUpdated_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { setUpdated_tree_tracked() } }
+    test("setUpdated_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { setUpdated_brute_force() } }
+    test("size_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { size_sap_untracked() } }
+    test("size_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { size_sap_tracked() } }
+    test("size_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { size_tree_untracked() } }
+    test("size_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { size_tree_tracked() } }
+    test("size_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { size_brute_force() } }
+    test("detectConvexAndTransform_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectConvexAndTransform_sap_untracked() } }
+    test("detectConvexAndTransform_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectConvexAndTransform_sap_tracked() } }
+    test("detectConvexAndTransform_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectConvexAndTransform_tree_untracked() } }
+    test("detectConvexAndTransform_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectConvexAndTransform_tree_tracked() } }
+    test("detectConvexAndTransform_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { detectConvexAndTransform_brute_force() } }
+    test("detectIteratorFailure_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectIteratorFailure_sap_untracked() } }
+    test("detectIteratorFailure_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectIteratorFailure_sap_tracked() } }
+    test("detectIteratorFailure_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectIteratorFailure_tree_untracked() } }
+    test("detectIteratorFailure_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectIteratorFailure_tree_tracked() } }
+    test("detectIteratorFailure_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { detectIteratorFailure_brute_force() } }
+    test("raycastIteratorFailure_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { raycastIteratorFailure_sap_untracked() } }
+    test("raycastIteratorFailure_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { raycastIteratorFailure_sap_tracked() } }
+    test("raycastIteratorFailure_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { raycastIteratorFailure_tree_untracked() } }
+    test("raycastIteratorFailure_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { raycastIteratorFailure_tree_tracked() } }
+    test("raycastIteratorFailure_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { raycastIteratorFailure_brute_force() } }
+    test("detectAABBIteratorFailure_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectAABBIteratorFailure_sap_untracked() } }
+    test("detectAABBIteratorFailure_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectAABBIteratorFailure_sap_tracked() } }
+    test("detectAABBIteratorFailure_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectAABBIteratorFailure_tree_untracked() } }
+    test("detectAABBIteratorFailure_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectAABBIteratorFailure_tree_tracked() } }
+    test("detectAABBIteratorFailure_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { detectAABBIteratorFailure_brute_force() } }
+    test("detectEmptyIterator_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectEmptyIterator_sap_untracked() } }
+    test("detectEmptyIterator_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectEmptyIterator_sap_tracked() } }
+    test("detectEmptyIterator_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectEmptyIterator_tree_untracked() } }
+    test("detectEmptyIterator_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectEmptyIterator_tree_tracked() } }
+    test("detectEmptyIterator_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { detectEmptyIterator_brute_force() } }
+    test("detect_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detect_sap_untracked() } }
+    test("detect_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detect_sap_tracked() } }
+    test("detect_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detect_tree_untracked() } }
+    test("detect_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detect_tree_tracked() } }
+    test("detect_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { detect_brute_force() } }
+    test("detectAABB_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectAABB_sap_untracked() } }
+    test("detectAABB_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectAABB_sap_tracked() } }
+    test("detectAABB_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectAABB_tree_untracked() } }
+    test("detectAABB_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectAABB_tree_tracked() } }
+    test("detectAABB_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { detectAABB_brute_force() } }
+    test("detectRay_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectRay_sap_untracked() } }
+    test("detectRay_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectRay_sap_tracked() } }
+    test("detectRay_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectRay_tree_untracked() } }
+    test("detectRay_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { detectRay_tree_tracked() } }
+    test("detectRay_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { detectRay_brute_force() } }
+    test("shiftCoordinates_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { shiftCoordinates_sap_untracked() } }
+    test("shiftCoordinates_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { shiftCoordinates_sap_tracked() } }
+    test("shiftCoordinates_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { shiftCoordinates_tree_untracked() } }
+    test("shiftCoordinates_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { shiftCoordinates_tree_tracked() } }
+    test("shiftCoordinates_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { shiftCoordinates_brute_force() } }
+    test("getBroadphaseFilter_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getBroadphaseFilter_sap_untracked() } }
+    test("getBroadphaseFilter_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getBroadphaseFilter_sap_tracked() } }
+    test("getBroadphaseFilter_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getBroadphaseFilter_tree_untracked() } }
+    test("getBroadphaseFilter_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { getBroadphaseFilter_tree_tracked() } }
+    test("getBroadphaseFilter_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { getBroadphaseFilter_brute_force() } }
+    test("randomizedTest_sap_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { randomizedTest_sap_untracked() } }
+    test("randomizedTest_sap_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { randomizedTest_sap_tracked() } }
+    test("randomizedTest_tree_untracked") { CollisionBodyBroadphaseCoverageTestFixture().run { randomizedTest_tree_untracked() } }
+    test("randomizedTest_tree_tracked") { CollisionBodyBroadphaseCoverageTestFixture().run { randomizedTest_tree_tracked() } }
+    test("randomizedTest_brute_force") { CollisionBodyBroadphaseCoverageTestFixture().run { randomizedTest_brute_force() } }
+}
+
 private class Body : AbstractCollisionBody<Fixture> {
     constructor() : super()
     constructor(shape: Convex) : this() { addFixture(shape) }
@@ -62,7 +190,7 @@ private class Body : AbstractCollisionBody<Fixture> {
 
 private enum class Variant { SAP_UNTRACKED, SAP_TRACKED, TREE_UNTRACKED, TREE_TRACKED, BRUTE_FORCE }
 
-class CollisionBodyBroadphaseCoverageTest {
+private class CollisionBodyBroadphaseCoverageTestFixture  {
     private fun detector(variant: Variant): BroadphaseDetector<Body> {
         val filter = CollisionBodyBroadphaseFilter<Body>()
         val producer = CollisionBodyAABBProducer<Body>()
@@ -437,155 +565,155 @@ class CollisionBodyBroadphaseCoverageTest {
         }
     }
 
-    @Test fun addContainsBody_sap_untracked() = addContainsBody(Variant.SAP_UNTRACKED)
-    @Test fun addContainsBody_sap_tracked() = addContainsBody(Variant.SAP_TRACKED)
-    @Test fun addContainsBody_tree_untracked() = addContainsBody(Variant.TREE_UNTRACKED)
-    @Test fun addContainsBody_tree_tracked() = addContainsBody(Variant.TREE_TRACKED)
-    @Test fun addContainsBody_brute_force() = addContainsBody(Variant.BRUTE_FORCE)
+fun addContainsBody_sap_untracked() = addContainsBody(Variant.SAP_UNTRACKED)
+fun addContainsBody_sap_tracked() = addContainsBody(Variant.SAP_TRACKED)
+fun addContainsBody_tree_untracked() = addContainsBody(Variant.TREE_UNTRACKED)
+fun addContainsBody_tree_tracked() = addContainsBody(Variant.TREE_TRACKED)
+fun addContainsBody_brute_force() = addContainsBody(Variant.BRUTE_FORCE)
 
-    @Test fun clear_sap_untracked() = clear(Variant.SAP_UNTRACKED)
-    @Test fun clear_sap_tracked() = clear(Variant.SAP_TRACKED)
-    @Test fun clear_tree_untracked() = clear(Variant.TREE_UNTRACKED)
-    @Test fun clear_tree_tracked() = clear(Variant.TREE_TRACKED)
-    @Test fun clear_brute_force() = clear(Variant.BRUTE_FORCE)
+fun clear_sap_untracked() = clear(Variant.SAP_UNTRACKED)
+fun clear_sap_tracked() = clear(Variant.SAP_TRACKED)
+fun clear_tree_untracked() = clear(Variant.TREE_UNTRACKED)
+fun clear_tree_tracked() = clear(Variant.TREE_TRACKED)
+fun clear_brute_force() = clear(Variant.BRUTE_FORCE)
 
-    @Test fun updateTargeted_sap_untracked() = updateCase(Variant.SAP_UNTRACKED, true)
-    @Test fun updateTargeted_sap_tracked() = updateCase(Variant.SAP_TRACKED, true)
-    @Test fun updateTargeted_tree_untracked() = updateCase(Variant.TREE_UNTRACKED, true)
-    @Test fun updateTargeted_tree_tracked() = updateCase(Variant.TREE_TRACKED, true)
-    @Test fun updateTargeted_brute_force() = updateCase(Variant.BRUTE_FORCE, true)
+fun updateTargeted_sap_untracked() = updateCase(Variant.SAP_UNTRACKED, true)
+fun updateTargeted_sap_tracked() = updateCase(Variant.SAP_TRACKED, true)
+fun updateTargeted_tree_untracked() = updateCase(Variant.TREE_UNTRACKED, true)
+fun updateTargeted_tree_tracked() = updateCase(Variant.TREE_TRACKED, true)
+fun updateTargeted_brute_force() = updateCase(Variant.BRUTE_FORCE, true)
 
-    @Test fun update_sap_untracked() = updateCase(Variant.SAP_UNTRACKED, false)
-    @Test fun update_sap_tracked() = updateCase(Variant.SAP_TRACKED, false)
-    @Test fun update_tree_untracked() = updateCase(Variant.TREE_UNTRACKED, false)
-    @Test fun update_tree_tracked() = updateCase(Variant.TREE_TRACKED, false)
-    @Test fun update_brute_force() = updateCase(Variant.BRUTE_FORCE, false)
+fun update_sap_untracked() = updateCase(Variant.SAP_UNTRACKED, false)
+fun update_sap_tracked() = updateCase(Variant.SAP_TRACKED, false)
+fun update_tree_untracked() = updateCase(Variant.TREE_UNTRACKED, false)
+fun update_tree_tracked() = updateCase(Variant.TREE_TRACKED, false)
+fun update_brute_force() = updateCase(Variant.BRUTE_FORCE, false)
 
-    @Test fun removeContainsBody_sap_untracked() = removeContainsBody(Variant.SAP_UNTRACKED)
-    @Test fun removeContainsBody_sap_tracked() = removeContainsBody(Variant.SAP_TRACKED)
-    @Test fun removeContainsBody_tree_untracked() = removeContainsBody(Variant.TREE_UNTRACKED)
-    @Test fun removeContainsBody_tree_tracked() = removeContainsBody(Variant.TREE_TRACKED)
-    @Test fun removeContainsBody_brute_force() = removeContainsBody(Variant.BRUTE_FORCE)
+fun removeContainsBody_sap_untracked() = removeContainsBody(Variant.SAP_UNTRACKED)
+fun removeContainsBody_sap_tracked() = removeContainsBody(Variant.SAP_TRACKED)
+fun removeContainsBody_tree_untracked() = removeContainsBody(Variant.TREE_UNTRACKED)
+fun removeContainsBody_tree_tracked() = removeContainsBody(Variant.TREE_TRACKED)
+fun removeContainsBody_brute_force() = removeContainsBody(Variant.BRUTE_FORCE)
 
-    @Test fun getAABB_sap_untracked() = getAABB(Variant.SAP_UNTRACKED)
-    @Test fun getAABB_sap_tracked() = getAABB(Variant.SAP_TRACKED)
-    @Test fun getAABB_tree_untracked() = getAABB(Variant.TREE_UNTRACKED)
-    @Test fun getAABB_tree_tracked() = getAABB(Variant.TREE_TRACKED)
-    @Test fun getAABB_brute_force() = getAABB(Variant.BRUTE_FORCE)
+fun getAABB_sap_untracked() = getAABB(Variant.SAP_UNTRACKED)
+fun getAABB_sap_tracked() = getAABB(Variant.SAP_TRACKED)
+fun getAABB_tree_untracked() = getAABB(Variant.TREE_UNTRACKED)
+fun getAABB_tree_tracked() = getAABB(Variant.TREE_TRACKED)
+fun getAABB_brute_force() = getAABB(Variant.BRUTE_FORCE)
 
-    @Test fun getAABBExpansionMethod_sap_untracked() = getAABBExpansionMethod(Variant.SAP_UNTRACKED)
-    @Test fun getAABBExpansionMethod_sap_tracked() = getAABBExpansionMethod(Variant.SAP_TRACKED)
-    @Test fun getAABBExpansionMethod_tree_untracked() = getAABBExpansionMethod(Variant.TREE_UNTRACKED)
-    @Test fun getAABBExpansionMethod_tree_tracked() = getAABBExpansionMethod(Variant.TREE_TRACKED)
-    @Test fun getAABBExpansionMethod_brute_force() = getAABBExpansionMethod(Variant.BRUTE_FORCE)
+fun getAABBExpansionMethod_sap_untracked() = getAABBExpansionMethod(Variant.SAP_UNTRACKED)
+fun getAABBExpansionMethod_sap_tracked() = getAABBExpansionMethod(Variant.SAP_TRACKED)
+fun getAABBExpansionMethod_tree_untracked() = getAABBExpansionMethod(Variant.TREE_UNTRACKED)
+fun getAABBExpansionMethod_tree_tracked() = getAABBExpansionMethod(Variant.TREE_TRACKED)
+fun getAABBExpansionMethod_brute_force() = getAABBExpansionMethod(Variant.BRUTE_FORCE)
 
-    @Test fun updateSmall_sap_untracked() = updateSmall(Variant.SAP_UNTRACKED)
-    @Test fun updateSmall_sap_tracked() = updateSmall(Variant.SAP_TRACKED)
-    @Test fun updateSmall_tree_untracked() = updateSmall(Variant.TREE_UNTRACKED)
-    @Test fun updateSmall_tree_tracked() = updateSmall(Variant.TREE_TRACKED)
-    @Test fun updateSmall_brute_force() = updateSmall(Variant.BRUTE_FORCE)
+fun updateSmall_sap_untracked() = updateSmall(Variant.SAP_UNTRACKED)
+fun updateSmall_sap_tracked() = updateSmall(Variant.SAP_TRACKED)
+fun updateSmall_tree_untracked() = updateSmall(Variant.TREE_UNTRACKED)
+fun updateSmall_tree_tracked() = updateSmall(Variant.TREE_TRACKED)
+fun updateSmall_brute_force() = updateSmall(Variant.BRUTE_FORCE)
 
-    @Test fun updateLarge_sap_untracked() = updateLarge(Variant.SAP_UNTRACKED)
-    @Test fun updateLarge_sap_tracked() = updateLarge(Variant.SAP_TRACKED)
-    @Test fun updateLarge_tree_untracked() = updateLarge(Variant.TREE_UNTRACKED)
-    @Test fun updateLarge_tree_tracked() = updateLarge(Variant.TREE_TRACKED)
-    @Test fun updateLarge_brute_force() = updateLarge(Variant.BRUTE_FORCE)
+fun updateLarge_sap_untracked() = updateLarge(Variant.SAP_UNTRACKED)
+fun updateLarge_sap_tracked() = updateLarge(Variant.SAP_TRACKED)
+fun updateLarge_tree_untracked() = updateLarge(Variant.TREE_UNTRACKED)
+fun updateLarge_tree_tracked() = updateLarge(Variant.TREE_TRACKED)
+fun updateLarge_brute_force() = updateLarge(Variant.BRUTE_FORCE)
 
-    @Test fun getSetUpdateTrackingEnabled_sap_untracked() = getSetUpdateTrackingEnabled(Variant.SAP_UNTRACKED)
-    @Test fun getSetUpdateTrackingEnabled_sap_tracked() = getSetUpdateTrackingEnabled(Variant.SAP_TRACKED)
-    @Test fun getSetUpdateTrackingEnabled_tree_untracked() = getSetUpdateTrackingEnabled(Variant.TREE_UNTRACKED)
-    @Test fun getSetUpdateTrackingEnabled_tree_tracked() = getSetUpdateTrackingEnabled(Variant.TREE_TRACKED)
-    @Test fun getSetUpdateTrackingEnabled_brute_force() = getSetUpdateTrackingEnabled(Variant.BRUTE_FORCE)
+fun getSetUpdateTrackingEnabled_sap_untracked() = getSetUpdateTrackingEnabled(Variant.SAP_UNTRACKED)
+fun getSetUpdateTrackingEnabled_sap_tracked() = getSetUpdateTrackingEnabled(Variant.SAP_TRACKED)
+fun getSetUpdateTrackingEnabled_tree_untracked() = getSetUpdateTrackingEnabled(Variant.TREE_UNTRACKED)
+fun getSetUpdateTrackingEnabled_tree_tracked() = getSetUpdateTrackingEnabled(Variant.TREE_TRACKED)
+fun getSetUpdateTrackingEnabled_brute_force() = getSetUpdateTrackingEnabled(Variant.BRUTE_FORCE)
 
-    @Test fun isUpdateTrackingSupported_sap_untracked() = isUpdateTrackingSupported(Variant.SAP_UNTRACKED)
-    @Test fun isUpdateTrackingSupported_sap_tracked() = isUpdateTrackingSupported(Variant.SAP_TRACKED)
-    @Test fun isUpdateTrackingSupported_tree_untracked() = isUpdateTrackingSupported(Variant.TREE_UNTRACKED)
-    @Test fun isUpdateTrackingSupported_tree_tracked() = isUpdateTrackingSupported(Variant.TREE_TRACKED)
-    @Test fun isUpdateTrackingSupported_brute_force() = isUpdateTrackingSupported(Variant.BRUTE_FORCE)
+fun isUpdateTrackingSupported_sap_untracked() = isUpdateTrackingSupported(Variant.SAP_UNTRACKED)
+fun isUpdateTrackingSupported_sap_tracked() = isUpdateTrackingSupported(Variant.SAP_TRACKED)
+fun isUpdateTrackingSupported_tree_untracked() = isUpdateTrackingSupported(Variant.TREE_UNTRACKED)
+fun isUpdateTrackingSupported_tree_tracked() = isUpdateTrackingSupported(Variant.TREE_TRACKED)
+fun isUpdateTrackingSupported_brute_force() = isUpdateTrackingSupported(Variant.BRUTE_FORCE)
 
-    @Test fun optimize_sap_untracked() = optimize(Variant.SAP_UNTRACKED)
-    @Test fun optimize_sap_tracked() = optimize(Variant.SAP_TRACKED)
-    @Test fun optimize_tree_untracked() = optimize(Variant.TREE_UNTRACKED)
-    @Test fun optimize_tree_tracked() = optimize(Variant.TREE_TRACKED)
-    @Test fun optimize_brute_force() = optimize(Variant.BRUTE_FORCE)
+fun optimize_sap_untracked() = optimize(Variant.SAP_UNTRACKED)
+fun optimize_sap_tracked() = optimize(Variant.SAP_TRACKED)
+fun optimize_tree_untracked() = optimize(Variant.TREE_UNTRACKED)
+fun optimize_tree_tracked() = optimize(Variant.TREE_TRACKED)
+fun optimize_brute_force() = optimize(Variant.BRUTE_FORCE)
 
-    @Test fun setUpdated_sap_untracked() = setUpdated(Variant.SAP_UNTRACKED)
-    @Test fun setUpdated_sap_tracked() = setUpdated(Variant.SAP_TRACKED)
-    @Test fun setUpdated_tree_untracked() = setUpdated(Variant.TREE_UNTRACKED)
-    @Test fun setUpdated_tree_tracked() = setUpdated(Variant.TREE_TRACKED)
-    @Test fun setUpdated_brute_force() = setUpdated(Variant.BRUTE_FORCE)
+fun setUpdated_sap_untracked() = setUpdated(Variant.SAP_UNTRACKED)
+fun setUpdated_sap_tracked() = setUpdated(Variant.SAP_TRACKED)
+fun setUpdated_tree_untracked() = setUpdated(Variant.TREE_UNTRACKED)
+fun setUpdated_tree_tracked() = setUpdated(Variant.TREE_TRACKED)
+fun setUpdated_brute_force() = setUpdated(Variant.BRUTE_FORCE)
 
-    @Test fun size_sap_untracked() = size(Variant.SAP_UNTRACKED)
-    @Test fun size_sap_tracked() = size(Variant.SAP_TRACKED)
-    @Test fun size_tree_untracked() = size(Variant.TREE_UNTRACKED)
-    @Test fun size_tree_tracked() = size(Variant.TREE_TRACKED)
-    @Test fun size_brute_force() = size(Variant.BRUTE_FORCE)
+fun size_sap_untracked() = size(Variant.SAP_UNTRACKED)
+fun size_sap_tracked() = size(Variant.SAP_TRACKED)
+fun size_tree_untracked() = size(Variant.TREE_UNTRACKED)
+fun size_tree_tracked() = size(Variant.TREE_TRACKED)
+fun size_brute_force() = size(Variant.BRUTE_FORCE)
 
-    @Test fun detectConvexAndTransform_sap_untracked() = detectConvexAndTransform(Variant.SAP_UNTRACKED)
-    @Test fun detectConvexAndTransform_sap_tracked() = detectConvexAndTransform(Variant.SAP_TRACKED)
-    @Test fun detectConvexAndTransform_tree_untracked() = detectConvexAndTransform(Variant.TREE_UNTRACKED)
-    @Test fun detectConvexAndTransform_tree_tracked() = detectConvexAndTransform(Variant.TREE_TRACKED)
-    @Test fun detectConvexAndTransform_brute_force() = detectConvexAndTransform(Variant.BRUTE_FORCE)
+fun detectConvexAndTransform_sap_untracked() = detectConvexAndTransform(Variant.SAP_UNTRACKED)
+fun detectConvexAndTransform_sap_tracked() = detectConvexAndTransform(Variant.SAP_TRACKED)
+fun detectConvexAndTransform_tree_untracked() = detectConvexAndTransform(Variant.TREE_UNTRACKED)
+fun detectConvexAndTransform_tree_tracked() = detectConvexAndTransform(Variant.TREE_TRACKED)
+fun detectConvexAndTransform_brute_force() = detectConvexAndTransform(Variant.BRUTE_FORCE)
 
-    @Test fun detectIteratorFailure_sap_untracked() = detectIteratorFailure(Variant.SAP_UNTRACKED)
-    @Test fun detectIteratorFailure_sap_tracked() = detectIteratorFailure(Variant.SAP_TRACKED)
-    @Test fun detectIteratorFailure_tree_untracked() = detectIteratorFailure(Variant.TREE_UNTRACKED)
-    @Test fun detectIteratorFailure_tree_tracked() = detectIteratorFailure(Variant.TREE_TRACKED)
-    @Test fun detectIteratorFailure_brute_force() = detectIteratorFailure(Variant.BRUTE_FORCE)
+fun detectIteratorFailure_sap_untracked() = detectIteratorFailure(Variant.SAP_UNTRACKED)
+fun detectIteratorFailure_sap_tracked() = detectIteratorFailure(Variant.SAP_TRACKED)
+fun detectIteratorFailure_tree_untracked() = detectIteratorFailure(Variant.TREE_UNTRACKED)
+fun detectIteratorFailure_tree_tracked() = detectIteratorFailure(Variant.TREE_TRACKED)
+fun detectIteratorFailure_brute_force() = detectIteratorFailure(Variant.BRUTE_FORCE)
 
-    @Test fun raycastIteratorFailure_sap_untracked() = raycastIteratorFailure(Variant.SAP_UNTRACKED)
-    @Test fun raycastIteratorFailure_sap_tracked() = raycastIteratorFailure(Variant.SAP_TRACKED)
-    @Test fun raycastIteratorFailure_tree_untracked() = raycastIteratorFailure(Variant.TREE_UNTRACKED)
-    @Test fun raycastIteratorFailure_tree_tracked() = raycastIteratorFailure(Variant.TREE_TRACKED)
-    @Test fun raycastIteratorFailure_brute_force() = raycastIteratorFailure(Variant.BRUTE_FORCE)
+fun raycastIteratorFailure_sap_untracked() = raycastIteratorFailure(Variant.SAP_UNTRACKED)
+fun raycastIteratorFailure_sap_tracked() = raycastIteratorFailure(Variant.SAP_TRACKED)
+fun raycastIteratorFailure_tree_untracked() = raycastIteratorFailure(Variant.TREE_UNTRACKED)
+fun raycastIteratorFailure_tree_tracked() = raycastIteratorFailure(Variant.TREE_TRACKED)
+fun raycastIteratorFailure_brute_force() = raycastIteratorFailure(Variant.BRUTE_FORCE)
 
-    @Test fun detectAABBIteratorFailure_sap_untracked() = detectAABBIteratorFailure(Variant.SAP_UNTRACKED)
-    @Test fun detectAABBIteratorFailure_sap_tracked() = detectAABBIteratorFailure(Variant.SAP_TRACKED)
-    @Test fun detectAABBIteratorFailure_tree_untracked() = detectAABBIteratorFailure(Variant.TREE_UNTRACKED)
-    @Test fun detectAABBIteratorFailure_tree_tracked() = detectAABBIteratorFailure(Variant.TREE_TRACKED)
-    @Test fun detectAABBIteratorFailure_brute_force() = detectAABBIteratorFailure(Variant.BRUTE_FORCE)
+fun detectAABBIteratorFailure_sap_untracked() = detectAABBIteratorFailure(Variant.SAP_UNTRACKED)
+fun detectAABBIteratorFailure_sap_tracked() = detectAABBIteratorFailure(Variant.SAP_TRACKED)
+fun detectAABBIteratorFailure_tree_untracked() = detectAABBIteratorFailure(Variant.TREE_UNTRACKED)
+fun detectAABBIteratorFailure_tree_tracked() = detectAABBIteratorFailure(Variant.TREE_TRACKED)
+fun detectAABBIteratorFailure_brute_force() = detectAABBIteratorFailure(Variant.BRUTE_FORCE)
 
-    @Test fun detectEmptyIterator_sap_untracked() = detectEmptyIterator(Variant.SAP_UNTRACKED)
-    @Test fun detectEmptyIterator_sap_tracked() = detectEmptyIterator(Variant.SAP_TRACKED)
-    @Test fun detectEmptyIterator_tree_untracked() = detectEmptyIterator(Variant.TREE_UNTRACKED)
-    @Test fun detectEmptyIterator_tree_tracked() = detectEmptyIterator(Variant.TREE_TRACKED)
-    @Test fun detectEmptyIterator_brute_force() = detectEmptyIterator(Variant.BRUTE_FORCE)
+fun detectEmptyIterator_sap_untracked() = detectEmptyIterator(Variant.SAP_UNTRACKED)
+fun detectEmptyIterator_sap_tracked() = detectEmptyIterator(Variant.SAP_TRACKED)
+fun detectEmptyIterator_tree_untracked() = detectEmptyIterator(Variant.TREE_UNTRACKED)
+fun detectEmptyIterator_tree_tracked() = detectEmptyIterator(Variant.TREE_TRACKED)
+fun detectEmptyIterator_brute_force() = detectEmptyIterator(Variant.BRUTE_FORCE)
 
-    @Test fun detect_sap_untracked() = detect(Variant.SAP_UNTRACKED)
-    @Test fun detect_sap_tracked() = detect(Variant.SAP_TRACKED)
-    @Test fun detect_tree_untracked() = detect(Variant.TREE_UNTRACKED)
-    @Test fun detect_tree_tracked() = detect(Variant.TREE_TRACKED)
-    @Test fun detect_brute_force() = detect(Variant.BRUTE_FORCE)
+fun detect_sap_untracked() = detect(Variant.SAP_UNTRACKED)
+fun detect_sap_tracked() = detect(Variant.SAP_TRACKED)
+fun detect_tree_untracked() = detect(Variant.TREE_UNTRACKED)
+fun detect_tree_tracked() = detect(Variant.TREE_TRACKED)
+fun detect_brute_force() = detect(Variant.BRUTE_FORCE)
 
-    @Test fun detectAABB_sap_untracked() = detectAABB(Variant.SAP_UNTRACKED)
-    @Test fun detectAABB_sap_tracked() = detectAABB(Variant.SAP_TRACKED)
-    @Test fun detectAABB_tree_untracked() = detectAABB(Variant.TREE_UNTRACKED)
-    @Test fun detectAABB_tree_tracked() = detectAABB(Variant.TREE_TRACKED)
-    @Test fun detectAABB_brute_force() = detectAABB(Variant.BRUTE_FORCE)
+fun detectAABB_sap_untracked() = detectAABB(Variant.SAP_UNTRACKED)
+fun detectAABB_sap_tracked() = detectAABB(Variant.SAP_TRACKED)
+fun detectAABB_tree_untracked() = detectAABB(Variant.TREE_UNTRACKED)
+fun detectAABB_tree_tracked() = detectAABB(Variant.TREE_TRACKED)
+fun detectAABB_brute_force() = detectAABB(Variant.BRUTE_FORCE)
 
-    @Test fun detectRay_sap_untracked() = detectRay(Variant.SAP_UNTRACKED)
-    @Test fun detectRay_sap_tracked() = detectRay(Variant.SAP_TRACKED)
-    @Test fun detectRay_tree_untracked() = detectRay(Variant.TREE_UNTRACKED)
-    @Test fun detectRay_tree_tracked() = detectRay(Variant.TREE_TRACKED)
-    @Test fun detectRay_brute_force() = detectRay(Variant.BRUTE_FORCE)
+fun detectRay_sap_untracked() = detectRay(Variant.SAP_UNTRACKED)
+fun detectRay_sap_tracked() = detectRay(Variant.SAP_TRACKED)
+fun detectRay_tree_untracked() = detectRay(Variant.TREE_UNTRACKED)
+fun detectRay_tree_tracked() = detectRay(Variant.TREE_TRACKED)
+fun detectRay_brute_force() = detectRay(Variant.BRUTE_FORCE)
 
-    @Test fun shiftCoordinates_sap_untracked() = shiftCoordinates(Variant.SAP_UNTRACKED)
-    @Test fun shiftCoordinates_sap_tracked() = shiftCoordinates(Variant.SAP_TRACKED)
-    @Test fun shiftCoordinates_tree_untracked() = shiftCoordinates(Variant.TREE_UNTRACKED)
-    @Test fun shiftCoordinates_tree_tracked() = shiftCoordinates(Variant.TREE_TRACKED)
-    @Test fun shiftCoordinates_brute_force() = shiftCoordinates(Variant.BRUTE_FORCE)
+fun shiftCoordinates_sap_untracked() = shiftCoordinates(Variant.SAP_UNTRACKED)
+fun shiftCoordinates_sap_tracked() = shiftCoordinates(Variant.SAP_TRACKED)
+fun shiftCoordinates_tree_untracked() = shiftCoordinates(Variant.TREE_UNTRACKED)
+fun shiftCoordinates_tree_tracked() = shiftCoordinates(Variant.TREE_TRACKED)
+fun shiftCoordinates_brute_force() = shiftCoordinates(Variant.BRUTE_FORCE)
 
-    @Test fun getBroadphaseFilter_sap_untracked() = getBroadphaseFilter(Variant.SAP_UNTRACKED)
-    @Test fun getBroadphaseFilter_sap_tracked() = getBroadphaseFilter(Variant.SAP_TRACKED)
-    @Test fun getBroadphaseFilter_tree_untracked() = getBroadphaseFilter(Variant.TREE_UNTRACKED)
-    @Test fun getBroadphaseFilter_tree_tracked() = getBroadphaseFilter(Variant.TREE_TRACKED)
-    @Test fun getBroadphaseFilter_brute_force() = getBroadphaseFilter(Variant.BRUTE_FORCE)
+fun getBroadphaseFilter_sap_untracked() = getBroadphaseFilter(Variant.SAP_UNTRACKED)
+fun getBroadphaseFilter_sap_tracked() = getBroadphaseFilter(Variant.SAP_TRACKED)
+fun getBroadphaseFilter_tree_untracked() = getBroadphaseFilter(Variant.TREE_UNTRACKED)
+fun getBroadphaseFilter_tree_tracked() = getBroadphaseFilter(Variant.TREE_TRACKED)
+fun getBroadphaseFilter_brute_force() = getBroadphaseFilter(Variant.BRUTE_FORCE)
 
-    @Test fun randomizedTest_sap_untracked() = randomizedTest(Variant.SAP_UNTRACKED)
-    @Test fun randomizedTest_sap_tracked() = randomizedTest(Variant.SAP_TRACKED)
-    @Test fun randomizedTest_tree_untracked() = randomizedTest(Variant.TREE_UNTRACKED)
-    @Test fun randomizedTest_tree_tracked() = randomizedTest(Variant.TREE_TRACKED)
-    @Test fun randomizedTest_brute_force() = randomizedTest(Variant.BRUTE_FORCE)
+fun randomizedTest_sap_untracked() = randomizedTest(Variant.SAP_UNTRACKED)
+fun randomizedTest_sap_tracked() = randomizedTest(Variant.SAP_TRACKED)
+fun randomizedTest_tree_untracked() = randomizedTest(Variant.TREE_UNTRACKED)
+fun randomizedTest_tree_tracked() = randomizedTest(Variant.TREE_TRACKED)
+fun randomizedTest_brute_force() = randomizedTest(Variant.BRUTE_FORCE)
 
     private data class RectBody(val body: Body?, val minX: Double, val minY: Double, val maxX: Double, val maxY: Double) {
         fun overlaps(other: RectBody) = minX <= other.maxX && maxX >= other.minX &&

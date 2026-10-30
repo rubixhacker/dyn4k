@@ -24,7 +24,7 @@
  */
 package org.dyn4j.coverage.world.core
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -65,6 +65,74 @@ import org.dyn4j.world.listener.BoundsListenerAdapter
 import org.dyn4j.world.listener.CollisionListenerAdapter
 import kotlin.math.PI
 import kotlin.math.sqrt
+
+val CollisionWorldCoreCoverageTest by testSuite {
+    test("createSuccess") { CollisionWorldCoreCoverageTestFixture().run { createSuccess() } }
+    test("addBody") { CollisionWorldCoreCoverageTestFixture().run { addBody() } }
+    test("addNullBody") { CollisionWorldCoreCoverageTestFixture().run { addNullBody() } }
+    test("addSameBodyToSameWorld") { CollisionWorldCoreCoverageTestFixture().run { addSameBodyToSameWorld() } }
+    test("addBodyFromOtherWorld") { CollisionWorldCoreCoverageTestFixture().run { addBodyFromOtherWorld() } }
+    test("removeAllBodies") { CollisionWorldCoreCoverageTestFixture().run { removeAllBodies() } }
+    test("containsBody") { CollisionWorldCoreCoverageTestFixture().run { containsBody() } }
+    test("removeBodyNegativeIndex") { CollisionWorldCoreCoverageTestFixture().run { removeBodyNegativeIndex() } }
+    test("removeBodyBadIndex") { CollisionWorldCoreCoverageTestFixture().run { removeBodyBadIndex() } }
+    test("removeBody") { CollisionWorldCoreCoverageTestFixture().run { removeBody() } }
+    test("getBodies") { CollisionWorldCoreCoverageTestFixture().run { getBodies() } }
+    test("getBodiesAndRemove") { CollisionWorldCoreCoverageTestFixture().run { getBodiesAndRemove() } }
+    test("getBodiesAndAdd") { CollisionWorldCoreCoverageTestFixture().run { getBodiesAndAdd() } }
+    test("getBodyAtIndex") { CollisionWorldCoreCoverageTestFixture().run { getBodyAtIndex() } }
+    test("getBodyAtNegativeIndex") { CollisionWorldCoreCoverageTestFixture().run { getBodyAtNegativeIndex() } }
+    test("getBodyAtBadIndex") { CollisionWorldCoreCoverageTestFixture().run { getBodyAtBadIndex() } }
+    test("getBodyCount") { CollisionWorldCoreCoverageTestFixture().run { getBodyCount() } }
+    test("isEmpty") { CollisionWorldCoreCoverageTestFixture().run { isEmpty() } }
+    test("getBodyIterator") { CollisionWorldCoreCoverageTestFixture().run { getBodyIterator() } }
+    test("getBodyIteratorFailure") { CollisionWorldCoreCoverageTestFixture().run { getBodyIteratorFailure() } }
+    test("getAndSetBounds") { CollisionWorldCoreCoverageTestFixture().run { getAndSetBounds() } }
+    test("getAndSetBroadphaseDetector") { CollisionWorldCoreCoverageTestFixture().run { getAndSetBroadphaseDetector() } }
+    test("setNullBroadphaseDetector") { CollisionWorldCoreCoverageTestFixture().run { setNullBroadphaseDetector() } }
+    test("getAndSetBroadphaseFilter") { CollisionWorldCoreCoverageTestFixture().run { getAndSetBroadphaseFilter() } }
+    test("setNullBroadphaseFilter") { CollisionWorldCoreCoverageTestFixture().run { setNullBroadphaseFilter() } }
+    test("getAndSetNarrowphaseDetector") { CollisionWorldCoreCoverageTestFixture().run { getAndSetNarrowphaseDetector() } }
+    test("setNullNarrowphaseDetector") { CollisionWorldCoreCoverageTestFixture().run { setNullNarrowphaseDetector() } }
+    test("getAndSetNarrowphasePostProcessor") { CollisionWorldCoreCoverageTestFixture().run { getAndSetNarrowphasePostProcessor() } }
+    test("setNullNarrowphasePostProcessor") { CollisionWorldCoreCoverageTestFixture().run { setNullNarrowphasePostProcessor() } }
+    test("setManifoldSolver") { CollisionWorldCoreCoverageTestFixture().run { setManifoldSolver() } }
+    test("setNullManifoldSolver") { CollisionWorldCoreCoverageTestFixture().run { setNullManifoldSolver() } }
+    test("setTimeOfImpactDetector") { CollisionWorldCoreCoverageTestFixture().run { setTimeOfImpactDetector() } }
+    test("setNullTimeOfImpactDetector") { CollisionWorldCoreCoverageTestFixture().run { setNullTimeOfImpactDetector() } }
+    test("setRaycastDetector") { CollisionWorldCoreCoverageTestFixture().run { setRaycastDetector() } }
+    test("setNullRaycastDetector") { CollisionWorldCoreCoverageTestFixture().run { setNullRaycastDetector() } }
+    test("shift") { CollisionWorldCoreCoverageTestFixture().run { shift() } }
+    test("getCollisionData") { CollisionWorldCoreCoverageTestFixture().run { getCollisionData() } }
+    test("getCollisionDataIterator") { CollisionWorldCoreCoverageTestFixture().run { getCollisionDataIterator() } }
+    test("getCollisionDataIteratorFailure") { CollisionWorldCoreCoverageTestFixture().run { getCollisionDataIteratorFailure() } }
+    test("fixtureModification") { CollisionWorldCoreCoverageTestFixture().run { fixtureModification() } }
+    test("listeners") { CollisionWorldCoreCoverageTestFixture().run { listeners() } }
+    test("getSetUserData") { CollisionWorldCoreCoverageTestFixture().run { getSetUserData() } }
+    test("detectBroadphaseFilterNotAllowed") { CollisionWorldCoreCoverageTestFixture().run { detectBroadphaseFilterNotAllowed() } }
+    test("detectNoLongerColliding") { CollisionWorldCoreCoverageTestFixture().run { detectNoLongerColliding() } }
+    test("detectIteratorRemove") { CollisionWorldCoreCoverageTestFixture().run { detectIteratorRemove() } }
+    test("detectWithListeners") { CollisionWorldCoreCoverageTestFixture().run { detectWithListeners() } }
+    test("detectWithFixtureModification") { CollisionWorldCoreCoverageTestFixture().run { detectWithFixtureModification() } }
+    test("detectWithBounds") { CollisionWorldCoreCoverageTestFixture().run { detectWithBounds() } }
+    test("detectWithDisabled") { CollisionWorldCoreCoverageTestFixture().run { detectWithDisabled() } }
+    test("detectAABB") { CollisionWorldCoreCoverageTestFixture().run { detectAABB() } }
+    test("detectAABBAgainstSingleBody") { CollisionWorldCoreCoverageTestFixture().run { detectAABBAgainstSingleBody() } }
+    test("detectAABBIterator") { CollisionWorldCoreCoverageTestFixture().run { detectAABBIterator() } }
+    test("detectAABBIteratorFailures") { CollisionWorldCoreCoverageTestFixture().run { detectAABBIteratorFailures() } }
+    test("detectConvex") { CollisionWorldCoreCoverageTestFixture().run { detectConvex() } }
+    test("detectConvexAgainstSingleBody") { CollisionWorldCoreCoverageTestFixture().run { detectConvexAgainstSingleBody() } }
+    test("detectContexIterator") { CollisionWorldCoreCoverageTestFixture().run { detectContexIterator() } }
+    test("detectConvexIteratorFailures") { CollisionWorldCoreCoverageTestFixture().run { detectConvexIteratorFailures() } }
+    test("raycast") { CollisionWorldCoreCoverageTestFixture().run { raycast() } }
+    test("raycastAgainstSingleBody") { CollisionWorldCoreCoverageTestFixture().run { raycastAgainstSingleBody() } }
+    test("raycastIterator") { CollisionWorldCoreCoverageTestFixture().run { raycastIterator() } }
+    test("raycastIteratorFailures") { CollisionWorldCoreCoverageTestFixture().run { raycastIteratorFailures() } }
+    test("convexCast") { CollisionWorldCoreCoverageTestFixture().run { convexCast() } }
+    test("convexCastAgainstSingleBody") { CollisionWorldCoreCoverageTestFixture().run { convexCastAgainstSingleBody() } }
+    test("convexCastIterator") { CollisionWorldCoreCoverageTestFixture().run { convexCastIterator() } }
+    test("convexCastIteratorFailures") { CollisionWorldCoreCoverageTestFixture().run { convexCastIteratorFailures() } }
+}
 
 internal open class CoreCollisionWorld(capacity: Int = 10) :
     AbstractCollisionWorld<Body, BodyFixture, WorldCollisionData<Body>>(capacity) {
@@ -120,8 +188,8 @@ private fun castWorld(extraFixture: Boolean): Triple<CoreCollisionWorld, Body, B
     return Triple(world, first, second)
 }
 
-class CollisionWorldCoreCoverageTest {
-    @Test fun createSuccess() {
+private class CollisionWorldCoreCoverageTestFixture  {
+fun createSuccess() {
         for (capacity in listOf(10, 16, -16, 0)) {
             val world = CoreCollisionWorld(capacity)
             assertTrue(world.getBodies().isEmpty())
@@ -141,7 +209,7 @@ class CollisionWorldCoreCoverageTest {
         }
     }
 
-    @Test fun addBody() {
+fun addBody() {
         val world = CoreCollisionWorld()
         val body = circleBody()
         val fixture = body.getFixture(0)
@@ -155,15 +223,15 @@ class CollisionWorldCoreCoverageTest {
         assertTrue(world.containsInBroadphase(body, fixture))
     }
 
-    @Test fun addNullBody() = assertFailsWith<NullPointerException> { CoreCollisionWorld().addBody(null) }.let { Unit }
-    @Test fun addSameBodyToSameWorld() {
+fun addNullBody() = assertFailsWith<NullPointerException> { CoreCollisionWorld().addBody(null) }.let { Unit }
+fun addSameBodyToSameWorld() {
         val world = CoreCollisionWorld()
         val body = Body()
         world.addBody(body)
         assertFailsWith<IllegalArgumentException> { world.addBody(body) }
         assertEquals(1, world.getBodyCount())
     }
-    @Test fun addBodyFromOtherWorld() {
+fun addBodyFromOtherWorld() {
         val first = CoreCollisionWorld()
         val second = CoreCollisionWorld()
         val body = Body()
@@ -172,7 +240,7 @@ class CollisionWorldCoreCoverageTest {
         assertSame(first, body.getOwner())
     }
 
-    @Test fun removeAllBodies() {
+fun removeAllBodies() {
         val world = CoreCollisionWorld()
         val first = circleBody()
         val second = Body().also { it.addFixture(Geometry.createEquilateralTriangle(0.5)); it.setMass(MassType.NORMAL) }
@@ -193,7 +261,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(0, world.collisionCount())
     }
 
-    @Test fun containsBody() {
+fun containsBody() {
         val world = CoreCollisionWorld()
         val first = Body()
         val second = Body()
@@ -205,10 +273,10 @@ class CollisionWorldCoreCoverageTest {
         assertFalse(world.containsBody(Body()))
     }
 
-    @Test fun removeBodyNegativeIndex() = assertFailsWith<IndexOutOfBoundsException> { CoreCollisionWorld().removeBody(-1) }.let { Unit }
-    @Test fun removeBodyBadIndex() = assertFailsWith<IndexOutOfBoundsException> { CoreCollisionWorld().removeBody(2) }.let { Unit }
+fun removeBodyNegativeIndex() = assertFailsWith<IndexOutOfBoundsException> { CoreCollisionWorld().removeBody(-1) }.let { Unit }
+fun removeBodyBadIndex() = assertFailsWith<IndexOutOfBoundsException> { CoreCollisionWorld().removeBody(2) }.let { Unit }
 
-    @Test fun removeBody() {
+fun removeBody() {
         val world = CoreCollisionWorld()
         val first = circleBody()
         val second = Body().also { it.addFixture(Geometry.createEquilateralTriangle(0.5)); it.setMass(MassType.NORMAL) }
@@ -232,7 +300,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(0, world.getBodyCount())
     }
 
-    @Test fun getBodies() {
+fun getBodies() {
         val world = CoreCollisionWorld()
         val view = world.getBodies()
         val first = Body()
@@ -243,15 +311,15 @@ class CollisionWorldCoreCoverageTest {
         assertSame(first, view[0])
         assertSame(second, view[1])
     }
-    @Test fun getBodiesAndRemove() {
+fun getBodiesAndRemove() {
         val world = CoreCollisionWorld()
         assertFailsWith<UnsupportedOperationException> { (world.getBodies() as MutableList<Body>).removeAt(0) }
     }
-    @Test fun getBodiesAndAdd() {
+fun getBodiesAndAdd() {
         val world = CoreCollisionWorld()
         assertFailsWith<UnsupportedOperationException> { (world.getBodies() as MutableList<Body>).add(Body()) }
     }
-    @Test fun getBodyAtIndex() {
+fun getBodyAtIndex() {
         val world = CoreCollisionWorld()
         val first = Body()
         val second = Body()
@@ -260,23 +328,23 @@ class CollisionWorldCoreCoverageTest {
         assertSame(first, world.getBody(0))
         assertSame(second, world.getBody(1))
     }
-    @Test fun getBodyAtNegativeIndex() = assertFailsWith<IndexOutOfBoundsException> { CoreCollisionWorld().getBody(-1) }.let { Unit }
-    @Test fun getBodyAtBadIndex() = assertFailsWith<IndexOutOfBoundsException> { CoreCollisionWorld().getBody(2) }.let { Unit }
-    @Test fun getBodyCount() {
+fun getBodyAtNegativeIndex() = assertFailsWith<IndexOutOfBoundsException> { CoreCollisionWorld().getBody(-1) }.let { Unit }
+fun getBodyAtBadIndex() = assertFailsWith<IndexOutOfBoundsException> { CoreCollisionWorld().getBody(2) }.let { Unit }
+fun getBodyCount() {
         val world = CoreCollisionWorld()
         assertEquals(0, world.getBodyCount())
         world.addBody(Body())
         world.addBody(Body())
         assertEquals(2, world.getBodyCount())
     }
-    @Test fun isEmpty() {
+fun isEmpty() {
         val world = CoreCollisionWorld()
         assertTrue(world.isEmpty())
         world.addBody(Body())
         world.addBody(Body())
         assertFalse(world.isEmpty())
     }
-    @Test fun getBodyIterator() {
+fun getBodyIterator() {
         val world = CoreCollisionWorld()
         val first = Body()
         val second = Body()
@@ -294,7 +362,7 @@ class CollisionWorldCoreCoverageTest {
         removing.remove()
         assertEquals(0, world.getBodyCount())
     }
-    @Test fun getBodyIteratorFailure() {
+fun getBodyIteratorFailure() {
         val world = CoreCollisionWorld()
         world.addBody(Body())
         world.addBody(Body())
@@ -313,7 +381,7 @@ class CollisionWorldCoreCoverageTest {
         assertFailsWith<IndexOutOfBoundsException> { modified.remove() }
     }
 
-    @Test fun getAndSetBounds() {
+fun getAndSetBounds() {
         val world = CoreCollisionWorld()
         assertNull(world.getBounds())
         val bounds = AxisAlignedBounds(10.0, 10.0)
@@ -322,7 +390,7 @@ class CollisionWorldCoreCoverageTest {
         world.setBounds(null)
         assertNull(world.getBounds())
     }
-    @Test fun getAndSetBroadphaseDetector() {
+fun getAndSetBroadphaseDetector() {
         val world = CoreCollisionWorld()
         val body = circleBody()
         world.addBody(body)
@@ -337,8 +405,8 @@ class CollisionWorldCoreCoverageTest {
         assertNotSame(original, replacement)
         assertTrue(world.containsInBroadphase(body, body.getFixture(0)))
     }
-    @Test fun setNullBroadphaseDetector() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setBroadphaseDetector(null) }.let { Unit }
-    @Test fun getAndSetBroadphaseFilter() {
+fun setNullBroadphaseDetector() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setBroadphaseDetector(null) }.let { Unit }
+fun getAndSetBroadphaseFilter() {
         val world = CoreCollisionWorld()
         val original = world.getBroadphaseCollisionDataFilter()
         val replacement = org.dyn4j.world.CollisionBodyBroadphaseCollisionDataFilter<Body, BodyFixture>()
@@ -346,8 +414,8 @@ class CollisionWorldCoreCoverageTest {
         assertSame(replacement, world.getBroadphaseCollisionDataFilter())
         assertNotSame(original, replacement)
     }
-    @Test fun setNullBroadphaseFilter() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setBroadphaseCollisionDataFilter(null) }.let { Unit }
-    @Test fun getAndSetNarrowphaseDetector() {
+fun setNullBroadphaseFilter() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setBroadphaseCollisionDataFilter(null) }.let { Unit }
+fun getAndSetNarrowphaseDetector() {
         val world = CoreCollisionWorld()
         val original = world.getNarrowphaseDetector()
         val replacement = Gjk()
@@ -355,8 +423,8 @@ class CollisionWorldCoreCoverageTest {
         assertSame(replacement, world.getNarrowphaseDetector())
         assertNotSame(original, replacement)
     }
-    @Test fun setNullNarrowphaseDetector() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setNarrowphaseDetector(null) }.let { Unit }
-    @Test fun getAndSetNarrowphasePostProcessor() {
+fun setNullNarrowphaseDetector() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setNarrowphaseDetector(null) }.let { Unit }
+fun getAndSetNarrowphasePostProcessor() {
         val world = CoreCollisionWorld()
         val original = world.getNarrowphasePostProcessor()
         val replacement = LinkPostProcessor()
@@ -364,8 +432,8 @@ class CollisionWorldCoreCoverageTest {
         assertSame(replacement, world.getNarrowphasePostProcessor())
         assertNotSame(original, replacement)
     }
-    @Test fun setNullNarrowphasePostProcessor() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setNarrowphasePostProcessor(null) }.let { Unit }
-    @Test fun setManifoldSolver() {
+fun setNullNarrowphasePostProcessor() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setNarrowphasePostProcessor(null) }.let { Unit }
+fun setManifoldSolver() {
         val world = CoreCollisionWorld()
         val original = world.getManifoldSolver()
         val replacement = ClippingManifoldSolver()
@@ -373,8 +441,8 @@ class CollisionWorldCoreCoverageTest {
         assertSame(replacement, world.getManifoldSolver())
         assertNotSame(original, replacement)
     }
-    @Test fun setNullManifoldSolver() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setManifoldSolver(null) }.let { Unit }
-    @Test fun setTimeOfImpactDetector() {
+fun setNullManifoldSolver() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setManifoldSolver(null) }.let { Unit }
+fun setTimeOfImpactDetector() {
         val world = CoreCollisionWorld()
         val original = world.getTimeOfImpactDetector()
         val replacement = ConservativeAdvancement()
@@ -382,8 +450,8 @@ class CollisionWorldCoreCoverageTest {
         assertSame(replacement, world.getTimeOfImpactDetector())
         assertNotSame(original, replacement)
     }
-    @Test fun setNullTimeOfImpactDetector() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setTimeOfImpactDetector(null) }.let { Unit }
-    @Test fun setRaycastDetector() {
+fun setNullTimeOfImpactDetector() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setTimeOfImpactDetector(null) }.let { Unit }
+fun setRaycastDetector() {
         val world = CoreCollisionWorld()
         val original = world.getRaycastDetector()
         val replacement = Gjk()
@@ -391,9 +459,9 @@ class CollisionWorldCoreCoverageTest {
         assertSame(replacement, world.getRaycastDetector())
         assertNotSame(original, replacement)
     }
-    @Test fun setNullRaycastDetector() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setRaycastDetector(null) }.let { Unit }
+fun setNullRaycastDetector() = assertFailsWith<NullPointerException> { CoreCollisionWorld().setRaycastDetector(null) }.let { Unit }
 
-    @Test fun shift() {
+fun shift() {
         val world = CoreCollisionWorld()
         val bounds = AxisAlignedBounds(20.0, 20.0)
         world.setBounds(bounds)
@@ -424,7 +492,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(point.y + 1.0, data.getManifold().getPoints()[0].getPoint().y)
     }
 
-    @Test fun getCollisionData() {
+fun getCollisionData() {
         val world = CoreCollisionWorld()
         val first = circleBody()
         val second = Body().also { it.addFixture(Geometry.createEquilateralTriangle(0.5)); it.setMass(MassType.NORMAL) }
@@ -450,7 +518,7 @@ class CollisionWorldCoreCoverageTest {
         assertNull(world.getCollisionData(null, null, null, null))
     }
 
-    @Test fun getCollisionDataIterator() {
+fun getCollisionDataIterator() {
         val world = CoreCollisionWorld()
         val first = circleBody()
         val second = Body().also { it.addFixture(Geometry.createEquilateralTriangle(0.5)); it.setMass(MassType.NORMAL) }
@@ -498,7 +566,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(1, world.getCollisionDataIterator().asSequence().count())
     }
 
-    @Test fun getCollisionDataIteratorFailure() {
+fun getCollisionDataIteratorFailure() {
         val world = CoreCollisionWorld()
         world.addBody(circleBody())
         world.addBody(Body().also { it.addFixture(Geometry.createEquilateralTriangle(0.5)); it.setMass(MassType.NORMAL) })
@@ -510,7 +578,7 @@ class CollisionWorldCoreCoverageTest {
         assertFailsWith<NoSuchElementException> { iterator.next() }
     }
 
-    @Test fun fixtureModification() {
+fun fixtureModification() {
         val world = CoreCollisionWorld()
         val first = circleBody()
         val oldFixture = first.getFixture(0)
@@ -540,7 +608,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(0, world.collisionCount())
     }
 
-    @Test fun listeners() {
+fun listeners() {
         val world = CoreCollisionWorld()
         val bounds = BoundsListenerAdapter<Body, BodyFixture>()
         val collision = CollisionListenerAdapter<Body, BodyFixture>()
@@ -584,7 +652,7 @@ class CollisionWorldCoreCoverageTest {
         assertViews(0, 0)
     }
 
-    @Test fun getSetUserData() {
+fun getSetUserData() {
         val world = CoreCollisionWorld()
         assertNull(world.getUserData())
         val value = Any()
@@ -594,7 +662,7 @@ class CollisionWorldCoreCoverageTest {
         assertNull(world.getUserData())
     }
 
-    @Test fun detectBroadphaseFilterNotAllowed() {
+fun detectBroadphaseFilterNotAllowed() {
         val world = CoreCollisionWorld()
         world.setBroadphaseCollisionDataFilter(object : org.dyn4j.world.CollisionBodyBroadphaseCollisionDataFilter<Body, BodyFixture>() {
             override fun isAllowed(body1: Body?, fixture1: BodyFixture?, body2: Body?, fixture2: BodyFixture?): Boolean =
@@ -612,7 +680,7 @@ class CollisionWorldCoreCoverageTest {
         assertFalse(data.isManifoldCollision())
     }
 
-    @Test fun detectNoLongerColliding() {
+fun detectNoLongerColliding() {
         val world = CoreCollisionWorld()
         val first = Body().also { it.addFixture(Circle(1.0)) }
         val second = Body().also { it.addFixture(Geometry.createEquilateralTriangle(0.5)) }
@@ -625,7 +693,7 @@ class CollisionWorldCoreCoverageTest {
         assertFalse(world.getCollisionDataIterator().hasNext())
     }
 
-    @Test fun detectIteratorRemove() {
+fun detectIteratorRemove() {
         val world = object : CoreCollisionWorld() {
             override fun processCollisions(iterator: MutableIterator<WorldCollisionData<Body>>) {
                 while (iterator.hasNext()) {
@@ -639,7 +707,7 @@ class CollisionWorldCoreCoverageTest {
         assertFailsWith<UnsupportedOperationException> { world.scan() }
     }
 
-    @Test fun detectWithListeners() {
+fun detectWithListeners() {
         val world = CoreCollisionWorld()
         val first = circleBody()
         val second = Body().also { it.addFixture(Geometry.createEquilateralTriangle(0.5)); it.setMass(MassType.NORMAL) }
@@ -673,7 +741,7 @@ class CollisionWorldCoreCoverageTest {
         assertFalse(data.isManifoldCollision())
     }
 
-    @Test fun detectWithFixtureModification() {
+fun detectWithFixtureModification() {
         val world = CoreCollisionWorld()
         val first = Body().also {
             it.addFixture(Circle(0.5))
@@ -693,7 +761,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(1, world.getCollisionDataIterator().asSequence().count())
     }
 
-    @Test fun detectWithBounds() {
+fun detectWithBounds() {
         val world = CoreCollisionWorld()
         var calls = 0
         world.setBounds(AxisAlignedBounds(10.0, 10.0))
@@ -720,7 +788,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(0, calls)
     }
 
-    @Test fun detectWithDisabled() {
+fun detectWithDisabled() {
         val world = CoreCollisionWorld()
         val first = circleBody()
         val second = Body().also { it.addFixture(Circle(0.5)); it.setMass(MassType.NORMAL) }
@@ -739,7 +807,7 @@ class CollisionWorldCoreCoverageTest {
         assertFalse(data.isManifoldCollision())
     }
 
-    @Test fun detectAABB() {
+fun detectAABB() {
         val (world, first, second) = queryWorld()
         var filter = DetectFilter<Body, BodyFixture>(true, true, null)
         val full = AABB(-2.0, -2.0, 2.0, 2.0)
@@ -755,7 +823,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(0, world.detect(full, filter).size)
     }
 
-    @Test fun detectAABBAgainstSingleBody() {
+fun detectAABBAgainstSingleBody() {
         val (world, first, _) = queryWorld()
         var filter = DetectFilter<Body, BodyFixture>(true, true, null)
         val full = AABB(-2.0, -2.0, 2.0, 2.0)
@@ -774,7 +842,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(1, world.detect(full, first, filter).size)
     }
 
-    @Test fun detectAABBIterator() {
+fun detectAABBIterator() {
         val world = CoreCollisionWorld()
         val full = AABB(-2.0, -2.0, 2.0, 2.0)
         assertFalse(world.detectIterator(full, null).hasNext())
@@ -790,7 +858,7 @@ class CollisionWorldCoreCoverageTest {
         assertNotNull(single.next())
     }
 
-    @Test fun detectAABBIteratorFailures() {
+fun detectAABBIteratorFailures() {
         val (world, first, _) = queryWorld()
         val full = AABB(-2.0, -2.0, 2.0, 2.0)
         for (body in listOf(null, first)) {
@@ -803,7 +871,7 @@ class CollisionWorldCoreCoverageTest {
         }
     }
 
-    @Test fun detectConvex() {
+fun detectConvex() {
         val (world, first, second) = queryWorld()
         var filter = DetectFilter<Body, BodyFixture>(true, true, null)
         var shape = Circle(0.5)
@@ -822,7 +890,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(1, world.detect(shape, transform, DetectFilter(true, true, null)).size)
     }
 
-    @Test fun detectConvexAgainstSingleBody() {
+fun detectConvexAgainstSingleBody() {
         val (world, first, second) = queryWorld()
         var filter = DetectFilter<Body, BodyFixture>(true, true, null)
         var shape = Circle(0.5)
@@ -845,7 +913,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(1, world.detect(shape, transform, first, filter).size)
     }
 
-    @Test fun detectContexIterator() {
+fun detectContexIterator() {
         val world = CoreCollisionWorld()
         val shape = Circle(0.5)
         val transform = Transform().also { it.translate(-0.5, 0.0) }
@@ -860,7 +928,7 @@ class CollisionWorldCoreCoverageTest {
         assertNotNull(single.next())
     }
 
-    @Test fun detectConvexIteratorFailures() {
+fun detectConvexIteratorFailures() {
         val (world, first, _) = queryWorld()
         val shape = Circle(0.5)
         val transform = Transform().also { it.translate(-0.5, 0.0) }
@@ -874,7 +942,7 @@ class CollisionWorldCoreCoverageTest {
         }
     }
 
-    @Test fun raycast() {
+fun raycast() {
         val (world, first, second) = castWorld(false)
         var filter = DetectFilter<Body, BodyFixture>(true, true, null)
         var ray = Ray(Vector2(-1.0, -1.0), Vector2(1.0, 1.0))
@@ -903,7 +971,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(0, world.raycast(Ray(Vector2(-1.0, 1.0), Vector2(-2.0, 2.0)), -1.0, filter).size)
     }
 
-    @Test fun raycastAgainstSingleBody() {
+fun raycastAgainstSingleBody() {
         val (world, first, second) = castWorld(true)
         var filter = DetectFilter<Body, BodyFixture>(true, true, null)
         var ray = Ray(Vector2(-1.0, -1.0), Vector2(1.0, 1.0))
@@ -929,7 +997,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(0, world.raycast(Ray(Vector2(-1.0, 1.0), Vector2(-2.0, 2.0)), -1.0, first, filter).size)
     }
 
-    @Test fun raycastIterator() {
+fun raycastIterator() {
         val empty = CoreCollisionWorld()
         val ray = Ray(Vector2(-1.0, -1.0), Vector2(1.0, 1.0))
         assertFalse(empty.raycastIterator(ray, Double.MAX_VALUE, null).hasNext())
@@ -943,7 +1011,7 @@ class CollisionWorldCoreCoverageTest {
         assertNotNull(single.next())
     }
 
-    @Test fun raycastIteratorFailures() {
+fun raycastIteratorFailures() {
         val (world, first, _) = castWorld(false)
         val ray = Ray(Vector2(-1.0, -1.0), Vector2(1.0, 1.0))
         for (body in listOf(null, first)) {
@@ -956,7 +1024,7 @@ class CollisionWorldCoreCoverageTest {
         }
     }
 
-    @Test fun convexCast() {
+fun convexCast() {
         val (world, first, second) = castWorld(true)
         var filter = DetectFilter<Body, BodyFixture>(true, true, null)
         val shape = Geometry.createRectangle(0.5, 0.5)
@@ -988,7 +1056,7 @@ class CollisionWorldCoreCoverageTest {
         assertEquals(0, world.convexCast(shape, transform, Vector2(0.25, 0.25), angle, filter).size)
     }
 
-    @Test fun convexCastAgainstSingleBody() {
+fun convexCastAgainstSingleBody() {
         val (world, first, _) = castWorld(true)
         var filter = DetectFilter<Body, BodyFixture>(true, true, null)
         val shape = Geometry.createRectangle(0.5, 0.5)
@@ -1020,7 +1088,7 @@ class CollisionWorldCoreCoverageTest {
         assertNull(world.convexCastClosest(shape, transform, Vector2(0.25, 0.25), angle, first, filter))
     }
 
-    @Test fun convexCastIterator() {
+fun convexCastIterator() {
         val shape = Geometry.createRectangle(0.5, 0.5)
         val transform = Transform().also { it.translate(-1.0, -1.0) }
         val movement = Vector2(3.0, 3.0)
@@ -1032,7 +1100,7 @@ class CollisionWorldCoreCoverageTest {
         assertNotNull(iterator.next())
     }
 
-    @Test fun convexCastIteratorFailures() {
+fun convexCastIteratorFailures() {
         val (world, _, _) = castWorld(true)
         val shape = Geometry.createRectangle(0.5, 0.5)
         val transform = Transform().also { it.translate(-1.0, -1.0) }

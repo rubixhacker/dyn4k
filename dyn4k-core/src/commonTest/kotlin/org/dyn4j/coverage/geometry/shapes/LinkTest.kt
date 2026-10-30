@@ -24,13 +24,22 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class LinkTest {
-    @Test
-    fun createCoincident() {
+val LinkTest by testSuite {
+    test("createCoincident") { LinkTestFixture().run { createCoincident() } }
+    test("creatSuccess") { LinkTestFixture().run { creatSuccess() } }
+    test("rotate") { LinkTestFixture().run { rotate() } }
+    test("translate") { LinkTestFixture().run { translate() } }
+    test("copy") { LinkTestFixture().run { copy() } }
+    test("copyNonLoop") { LinkTestFixture().run { copyNonLoop() } }
+}
+
+private class LinkTestFixture  {
+fun createCoincident() {
         assertFailsWith<IllegalArgumentException> {
 
 		Link(null, Vector2(), Vector2(), null);
@@ -38,8 +47,7 @@ class LinkTest {
         }
     }
 
-    @Test
-    fun creatSuccess() {
+fun creatSuccess() {
 
 		var l = Link(
 			null,
@@ -64,8 +72,7 @@ class LinkTest {
 
     }
 
-    @Test
-    fun rotate() {
+fun rotate() {
 
 		var links = Geometry.createLinks(arrayOf(
 			Vector2(0.0, 0.0),
@@ -88,8 +95,7 @@ class LinkTest {
 
     }
 
-    @Test
-    fun translate() {
+fun translate() {
 
 		var links = Geometry.createLinks(arrayOf(
 			Vector2(0.0, 0.0),
@@ -107,8 +113,7 @@ class LinkTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var link = Link(
 				Vector2(0.0, 0.0),
@@ -150,8 +155,7 @@ class LinkTest {
 
     }
 
-    @Test
-    fun copyNonLoop() {
+fun copyNonLoop() {
 
 		var points = mutableListOf<Vector2>();
 		points.add(Vector2(0.0, 0.0));

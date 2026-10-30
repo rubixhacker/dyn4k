@@ -24,11 +24,17 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class AbstractShapeTest {
+val AbstractShapeTest by testSuite {
+    test("create") { AbstractShapeTestFixture().run { create() } }
+    test("setUserData") { AbstractShapeTestFixture().run { setUserData() } }
+}
+
+private class AbstractShapeTestFixture  {
     private class TestShape(center: Vector2, radius: Double) : AbstractShape(center, radius) {
         override fun contains(point: Vector2, transform: Transform, inclusive: Boolean) = false
         override fun createMass(density: Double) = Mass()
@@ -39,8 +45,7 @@ class AbstractShapeTest {
         override fun copy() = TestShape(getCenter().copy(), getRadius())
     }
 
-    @Test
-    fun create() {
+fun create() {
 
 		var c = Vector2(1.0, 2.0);
 		var r = 2.0;
@@ -52,8 +57,7 @@ class AbstractShapeTest {
 
     }
 
-    @Test
-    fun setUserData() {
+fun setUserData() {
 
 		var s = TestShape(Vector2(), 0.0);
 

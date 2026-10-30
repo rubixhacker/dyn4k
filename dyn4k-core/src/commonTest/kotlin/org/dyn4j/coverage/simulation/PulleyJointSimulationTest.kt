@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.simulation
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.dynamics.joint.PulleyJoint
@@ -31,13 +32,16 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class PulleyJointSimulationTest {
-    @Test
-    fun simpleLinkage() {
+val PulleyJointSimulationTest by testSuite {
+    test("simpleLinkage") { PulleyJointSimulationTestFixture().run { simpleLinkage() } }
+    test("withAndWithoutSlack") { PulleyJointSimulationTestFixture().run { withAndWithoutSlack() } }
+}
+
+private class PulleyJointSimulationTestFixture  {
+fun simpleLinkage() {
         val w = World<Body>()
         var b1 = Body()
         var b1f = b1.addFixture(Geometry.createCircle(0.5))
@@ -84,8 +88,7 @@ class PulleyJointSimulationTest {
         assertEquals(4.618, aj.getReactionForce(invdt).getMagnitude(), 1e-3)
         assertEquals(0.0, aj.getReactionTorque(invdt))
     }
-    @Test
-    fun withAndWithoutSlack() {
+fun withAndWithoutSlack() {
         val w = World<Body>()
         var g = Body()
         var gf = g.addFixture(Geometry.createRectangle(10.0, 1.0))

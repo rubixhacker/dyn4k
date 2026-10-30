@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.simulation
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.dynamics.joint.WeldJoint
@@ -31,13 +32,18 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class WeldJointSimulationTest {
-    @Test
-    fun standard() {
+val WeldJointSimulationTest by testSuite {
+    test("standard") { WeldJointSimulationTestFixture().run { standard() } }
+    test("softConstraint") { WeldJointSimulationTestFixture().run { softConstraint() } }
+    test("softConstraintWithLimitsLower") { WeldJointSimulationTestFixture().run { softConstraintWithLimitsLower() } }
+    test("softConstraintWithLimitsUpper") { WeldJointSimulationTestFixture().run { softConstraintWithLimitsUpper() } }
+}
+
+private class WeldJointSimulationTestFixture  {
+fun standard() {
         val w = World<Body>()
         var g = Body()
         var gf = g.addFixture(Geometry.createRectangle(10.0, 0.5))
@@ -87,8 +93,7 @@ class WeldJointSimulationTest {
         assertEquals(-0.52359, wj.getReactionTorque(invdt), 1e-5)
         assertEquals(4.9000, wj.getReactionForce(invdt).getMagnitude(), 1e-5)
     }
-    @Test
-    fun softConstraint() {
+fun softConstraint() {
         val w = World<Body>()
         var g = Body()
         var gf = g.addFixture(Geometry.createRectangle(10.0, 0.5))
@@ -137,8 +142,7 @@ class WeldJointSimulationTest {
         assertEquals( 5.00000, wj.getReactionTorque(invdt), 1e-5)
         assertEquals( 4.38931, wj.getReactionForce(invdt).getMagnitude(), 1e-5)
     }
-    @Test
-    fun softConstraintWithLimitsLower() {
+fun softConstraintWithLimitsLower() {
         val w = World<Body>()
         var g = Body()
         var gf = g.addFixture(Geometry.createRectangle(10.0, 0.5))
@@ -176,8 +180,7 @@ class WeldJointSimulationTest {
         assertEquals( 1.98177, wj.getReactionTorque(invdt), 1e-5)
         assertEquals( 4.90000, wj.getReactionForce(invdt).getMagnitude(), 1e-5)
     }
-    @Test
-    fun softConstraintWithLimitsUpper() {
+fun softConstraintWithLimitsUpper() {
         val w = World<Body>()
         var g = Body()
         var gf = g.addFixture(Geometry.createRectangle(10.0, 0.5))

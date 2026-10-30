@@ -24,7 +24,7 @@
  */
 package org.dyn4j.world
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -43,7 +43,23 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.dynamics.contact.ContactConstraint
 
-class WorldAdapterAndIslandCoverageTest {
+val WorldAdapterAndIslandCoverageTest by testSuite {
+    test("collisionItemAdapterGetAndSet") { WorldAdapterAndIslandCoverageTestFixture().run { collisionItemAdapterGetAndSet() } }
+    test("collisionItemAdapterEqualsAndHashcode") { WorldAdapterAndIslandCoverageTestFixture().run { collisionItemAdapterEqualsAndHashcode() } }
+    test("collisionItemAdapterCopy") { WorldAdapterAndIslandCoverageTestFixture().run { collisionItemAdapterCopy() } }
+    test("collisionItemAdapterCreate") { WorldAdapterAndIslandCoverageTestFixture().run { collisionItemAdapterCreate() } }
+    test("collisionItemAdapterSet") { WorldAdapterAndIslandCoverageTestFixture().run { collisionItemAdapterSet() } }
+    test("physicsBodySweptAABBProducerSweepIntoNewAABB") { WorldAdapterAndIslandCoverageTestFixture().run { physicsBodySweptAABBProducerSweepIntoNewAABB() } }
+    test("physicsBodySweptAABBProducerSweepIntoExistingAABB") { WorldAdapterAndIslandCoverageTestFixture().run { physicsBodySweptAABBProducerSweepIntoExistingAABB() } }
+    test("physicsBodySweptAABBProducerNoSweep") { WorldAdapterAndIslandCoverageTestFixture().run { physicsBodySweptAABBProducerNoSweep() } }
+    test("physicsBodySweptAABBProducerZero") { WorldAdapterAndIslandCoverageTestFixture().run { physicsBodySweptAABBProducerZero() } }
+    test("islandCreateSuccess") { WorldAdapterAndIslandCoverageTestFixture().run { islandCreateSuccess() } }
+    test("islandCreateInvalidInitialCapacity") { WorldAdapterAndIslandCoverageTestFixture().run { islandCreateInvalidInitialCapacity() } }
+    test("islandAdd") { WorldAdapterAndIslandCoverageTestFixture().run { islandAdd() } }
+    test("islandClear") { WorldAdapterAndIslandCoverageTestFixture().run { islandClear() } }
+}
+
+private class WorldAdapterAndIslandCoverageTestFixture  {
     private fun fixture(body: Body) = body.addFixture(Geometry.createCircle(0.5))
 
     private fun constraint(): ContactConstraint<Body> {
@@ -55,7 +71,7 @@ class WorldAdapterAndIslandCoverageTest {
         return ContactConstraint(pair)
     }
 
-    @Test fun collisionItemAdapterGetAndSet() {
+fun collisionItemAdapterGetAndSet() {
         val item = CollisionItemAdapter<Body, BodyFixture>()
         val a = Body(); val b = Body()
         val fa = fixture(a); val fb = fixture(b)
@@ -66,7 +82,7 @@ class WorldAdapterAndIslandCoverageTest {
         assertSame(b, item.getBody()); assertSame(fb, item.getFixture())
     }
 
-    @Test fun collisionItemAdapterEqualsAndHashcode() {
+fun collisionItemAdapterEqualsAndHashcode() {
         val a = Body(); val b = Body()
         val fa = fixture(a); val fb = fixture(b)
         val first = CollisionItemAdapter<Body, BodyFixture>(a, fa)
@@ -78,7 +94,7 @@ class WorldAdapterAndIslandCoverageTest {
         assertFalse(first == second)
     }
 
-    @Test fun collisionItemAdapterCopy() {
+fun collisionItemAdapterCopy() {
         val item = CollisionItemAdapter<Body, BodyFixture>()
         val empty = item.copy()
         assertNull(empty.getBody()); assertNull(empty.getFixture())
@@ -91,7 +107,7 @@ class WorldAdapterAndIslandCoverageTest {
         assertSame(body, copy.getBody()); assertSame(fixture, copy.getFixture())
     }
 
-    @Test fun collisionItemAdapterCreate() {
+fun collisionItemAdapterCreate() {
         val empty = CollisionItemAdapter<Body, BodyFixture>()
         assertNull(empty.getBody()); assertNull(empty.getFixture())
         val body = Body(); val fixture = fixture(body)
@@ -99,7 +115,7 @@ class WorldAdapterAndIslandCoverageTest {
         assertSame(body, item.getBody()); assertSame(fixture, item.getFixture())
     }
 
-    @Test fun collisionItemAdapterSet() {
+fun collisionItemAdapterSet() {
         val body = Body(); val fixture = fixture(body)
         val source = CollisionItemAdapter(body, fixture)
         val target = CollisionItemAdapter<Body, BodyFixture>()
@@ -116,7 +132,7 @@ class WorldAdapterAndIslandCoverageTest {
         fixture(it); it.setMass(MassType.NORMAL); it.translate(1.0, 0.0)
     }
 
-    @Test fun physicsBodySweptAABBProducerSweepIntoNewAABB() {
+fun physicsBodySweptAABBProducerSweepIntoNewAABB() {
         val producer = PhysicsBodySweptAABBProducer<Body>()
         val body = movingBody()
         assertBounds(producer.compute(body), -0.5, -0.5, 1.5, 0.5)
@@ -126,7 +142,7 @@ class WorldAdapterAndIslandCoverageTest {
         assertBounds(producer.compute(body), 1.5, 0.5, 2.5, 1.5)
     }
 
-    @Test fun physicsBodySweptAABBProducerSweepIntoExistingAABB() {
+fun physicsBodySweptAABBProducerSweepIntoExistingAABB() {
         val producer = PhysicsBodySweptAABBProducer<Body>()
         val body = movingBody()
         val box = AABB(0.0, 0.0, 0.0, 0.0)
@@ -140,28 +156,28 @@ class WorldAdapterAndIslandCoverageTest {
         assertBounds(box, 1.5, 0.5, 2.5, 1.5)
     }
 
-    @Test fun physicsBodySweptAABBProducerNoSweep() {
+fun physicsBodySweptAABBProducerNoSweep() {
         val body = Body(); fixture(body); body.setMass(MassType.NORMAL)
         assertBounds(PhysicsBodySweptAABBProducer<Body>().compute(body), -0.5, -0.5, 0.5, 0.5)
     }
 
-    @Test fun physicsBodySweptAABBProducerZero() {
+fun physicsBodySweptAABBProducerZero() {
         assertBounds(PhysicsBodySweptAABBProducer<Body>().compute(Body()), 0.0, 0.0, 0.0, 0.0)
     }
 
-    @Test fun islandCreateSuccess() {
+fun islandCreateSuccess() {
         val island = Island<Body>()
         assertNotNull(island.bodies); assertNotNull(island.joints); assertNotNull(island.contactConstraints)
         assertEquals(0, island.bodies.size)
     }
 
-    @Test fun islandCreateInvalidInitialCapacity() {
+fun islandCreateInvalidInitialCapacity() {
         val island = Island<Body>(-1, 0)
         assertNotNull(island.bodies); assertNotNull(island.joints); assertNotNull(island.contactConstraints)
         assertEquals(0, island.joints.size)
     }
 
-    @Test fun islandAdd() {
+fun islandAdd() {
         val island = Island<Body>()
         val a = Body(); val b = Body()
         val joint = AngleJoint(a, b)
@@ -176,7 +192,7 @@ class WorldAdapterAndIslandCoverageTest {
         assertEquals(2, island.contactConstraints.size)
     }
 
-    @Test fun islandClear() {
+fun islandClear() {
         val island = Island<Body>()
         island.add(Body()); island.add(AngleJoint(Body(), Body())); island.add(constraint())
         assertEquals(1, island.bodies.size)

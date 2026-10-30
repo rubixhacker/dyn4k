@@ -24,8 +24,8 @@
  */
 package org.dyn4j.coverage.collision.detection.narrowphase
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.dyn4j.collision.narrowphase.Gjk
@@ -36,7 +36,22 @@ import org.dyn4j.geometry.Link
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 
-class LinkPostProcessorCoverageTest {
+val LinkPostProcessorCoverageTest by testSuite {
+    test("create") { LinkPostProcessorCoverageTestFixture().run { create() } }
+    test("typeDetectionIgnore") { LinkPostProcessorCoverageTestFixture().run { typeDetectionIgnore() } }
+    test("failureWidthTwoWayLinksInVersionsPriorTo_4_2_0") { LinkPostProcessorCoverageTestFixture().run { failureWidthTwoWayLinksInVersionsPriorTo_4_2_0() } }
+    test("caseMiddleConvexConvex") { LinkPostProcessorCoverageTestFixture().run { caseMiddleConvexConvex() } }
+    test("caseMiddleConcaveConcave") { LinkPostProcessorCoverageTestFixture().run { caseMiddleConcaveConcave() } }
+    test("caseMiddleConvexConcave") { LinkPostProcessorCoverageTestFixture().run { caseMiddleConvexConcave() } }
+    test("caseMiddleConcaveConvex") { LinkPostProcessorCoverageTestFixture().run { caseMiddleConcaveConvex() } }
+    test("caseRightConcave") { LinkPostProcessorCoverageTestFixture().run { caseRightConcave() } }
+    test("caseLeftConcave") { LinkPostProcessorCoverageTestFixture().run { caseLeftConcave() } }
+    test("caseRightConvex") { LinkPostProcessorCoverageTestFixture().run { caseRightConvex() } }
+    test("caseLeftConvex") { LinkPostProcessorCoverageTestFixture().run { caseLeftConvex() } }
+    test("noPreviousOrNext") { LinkPostProcessorCoverageTestFixture().run { noPreviousOrNext() } }
+}
+
+private class LinkPostProcessorCoverageTestFixture  {
     private data class State(
         val x: Double, val y: Double,
         val rawDepth: Double, val rawX: Double, val rawY: Double,
@@ -71,14 +86,14 @@ class LinkPostProcessorCoverageTest {
             assertPenetration(penetration, expected.processedDepth, -expected.processedX, -expected.processedY)
         }
     }
-    @Test fun create() { LinkPostProcessor() }
-    @Test fun typeDetectionIgnore() {
+fun create() { LinkPostProcessor() }
+fun typeDetectionIgnore() {
         val circle1 = Geometry.createCircle(1.0); val circle2 = Geometry.createCircle(1.0)
         val penetration = Penetration(); penetration.setDepth(2.0); penetration.setNormal(Vector2(-1.0, 2.0))
         LinkPostProcessor().process(circle1, Transform(), circle2, Transform(), penetration)
         assertPenetration(penetration, 2.0, -1.0, 2.0)
     }
-    @Test fun failureWidthTwoWayLinksInVersionsPriorTo_4_2_0() {
+fun failureWidthTwoWayLinksInVersionsPriorTo_4_2_0() {
         val link = Geometry.createLinks(listOf(Vector2(5.0, 0.0), Vector2(4.0, 0.0), Vector2(0.0, 0.0), Vector2(0.0, 0.5)), false)[1]
         val rectangle = Geometry.createRectangle(0.1, 2.0)
         val linkTransform = Transform(); val rectangleTransform = Transform()
@@ -92,46 +107,46 @@ class LinkPostProcessorCoverageTest {
         processor.process(rectangle, rectangleTransform, link, linkTransform, penetration)
         assertPenetration(penetration, 0.041, 0.000, -1.000)
     }
-    @Test fun caseMiddleConvexConvex() = check(links(-0.5, -0.5)[1], listOf(
+fun caseMiddleConvexConvex() = check(links(-0.5, -0.5)[1], listOf(
         state(0.749, 0.0, 0.001, 1.0, 0.0, 0.0, 0.0, 0.0),
         state(-0.749, 0.0, 0.001, -1.0, 0.0, 0.0, 0.0, 0.0),
         state(0.73, -0.24, 0.010, 0.0, -1.0, 0.0, 0.0, 0.0)
     ))
-    @Test fun caseMiddleConcaveConcave() = check(links(0.5, 0.5)[1], listOf(
+fun caseMiddleConcaveConcave() = check(links(0.5, 0.5)[1], listOf(
         state(-0.749, 0.0, 0.001, -1.0, 0.0, 0.001, 0.0, 1.0),
         state(0.749, 0.0, 0.001, 1.0, 0.0, 0.001, 0.0, 1.0),
         state(0.73, -0.24, 0.010, 0.0, -1.0, 0.0, 0.0, 0.0),
         state(-0.60, -0.20, 0.037, -0.707, -0.707, 0.0, 0.0, 0.0)
     ), rotateLast = true)
-    @Test fun caseMiddleConvexConcave() = check(links(-0.5, 0.5)[1], listOf(
+fun caseMiddleConvexConcave() = check(links(-0.5, 0.5)[1], listOf(
         state(-0.749, 0.0, 0.001, -1.0, 0.0, 0.001, 0.0, 1.0),
         state(0.749, 0.0, 0.001, 1.0, 0.0, 0.0, 0.0, 0.0),
         state(0.73, -0.24, 0.010, 0.0, -1.0, 0.0, 0.0, 0.0)
     ))
-    @Test fun caseMiddleConcaveConvex() = check(links(0.5, -0.5)[1], listOf(
+fun caseMiddleConcaveConvex() = check(links(0.5, -0.5)[1], listOf(
         state(-0.749, 0.0, 0.001, -1.0, 0.0, 0.0, 0.0, 0.0),
         state(0.749, 0.0, 0.001, 1.0, 0.0, 0.001, 0.0, 1.0),
         state(-0.73, -0.24, 0.010, 0.0, -1.0, 0.0, 0.0, 0.0)
     ))
-    @Test fun caseRightConcave() = check(links(0.5, 0.5)[0], listOf(
+fun caseRightConcave() = check(links(0.5, 0.5)[0], listOf(
         state(0.26, 0.0, 0.010, -1.0, 0.0, 0.010, -0.707, 0.707),
         state(1.24, 0.5, 0.010, 1.0, 0.0, 0.010, 1.0, 0.0)
     ))
-    @Test fun caseLeftConcave() = check(links(0.5, 0.5)[2], listOf(
+fun caseLeftConcave() = check(links(0.5, 0.5)[2], listOf(
         state(-0.26, 0.0, 0.010, 1.0, 0.0, 0.010, 0.707, 0.707),
         state(-1.24, 0.5, 0.010, -1.0, 0.0, 0.010, -1.0, 0.0)
     ))
-    @Test fun caseRightConvex() = check(links(-0.5, -0.5)[0], listOf(
+fun caseRightConvex() = check(links(-0.5, -0.5)[0], listOf(
         state(0.749, 0.0, 0.177, 0.707, 0.707, 0.177, 0.707, 0.707),
         state(1.23, -0.74, 0.010, 0.0, -1.0, 0.010, 0.0, -1.0),
         state(0.73, 0.24, 0.010, 0.0, 1.0, 0.010, 0.0, 1.0)
     ))
-    @Test fun caseLeftConvex() = check(links(-0.5, -0.5)[2], listOf(
+fun caseLeftConvex() = check(links(-0.5, -0.5)[2], listOf(
         state(-0.749, 0.0, 0.177, -0.707, 0.707, 0.177, -0.707, 0.707),
         state(-1.23, -0.74, 0.010, 0.0, -1.0, 0.010, 0.0, -1.0),
         state(-0.73, 0.24, 0.010, 0.0, 1.0, 0.010, 0.0, 1.0)
     ))
-    @Test fun noPreviousOrNext() {
+fun noPreviousOrNext() {
         val link = Geometry.createLinks(listOf(Vector2(0.5, 0.0), Vector2(-0.5, 0.0)), false)[0]
         val square = Geometry.createSquare(0.5); val transform = Transform(); transform.translate(-0.749, 0.0)
         val penetration = Penetration(); assertTrue(Gjk().detect(link, Transform(), square, transform, penetration))

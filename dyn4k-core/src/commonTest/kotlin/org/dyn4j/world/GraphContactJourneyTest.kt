@@ -1,6 +1,6 @@
 package org.dyn4j.world
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -16,9 +16,19 @@ import org.dyn4j.dynamics.joint.PinJoint
 import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.Vector2
 
-class GraphContactJourneyTest {
-    @Test
-    fun emptyNestedGraphClearInvalidatesSavedSiblings() {
+val GraphContactJourneyTest by testSuite {
+    test("emptyNestedGraphClearInvalidatesSavedSiblings") { GraphContactJourneyTestFixture().run { emptyNestedGraphClearInvalidatesSavedSiblings() } }
+    test("trackedGraphEdgeSortAndReplaceAllInvalidateSavedViews") { GraphContactJourneyTestFixture().run { trackedGraphEdgeSortAndReplaceAllInvalidateSavedViews() } }
+    test("graphContactAndJointViewsKeepLiveIdentityAndFailFastIterators") { GraphContactJourneyTestFixture().run { graphContactAndJointViewsKeepLiveIdentityAndFailFastIterators() } }
+    test("graphProtectedIteratorsAndPublicSubListsRejectStructuralChangeOnly") { GraphContactJourneyTestFixture().run { graphProtectedIteratorsAndPublicSubListsRejectStructuralChangeOnly() } }
+    test("graphProtectedSubListsRejectStructuralChangeOnly") { GraphContactJourneyTestFixture().run { graphProtectedSubListsRejectStructuralChangeOnly() } }
+    test("graphPublicSubListsUseBaselineRangeErrors") { GraphContactJourneyTestFixture().run { graphPublicSubListsUseBaselineRangeErrors() } }
+    test("graphListsAndSubListsMarkRandomAccess") { GraphContactJourneyTestFixture().run { graphListsAndSubListsMarkRandomAccess() } }
+    test("contactViewsTrackEdgesAndBodyRemoval") { GraphContactJourneyTestFixture().run { contactViewsTrackEdgesAndBodyRemoval() } }
+}
+
+private class GraphContactJourneyTestFixture  {
+fun emptyNestedGraphClearInvalidatesSavedSiblings() {
         val node = ConstraintGraphNode(Body())
         val joint = PinJoint(node.getBody(), Vector2())
         node.mutableJoints().add(joint)
@@ -37,8 +47,7 @@ class GraphContactJourneyTest {
         if (siblingOutcome == WorldViewOutcome.VALUE) assertSame(joint, siblingValue)
     }
 
-    @Test
-    fun trackedGraphEdgeSortAndReplaceAllInvalidateSavedViews() {
+fun trackedGraphEdgeSortAndReplaceAllInvalidateSavedViews() {
         val body = Body()
         val fixture = body.addFixture(Circle(0.5))
         val other = Body()
@@ -70,8 +79,7 @@ class GraphContactJourneyTest {
         verify(joints) { it.replaceAllElements { value -> value } }
     }
 
-    @Test
-    fun graphContactAndJointViewsKeepLiveIdentityAndFailFastIterators() {
+fun graphContactAndJointViewsKeepLiveIdentityAndFailFastIterators() {
         val body1 = Body()
         val fixture1 = body1.addFixture(Circle(0.5))
         val body2 = Body()
@@ -111,8 +119,7 @@ class GraphContactJourneyTest {
         assertFailsWith<ConcurrentModificationException> { jointBeforeAdd.next() }
     }
 
-    @Test
-    fun graphProtectedIteratorsAndPublicSubListsRejectStructuralChangeOnly() {
+fun graphProtectedIteratorsAndPublicSubListsRejectStructuralChangeOnly() {
         val a = Body()
         val af = a.addFixture(Circle(0.5))
         val b = Body()
@@ -152,8 +159,7 @@ class GraphContactJourneyTest {
         assertFailsWith<ConcurrentModificationException> { jointSubList[0] }
     }
 
-    @Test
-    fun graphProtectedSubListsRejectStructuralChangeOnly() {
+fun graphProtectedSubListsRejectStructuralChangeOnly() {
         val a = Body()
         val af = a.addFixture(Circle(0.5))
         val b = Body()
@@ -182,8 +188,7 @@ class GraphContactJourneyTest {
         assertFailsWith<ConcurrentModificationException> { joints.size }
     }
 
-    @Test
-    fun graphPublicSubListsUseBaselineRangeErrors() {
+fun graphPublicSubListsUseBaselineRangeErrors() {
         val node = ConstraintGraphNode(Body())
         val views: List<List<*>> = listOf(node.getContactConstraints(), node.getJoints())
         for (view in views) {
@@ -192,8 +197,7 @@ class GraphContactJourneyTest {
         }
     }
 
-    @Test
-    fun graphListsAndSubListsMarkRandomAccess() {
+fun graphListsAndSubListsMarkRandomAccess() {
         val node = ConstraintGraphNode(Body())
         assertTrue(node.mutableContacts() is RandomAccess)
         assertTrue(node.mutableJoints() is RandomAccess)
@@ -204,8 +208,7 @@ class GraphContactJourneyTest {
         }
     }
 
-    @Test
-    fun contactViewsTrackEdgesAndBodyRemoval() {
+fun contactViewsTrackEdgesAndBodyRemoval() {
         val body1 = Body()
         val fixture1 = body1.addFixture(Circle(0.5))
         val body2 = Body()

@@ -24,8 +24,7 @@
  */
 package org.dyn4j.coverage.dynamics.joint.core
 
-import kotlin.test.BeforeTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -42,16 +41,61 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
+val DistanceJointCoreCoverageTest by testSuite {
+    test("createWithTwoDifferentBodies") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { createWithTwoDifferentBodies() } }
+    test("createWithNullAnchor1Point") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { createWithNullAnchor1Point() } }
+    test("createWithNullAnchor2Point") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { createWithNullAnchor2Point() } }
+    test("createWithSameBody") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { createWithSameBody() } }
+    test("shift") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { shift() } }
+    test("isSpringEnabled") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { isSpringEnabled() } }
+    test("isSpringDamperEnabled") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { isSpringDamperEnabled() } }
+    test("setPositiveRestDistance") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setPositiveRestDistance() } }
+    test("setNegativeRestDistance") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setNegativeRestDistance() } }
+    test("setSpringDampingRatio") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setSpringDampingRatio() } }
+    test("setNegativeDampingRatio") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setNegativeDampingRatio() } }
+    test("setDampingRatioGreaterThan1") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setDampingRatioGreaterThan1() } }
+    test("setSpringFrequency") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setSpringFrequency() } }
+    test("setSpringMode") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setSpringMode() } }
+    test("setSpringStiffnessNegative") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setSpringStiffnessNegative() } }
+    test("setSpringStiffness") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setSpringStiffness() } }
+    test("setSpringFrequencyNegative") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setSpringFrequencyNegative() } }
+    test("setSpringMaximumForceNegative") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setSpringMaximumForceNegative() } }
+    test("setSpringMaximumForce") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setSpringMaximumForce() } }
+    test("setDistanceAtRest") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setDistanceAtRest() } }
+    test("setUpperLimitSuccess") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setUpperLimitSuccess() } }
+    test("setUpperLimitNegative") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setUpperLimitNegative() } }
+    test("setUpperLimitInvalid") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setUpperLimitInvalid() } }
+    test("setLowerLimit") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setLowerLimit() } }
+    test("setLowerLimitNegative") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setLowerLimitNegative() } }
+    test("setLowerLimitInvalid") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setLowerLimitInvalid() } }
+    test("setUpperAndLowerLimits") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setUpperAndLowerLimits() } }
+    test("setUpperAndLowerLimitsInvalid") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setUpperAndLowerLimitsInvalid() } }
+    test("setUpperAndLowerLimitsNegative") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setUpperAndLowerLimitsNegative() } }
+    test("setUpperAndLowerLimitsNegative2") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setUpperAndLowerLimitsNegative2() } }
+    test("setSameLimitNegative") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setSameLimitNegative() } }
+    test("setSameLimitValid") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setSameLimitValid() } }
+    test("setLimitsEnabledSleep") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsEnabledSleep() } }
+    test("setLimitsSameSleep") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsSameSleep() } }
+    test("setLimitsDifferentSleep") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsDifferentSleep() } }
+    test("setLowerLimitSleep") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setLowerLimitSleep() } }
+    test("setUpperLimitSleep") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setUpperLimitSleep() } }
+    test("setLimitsEnabledSameSleep") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsEnabledSameSleep() } }
+    test("setLimitsEnabledDifferentSleep") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsEnabledDifferentSleep() } }
+    test("computeSpringStiffnessFrequency") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { computeSpringStiffnessFrequency() } }
+    test("copy") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { copy() } }
+    test("copyFailed") { DistanceJointCoreCoverageTestFixture().apply { setup() }.run { copyFailed() } }
+}
+
 private class DistanceCoefficientProbe(first: Body, second: Body, a1: Vector2, a2: Vector2) :
     DistanceJoint<Body>(first, second, a1, a2) {
     fun updateCoefficients() = updateSpringCoefficients()
 }
 
-class DistanceJointCoreCoverageTest {
+private class DistanceJointCoreCoverageTestFixture  {
     private lateinit var b1: Body
     private lateinit var b2: Body
 
-    @BeforeTest fun setup() {
+    fun setup() {
         b1 = Body()
         b1.addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
         b1.setMass(MassType.NORMAL)
@@ -59,7 +103,7 @@ class DistanceJointCoreCoverageTest {
         b2.addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
         b2.setMass(MassType.NORMAL)
     }
-    @Test fun createWithTwoDifferentBodies() {
+fun createWithTwoDifferentBodies() {
         var p1 = Vector2(1.0, 2.0)
         var p2 = Vector2(-2.0, 5.0)
         var d = p1.distance(p2)
@@ -91,19 +135,19 @@ class DistanceJointCoreCoverageTest {
         assertNotNull(dj.toString())
     }
 
-    @Test fun createWithNullAnchor1Point() {
+fun createWithNullAnchor1Point() {
         assertFailsWith<NullPointerException> { DistanceJoint<Body>(b1, b2, null, Vector2()) }
     }
 
-    @Test fun createWithNullAnchor2Point() {
+fun createWithNullAnchor2Point() {
         assertFailsWith<NullPointerException> { DistanceJoint<Body>(b1, b2, Vector2(), null) }
     }
 
-    @Test fun createWithSameBody() {
+fun createWithSameBody() {
         assertFailsWith<IllegalArgumentException> { DistanceJoint<Body>(b1, b1, Vector2(), Vector2()) }
     }
 
-    @Test fun shift() {
+fun shift() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         assertEquals(1.0, dj.getAnchor1().x)
         assertEquals(2.0, dj.getAnchor1().y)
@@ -116,7 +160,7 @@ class DistanceJointCoreCoverageTest {
         assertEquals(0.5, dj.getAnchor2().y)
     }
 
-    @Test fun isSpringEnabled() {
+fun isSpringEnabled() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         assertFalse(dj.isSpringEnabled())
         dj.setSpringFrequency(1.0)
@@ -129,7 +173,7 @@ class DistanceJointCoreCoverageTest {
         assertFalse(dj.isSpringEnabled())
     }
 
-    @Test fun isSpringDamperEnabled() {
+fun isSpringDamperEnabled() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         assertFalse(dj.isSpringDamperEnabled())
         dj.setSpringFrequency(1.0)
@@ -151,7 +195,7 @@ class DistanceJointCoreCoverageTest {
         assertFalse(dj.isSpringDamperEnabled())
     }
 
-    @Test fun setPositiveRestDistance() {
+fun setPositiveRestDistance() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         dj.setRestDistance(0.0)
         assertEquals(0.0, dj.getRestDistance())
@@ -159,12 +203,12 @@ class DistanceJointCoreCoverageTest {
         assertEquals(1.0, dj.getRestDistance())
     }
 
-    @Test fun setNegativeRestDistance() {
+fun setNegativeRestDistance() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         assertFailsWith<IllegalArgumentException> { dj.setRestDistance(-2.0) }
     }
 
-    @Test fun setSpringDampingRatio() {
+fun setSpringDampingRatio() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         dj.setSpringDampingRatio(0.0)
         assertEquals(0.0, dj.getSpringDampingRatio())
@@ -193,17 +237,17 @@ class DistanceJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setNegativeDampingRatio() {
+fun setNegativeDampingRatio() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         assertFailsWith<IllegalArgumentException> { dj.setSpringDampingRatio(-1.0) }
     }
 
-    @Test fun setDampingRatioGreaterThan1() {
+fun setDampingRatioGreaterThan1() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         assertFailsWith<IllegalArgumentException> { dj.setSpringDampingRatio(2.0) }
     }
 
-    @Test fun setSpringFrequency() {
+fun setSpringFrequency() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         dj.setSpringFrequency(0.0)
         assertEquals(0.0, dj.getSpringFrequency())
@@ -237,7 +281,7 @@ class DistanceJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setSpringMode() {
+fun setSpringMode() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         assertEquals(Joint.SPRING_MODE_FREQUENCY, dj.getSpringMode())
         dj.setSpringStiffness(0.3)
@@ -246,12 +290,12 @@ class DistanceJointCoreCoverageTest {
         assertEquals(Joint.SPRING_MODE_FREQUENCY, dj.getSpringMode())
     }
 
-    @Test fun setSpringStiffnessNegative() {
+fun setSpringStiffnessNegative() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         assertFailsWith<IllegalArgumentException> { dj.setSpringStiffness(-0.3) }
     }
 
-    @Test fun setSpringStiffness() {
+fun setSpringStiffness() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         dj.setSpringStiffness(0.0)
         assertEquals(0.0, dj.getSpringStiffness())
@@ -284,17 +328,17 @@ class DistanceJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setSpringFrequencyNegative() {
+fun setSpringFrequencyNegative() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         assertFailsWith<IllegalArgumentException> { dj.setSpringFrequency(-0.3) }
     }
 
-    @Test fun setSpringMaximumForceNegative() {
+fun setSpringMaximumForceNegative() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         assertFailsWith<IllegalArgumentException> { dj.setMaximumSpringForce(-1.0) }
     }
 
-    @Test fun setSpringMaximumForce() {
+fun setSpringMaximumForce() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         dj.setMaximumSpringForce(0.0)
         assertEquals(0.0, dj.getMaximumSpringForce())
@@ -328,7 +372,7 @@ class DistanceJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setDistanceAtRest() {
+fun setDistanceAtRest() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         var distance = dj.getRestDistance()
         assertFalse(b1.isAtRest())
@@ -346,45 +390,45 @@ class DistanceJointCoreCoverageTest {
         assertEquals(10.0, dj.getRestDistance())
     }
 
-    @Test fun setUpperLimitSuccess() {
+fun setUpperLimitSuccess() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(1.0, dj.getUpperLimit())
         dj.setUpperLimit(2.0)
         assertEquals(2.0, dj.getUpperLimit(), 1e-6)
     }
 
-    @Test fun setUpperLimitNegative() {
+fun setUpperLimitNegative() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(1.0, dj.getUpperLimit())
         assertFailsWith<IllegalArgumentException> { dj.setUpperLimit(-1.0) }
     }
 
-    @Test fun setUpperLimitInvalid() {
+fun setUpperLimitInvalid() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(1.0, dj.getUpperLimit())
         assertFailsWith<IllegalArgumentException> { dj.setUpperLimit(0.5) }
     }
 
-    @Test fun setLowerLimit() {
+fun setLowerLimit() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(1.0, dj.getLowerLimit())
         dj.setLowerLimit(0.0)
         assertEquals(0.0, dj.getLowerLimit(), 1e-6)
     }
 
-    @Test fun setLowerLimitNegative() {
+fun setLowerLimitNegative() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(1.0, dj.getLowerLimit())
         assertFailsWith<IllegalArgumentException> { dj.setLowerLimit(-1.0) }
     }
 
-    @Test fun setLowerLimitInvalid() {
+fun setLowerLimitInvalid() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(1.0, dj.getLowerLimit())
         assertFailsWith<IllegalArgumentException> { dj.setLowerLimit(1.5) }
     }
 
-    @Test fun setUpperAndLowerLimits() {
+fun setUpperAndLowerLimits() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(1.0, dj.getLowerLimit())
         assertEquals(1.0, dj.getUpperLimit())
@@ -399,35 +443,35 @@ class DistanceJointCoreCoverageTest {
         assertEquals(1.0, dj.getUpperLimit())
     }
 
-    @Test fun setUpperAndLowerLimitsInvalid() {
+fun setUpperAndLowerLimitsInvalid() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(1.0, dj.getLowerLimit())
         assertEquals(1.0, dj.getUpperLimit())
         assertFailsWith<IllegalArgumentException> { dj.setLimits(1.0, 0.0) }
     }
 
-    @Test fun setUpperAndLowerLimitsNegative() {
+fun setUpperAndLowerLimitsNegative() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(1.0, dj.getLowerLimit())
         assertEquals(1.0, dj.getUpperLimit())
         assertFailsWith<IllegalArgumentException> { dj.setLimits(-1.0, 0.0) }
     }
 
-    @Test fun setUpperAndLowerLimitsNegative2() {
+fun setUpperAndLowerLimitsNegative2() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(1.0, dj.getLowerLimit())
         assertEquals(1.0, dj.getUpperLimit())
         assertFailsWith<IllegalArgumentException> { dj.setLimits(0.0, -1.0) }
     }
 
-    @Test fun setSameLimitNegative() {
+fun setSameLimitNegative() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(1.0, dj.getLowerLimit())
         assertEquals(1.0, dj.getUpperLimit())
         assertFailsWith<IllegalArgumentException> { dj.setLimits(-1.0) }
     }
 
-    @Test fun setSameLimitValid() {
+fun setSameLimitValid() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(1.0, dj.getLowerLimit())
         assertEquals(1.0, dj.getUpperLimit())
@@ -436,7 +480,7 @@ class DistanceJointCoreCoverageTest {
         assertEquals(2.0, dj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledSleep() {
+fun setLimitsEnabledSleep() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         dj.setLowerLimitEnabled(true)
         dj.setUpperLimitEnabled(true)
@@ -475,7 +519,7 @@ class DistanceJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setLimitsSameSleep() {
+fun setLimitsSameSleep() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         dj.setLowerLimitEnabled(true)
         dj.setUpperLimitEnabled(true)
@@ -536,7 +580,7 @@ class DistanceJointCoreCoverageTest {
         assertEquals(1.0, dj.getUpperLimit())
     }
 
-    @Test fun setLimitsDifferentSleep() {
+fun setLimitsDifferentSleep() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         dj.setLowerLimitEnabled(true)
         dj.setUpperLimitEnabled(true)
@@ -597,7 +641,7 @@ class DistanceJointCoreCoverageTest {
         assertEquals(2.0, dj.getUpperLimit())
     }
 
-    @Test fun setLowerLimitSleep() {
+fun setLowerLimitSleep() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         dj.setLowerLimitEnabled(true)
         dj.setUpperLimitEnabled(true)
@@ -630,7 +674,7 @@ class DistanceJointCoreCoverageTest {
         assertEquals(defaultUpperLimit, dj.getUpperLimit())
     }
 
-    @Test fun setUpperLimitSleep() {
+fun setUpperLimitSleep() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         dj.setLowerLimitEnabled(true)
         dj.setUpperLimitEnabled(true)
@@ -663,7 +707,7 @@ class DistanceJointCoreCoverageTest {
         assertEquals(3.0, dj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledSameSleep() {
+fun setLimitsEnabledSameSleep() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         dj.setLowerLimitEnabled(true)
         dj.setUpperLimitEnabled(true)
@@ -702,7 +746,7 @@ class DistanceJointCoreCoverageTest {
         assertEquals(1.0, dj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledDifferentSleep() {
+fun setLimitsEnabledDifferentSleep() {
         var dj = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         dj.setLowerLimitEnabled(true)
         dj.setUpperLimitEnabled(true)
@@ -763,7 +807,7 @@ class DistanceJointCoreCoverageTest {
         assertEquals(4.0, dj.getUpperLimit())
     }
 
-    @Test fun computeSpringStiffnessFrequency() {
+fun computeSpringStiffnessFrequency() {
         val joint = DistanceCoefficientProbe(b1, b2, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
         joint.setSpringEnabled(true)
         joint.setSpringDamperEnabled(true)
@@ -782,7 +826,7 @@ class DistanceJointCoreCoverageTest {
         assertEquals(1000.0, joint.getSpringStiffness(), 1e-3)
     }
 
-    @Test fun copy() {
+fun copy() {
         val joint = DistanceJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         joint.setCollisionAllowed(true)
         joint.setLimits(2.0, 5.0)
@@ -846,7 +890,7 @@ class DistanceJointCoreCoverageTest {
         assertSame(secondShared.getBody1(), secondShared.getBodies()[0])
     }
 
-    @Test fun copyFailed() {
+fun copyFailed() {
         class SubBody : Body()
         val joint = DistanceJoint<Body>(SubBody(), SubBody(), Vector2(), Vector2(0.0, 1.0))
         assertFailsWith<CopyException> { joint.copy() }

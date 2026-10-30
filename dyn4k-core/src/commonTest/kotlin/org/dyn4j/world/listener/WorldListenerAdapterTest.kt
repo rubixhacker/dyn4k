@@ -1,6 +1,6 @@
 package org.dyn4j.world.listener
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertTrue
 import org.dyn4j.collision.continuous.TimeOfImpact
 import org.dyn4j.dynamics.Body
@@ -16,9 +16,13 @@ import org.dyn4j.world.ManifoldCollisionData
 import org.dyn4j.world.NarrowphaseCollisionData
 import org.dyn4j.world.PhysicsWorld
 
-class WorldListenerAdapterTest {
-    @Test
-    fun collisionAndTimeOfImpactAdaptersAllowEveryStage() {
+val WorldListenerAdapterTest by testSuite {
+    test("collisionAndTimeOfImpactAdaptersAllowEveryStage") { WorldListenerAdapterTestFixture().run { collisionAndTimeOfImpactAdaptersAllowEveryStage() } }
+    test("notificationAdaptersAcceptMissingCallbackData") { WorldListenerAdapterTestFixture().run { notificationAdaptersAcceptMissingCallbackData() } }
+}
+
+private class WorldListenerAdapterTestFixture  {
+fun collisionAndTimeOfImpactAdaptersAllowEveryStage() {
         val collisions = CollisionListenerAdapter<Body, BodyFixture>()
         val broadphase: BroadphaseCollisionData<Body, BodyFixture>? = null
         val narrowphase: NarrowphaseCollisionData<Body, BodyFixture>? = null
@@ -36,8 +40,7 @@ class WorldListenerAdapterTest {
         assertTrue(toiListener.collision(body, null, body, null, toi))
     }
 
-    @Test
-    fun notificationAdaptersAcceptMissingCallbackData() {
+fun notificationAdaptersAcceptMissingCallbackData() {
         BoundsListenerAdapter<Body, BodyFixture>().outside(null)
         val contacts = ContactListenerAdapter<Body>()
         val collision: ContactCollisionData<Body>? = null

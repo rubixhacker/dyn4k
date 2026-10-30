@@ -24,8 +24,8 @@
  */
 package org.dyn4j.coverage.collision.detection.continuous
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -39,7 +39,34 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 
-class ConservativeAdvancementCoverageTest {
+val ConservativeAdvancementCoverageTest by testSuite {
+    test("afterMidPoint") { ConservativeAdvancementCoverageTestFixture().run { afterMidPoint() } }
+    test("beforeMidPoint") { ConservativeAdvancementCoverageTestFixture().run { beforeMidPoint() } }
+    test("sameDirection") { ConservativeAdvancementCoverageTestFixture().run { sameDirection() } }
+    test("oppositeDirection") { ConservativeAdvancementCoverageTestFixture().run { oppositeDirection() } }
+    test("orthogonalDirection") { ConservativeAdvancementCoverageTestFixture().run { orthogonalDirection() } }
+    test("sameDirectionNoCollision") { ConservativeAdvancementCoverageTestFixture().run { sameDirectionNoCollision() } }
+    test("sameDirectionNoCollision2") { ConservativeAdvancementCoverageTestFixture().run { sameDirectionNoCollision2() } }
+    test("orthogonalDirectionNoCollision") { ConservativeAdvancementCoverageTestFixture().run { orthogonalDirectionNoCollision() } }
+    test("setDistanceDetector") { ConservativeAdvancementCoverageTestFixture().run { setDistanceDetector() } }
+    test("setNullDistanceDetector") { ConservativeAdvancementCoverageTestFixture().run { setNullDistanceDetector() } }
+    test("createWithNullDistanceDetector") { ConservativeAdvancementCoverageTestFixture().run { createWithNullDistanceDetector() } }
+    test("createSuccess") { ConservativeAdvancementCoverageTestFixture().run { createSuccess() } }
+    test("setTolerance") { ConservativeAdvancementCoverageTestFixture().run { setTolerance() } }
+    test("setZeroTolerance") { ConservativeAdvancementCoverageTestFixture().run { setZeroTolerance() } }
+    test("setNegativeTolerance") { ConservativeAdvancementCoverageTestFixture().run { setNegativeTolerance() } }
+    test("setMaxIterations") { ConservativeAdvancementCoverageTestFixture().run { setMaxIterations() } }
+    test("setZeroMaxIterations") { ConservativeAdvancementCoverageTestFixture().run { setZeroMaxIterations() } }
+    test("setNegativeMaxIterations") { ConservativeAdvancementCoverageTestFixture().run { setNegativeMaxIterations() } }
+    test("setLessThanTenMaxIterations") { ConservativeAdvancementCoverageTestFixture().run { setLessThanTenMaxIterations() } }
+    test("fastRotationAgainstStatic") { ConservativeAdvancementCoverageTestFixture().run { fastRotationAgainstStatic() } }
+    test("fastRotationAgainstFastRotation") { ConservativeAdvancementCoverageTestFixture().run { fastRotationAgainstFastRotation() } }
+    test("fastRotationAgainstFastRotationNoCollision") { ConservativeAdvancementCoverageTestFixture().run { fastRotationAgainstFastRotationNoCollision() } }
+    test("equidistantSameVelocityTest") { ConservativeAdvancementCoverageTestFixture().run { equidistantSameVelocityTest() } }
+    test("separationTooSmall") { ConservativeAdvancementCoverageTestFixture().run { separationTooSmall() } }
+}
+
+private class ConservativeAdvancementCoverageTestFixture  {
     private val moving = Geometry.createUnitCirclePolygon(5, 0.1)
     private val ground = Geometry.createRectangle(20.0, 0.5)
     private val detector = ConservativeAdvancement()
@@ -56,7 +83,7 @@ class ConservativeAdvancementCoverageTest {
         return hit to result
     }
 
-    @Test fun afterMidPoint() {
+fun afterMidPoint() {
         val start = moved(0.0, 1.5)
         val motion = Vector2(0.0, -120.0 * step)
         val (hit, result) = impact(moving, start, motion, 0.0, ground, Transform(), Vector2(), 0.0)
@@ -67,7 +94,7 @@ class ConservativeAdvancementCoverageTest {
         assertEquals(0.346, final.getTranslationY(), 1e-3)
     }
 
-    @Test fun beforeMidPoint() {
+fun beforeMidPoint() {
         val start = moved(0.0, 1.0)
         val motion = Vector2(0.0, -120.0 * step)
         val (hit, result) = impact(moving, start, motion, 0.0, ground, Transform(), Vector2(), 0.0)
@@ -78,7 +105,7 @@ class ConservativeAdvancementCoverageTest {
         assertEquals(0.346, final.getTranslationY(), 1e-3)
     }
 
-    @Test fun sameDirection() {
+fun sameDirection() {
         val start = moved(0.0, 1.5)
         val motion = Vector2(120.0 * step, 0.0)
         val (hit, result) = impact(moving, start, motion, 0.0, Geometry.createSquare(0.2),
@@ -90,7 +117,7 @@ class ConservativeAdvancementCoverageTest {
         assertEquals(1.500, final.getTranslationY(), 1e-3)
     }
 
-    @Test fun oppositeDirection() {
+fun oppositeDirection() {
         val start = moved(0.0, 1.5)
         val second = moved(2.0, 1.5)
         val firstMotion = Vector2(120.0 * step, 0.0)
@@ -107,7 +134,7 @@ class ConservativeAdvancementCoverageTest {
         assertEquals(1.500, secondFinal.getTranslationY(), 1e-3)
     }
 
-    @Test fun orthogonalDirection() {
+fun orthogonalDirection() {
         val start = moved(0.0, 1.5)
         val second = moved(1.0, 1.25)
         val firstMotion = Vector2(120.0 * step, 0.0)
@@ -124,39 +151,39 @@ class ConservativeAdvancementCoverageTest {
         assertEquals(1.450, secondFinal.getTranslationY(), 1e-3)
     }
 
-    @Test fun sameDirectionNoCollision() {
+fun sameDirectionNoCollision() {
         val (hit, _) = impact(moving, moved(0.0, 1.0), Vector2(120.0 * step, 0.0), 0.0,
             Geometry.createSquare(0.5), moved(0.0, 1.5), Vector2(30.0 * step, 0.0), 0.0)
         assertFalse(hit)
     }
 
-    @Test fun sameDirectionNoCollision2() {
+fun sameDirectionNoCollision2() {
         val (hit, _) = impact(moving, moved(0.0, 1.0), Vector2(120.0 * step, 0.0), 0.0,
             Geometry.createSquare(0.5), moved(1.6, 1.5), Vector2(60.0 * step, 0.0), 0.0)
         assertFalse(hit)
     }
 
-    @Test fun orthogonalDirectionNoCollision() {
+fun orthogonalDirectionNoCollision() {
         val (hit, _) = impact(moving, moved(0.0, 1.0), Vector2(120.0 * step, 0.0), 0.0,
             Geometry.createSquare(0.1), moved(1.0, 1.3), Vector2(0.0, 60.0 * step), 0.0)
         assertFalse(hit)
     }
 
-    @Test fun setDistanceDetector() {
+fun setDistanceDetector() {
         val injected = Gjk()
         detector.setDistanceDetector(injected)
         assertSame(injected, detector.getDistanceDetector())
     }
 
-    @Test fun setNullDistanceDetector() {
+fun setNullDistanceDetector() {
         assertFailsWith<NullPointerException> { detector.setDistanceDetector(null) }
     }
 
-    @Test fun createWithNullDistanceDetector() {
+fun createWithNullDistanceDetector() {
         assertFailsWith<NullPointerException> { ConservativeAdvancement(null) }
     }
 
-    @Test fun createSuccess() {
+fun createSuccess() {
         val injected = Gjk()
         val result = ConservativeAdvancement(injected)
         assertSame(injected, result.getDistanceDetector())
@@ -164,37 +191,37 @@ class ConservativeAdvancementCoverageTest {
         assertEquals(ConservativeAdvancement.DEFAULT_MAX_ITERATIONS, result.getMaxIterations())
     }
 
-    @Test fun setTolerance() {
+fun setTolerance() {
         detector.setDistanceEpsilon(0.3)
         assertEquals(0.3, detector.getDistanceEpsilon())
         detector.setDistanceEpsilon(0.000002)
         assertEquals(0.000002, detector.getDistanceEpsilon())
     }
 
-    @Test fun setZeroTolerance() {
+fun setZeroTolerance() {
         assertFailsWith<IllegalArgumentException> { detector.setDistanceEpsilon(0.0) }
     }
 
-    @Test fun setNegativeTolerance() {
+fun setNegativeTolerance() {
         assertFailsWith<IllegalArgumentException> { detector.setDistanceEpsilon(-0.00003) }
     }
 
-    @Test fun setMaxIterations() {
+fun setMaxIterations() {
         detector.setMaxIterations(23)
         assertEquals(23, detector.getMaxIterations())
         detector.setMaxIterations(10)
         assertEquals(10, detector.getMaxIterations())
     }
 
-    @Test fun setZeroMaxIterations() {
+fun setZeroMaxIterations() {
         assertFailsWith<IllegalArgumentException> { detector.setMaxIterations(0) }
     }
 
-    @Test fun setNegativeMaxIterations() {
+fun setNegativeMaxIterations() {
         assertFailsWith<IllegalArgumentException> { detector.setMaxIterations(-2) }
     }
 
-    @Test fun setLessThanTenMaxIterations() {
+fun setLessThanTenMaxIterations() {
         assertFailsWith<IllegalArgumentException> { detector.setMaxIterations(4) }
     }
 
@@ -202,7 +229,7 @@ class ConservativeAdvancementCoverageTest {
         it.rotate(-40.0 * PI / 180.0, it.getTranslationX(), it.getTranslationY())
     }
 
-    @Test fun fastRotationAgainstStatic() {
+fun fastRotationAgainstStatic() {
         val first = spinningFirst()
         val rotation = 80.0 * PI / 180.0
         val (hit, result) = impact(Geometry.createRectangle(2.0, 0.2), first, Vector2(), rotation,
@@ -212,7 +239,7 @@ class ConservativeAdvancementCoverageTest {
         assertEquals(-0.643, first.lerped(Vector2(), rotation, result.getTime()).getRotationAngle(), 1e-3)
     }
 
-    @Test fun fastRotationAgainstFastRotation() {
+fun fastRotationAgainstFastRotation() {
         val first = spinningFirst()
         val second = moved(-5.0, 0.0).also {
             it.rotate(-20.0 * PI / 180.0, it.getTranslationX(), it.getTranslationY())
@@ -227,7 +254,7 @@ class ConservativeAdvancementCoverageTest {
         assertEquals(-0.041, second.lerped(Vector2(), secondRotation, result.getTime()).getRotationAngle(), 1e-3)
     }
 
-    @Test fun fastRotationAgainstFastRotationNoCollision() {
+fun fastRotationAgainstFastRotationNoCollision() {
         val first = spinningFirst()
         val second = moved(-5.0, 0.0).also {
             it.rotate(-80.0 * PI / 180.0, it.getTranslationX(), it.getTranslationY())
@@ -237,13 +264,13 @@ class ConservativeAdvancementCoverageTest {
         assertFalse(hit)
     }
 
-    @Test fun equidistantSameVelocityTest() {
+fun equidistantSameVelocityTest() {
         val (hit, _) = impact(Geometry.createSquare(1.0), Transform(), Vector2(1.0, 0.0), 0.0,
             Geometry.createSquare(1.0), moved(3.0, 0.0), Vector2(1.0, 0.0), 0.0)
         assertFalse(hit)
     }
 
-    @Test fun separationTooSmall() {
+fun separationTooSmall() {
         val (hit, _) = impact(Geometry.createSquare(1.0), Transform(), Vector2(1.0, 0.0), 0.0,
             Geometry.createSquare(1.0), moved(1.000001, 0.0), Vector2(1.0, 0.0), 0.0)
         assertFalse(hit)

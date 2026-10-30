@@ -1,6 +1,6 @@
 package org.dyn4j.world
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
@@ -14,6 +14,15 @@ import org.dyn4j.geometry.AABB
 import org.dyn4j.geometry.Circle
 import org.dyn4j.world.listener.BoundsListener
 import org.dyn4j.world.listener.CollisionListenerAdapter
+
+val CollisionWorldJourneyTest by testSuite {
+    test("publicBodyAndCollisionListenerViewsMarkRandomAccess") { CollisionWorldJourneyTestFixture().run { publicBodyAndCollisionListenerViewsMarkRandomAccess() } }
+    test("bodiesAndLiveViewFollowWorldOwnership") { CollisionWorldJourneyTestFixture().run { bodiesAndLiveViewFollowWorldOwnership() } }
+    test("queryResultsCopyWhileIteratorReusesItsResult") { CollisionWorldJourneyTestFixture().run { queryResultsCopyWhileIteratorReusesItsResult() } }
+    test("factoryAndCollisionDataFollowFixtureRemoval") { CollisionWorldJourneyTestFixture().run { factoryAndCollisionDataFollowFixtureRemoval() } }
+    test("everyBroadphaseListenerRunsBeforeVeto") { CollisionWorldJourneyTestFixture().run { everyBroadphaseListenerRunsBeforeVeto() } }
+    test("boundsCallbackDisablesBodyAndListenerViewStaysLive") { CollisionWorldJourneyTestFixture().run { boundsCallbackDisablesBodyAndListenerViewStaysLive() } }
+}
 
 private class CollisionProbeWorld : AbstractCollisionWorld<Body, BodyFixture, WorldCollisionData<Body>>() {
     var created = 0
@@ -31,9 +40,8 @@ private class CollisionProbeWorld : AbstractCollisionWorld<Body, BodyFixture, Wo
     fun scan() = detect()
 }
 
-class CollisionWorldJourneyTest {
-    @Test
-    fun publicBodyAndCollisionListenerViewsMarkRandomAccess() {
+private class CollisionWorldJourneyTestFixture  {
+fun publicBodyAndCollisionListenerViewsMarkRandomAccess() {
         val world = World<Body>()
         val views = listOf(world.getBodies(), world.getCollisionListeners(), world.getBoundsListeners())
         for (view in views) {
@@ -42,8 +50,7 @@ class CollisionWorldJourneyTest {
         }
     }
 
-    @Test
-    fun bodiesAndLiveViewFollowWorldOwnership() {
+fun bodiesAndLiveViewFollowWorldOwnership() {
         val world = World<Body>()
         val bodies = world.getBodies()
         val body = Body()
@@ -63,8 +70,7 @@ class CollisionWorldJourneyTest {
         assertEquals(null, body.getOwner())
     }
 
-    @Test
-    fun queryResultsCopyWhileIteratorReusesItsResult() {
+fun queryResultsCopyWhileIteratorReusesItsResult() {
         val world = CollisionProbeWorld()
         val first = Body().also { it.addFixture(Circle(1.0)) }
         val second = Body().also { it.addFixture(Circle(1.0)) }
@@ -85,8 +91,7 @@ class CollisionWorldJourneyTest {
         assertEquals(1, world.detect(query, first, null).size)
     }
 
-    @Test
-    fun factoryAndCollisionDataFollowFixtureRemoval() {
+fun factoryAndCollisionDataFollowFixtureRemoval() {
         val world = CollisionProbeWorld()
         val first = Body().also { it.addFixture(Circle(1.0)) }
         val second = Body().also { it.addFixture(Circle(1.0)) }
@@ -105,8 +110,7 @@ class CollisionWorldJourneyTest {
         assertEquals(null, world.getCollisionData(first, first.getFixture(0), second, second.getFixture(0)))
     }
 
-    @Test
-    fun everyBroadphaseListenerRunsBeforeVeto() {
+fun everyBroadphaseListenerRunsBeforeVeto() {
         val world = CollisionProbeWorld()
         val first = Body().also { it.addFixture(Circle(1.0)) }
         val second = Body().also { it.addFixture(Circle(1.0)) }
@@ -130,8 +134,7 @@ class CollisionWorldJourneyTest {
         assertFalse(world.getCollisionData(first, first.getFixture(0), second, second.getFixture(0))!!.isBroadphaseCollision())
     }
 
-    @Test
-    fun boundsCallbackDisablesBodyAndListenerViewStaysLive() {
+fun boundsCallbackDisablesBodyAndListenerViewStaysLive() {
         val world = CollisionProbeWorld()
         val view = world.getBoundsListeners()
         val body = Body().also { it.addFixture(Circle(1.0)); it.translate(10.0, 0.0) }

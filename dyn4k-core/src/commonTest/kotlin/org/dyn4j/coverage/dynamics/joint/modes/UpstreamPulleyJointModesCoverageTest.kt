@@ -24,10 +24,10 @@
  */
 package org.dyn4j.coverage.dynamics.joint.modes
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sqrt
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -42,6 +42,25 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
+val UpstreamPulleyJointModesCoverageTest by testSuite {
+    test("createSuccess") { UpstreamPulleyJointModesCoverageTestFixture().run { createSuccess() } }
+    test("createWithNullAnchor1") { UpstreamPulleyJointModesCoverageTestFixture().run { createWithNullAnchor1() } }
+    test("createWithNullAnchor2") { UpstreamPulleyJointModesCoverageTestFixture().run { createWithNullAnchor2() } }
+    test("createWithNullAnchor3") { UpstreamPulleyJointModesCoverageTestFixture().run { createWithNullAnchor3() } }
+    test("createWithNullAnchor4") { UpstreamPulleyJointModesCoverageTestFixture().run { createWithNullAnchor4() } }
+    test("createWithSameBody") { UpstreamPulleyJointModesCoverageTestFixture().run { createWithSameBody() } }
+    test("setRatio") { UpstreamPulleyJointModesCoverageTestFixture().run { setRatio() } }
+    test("setRatioNegative") { UpstreamPulleyJointModesCoverageTestFixture().run { setRatioNegative() } }
+    test("setRatioZero") { UpstreamPulleyJointModesCoverageTestFixture().run { setRatioZero() } }
+    test("setRatioSleep") { UpstreamPulleyJointModesCoverageTestFixture().run { setRatioSleep() } }
+    test("setSlackEnabled") { UpstreamPulleyJointModesCoverageTestFixture().run { setSlackEnabled() } }
+    test("setLength") { UpstreamPulleyJointModesCoverageTestFixture().run { setLength() } }
+    test("setLengthNegative") { UpstreamPulleyJointModesCoverageTestFixture().run { setLengthNegative() } }
+    test("setLengthSleep") { UpstreamPulleyJointModesCoverageTestFixture().run { setLengthSleep() } }
+    test("shiftCoordinates") { UpstreamPulleyJointModesCoverageTestFixture().run { shiftCoordinates() } }
+    test("copyFailed") { UpstreamPulleyJointModesCoverageTestFixture().run { copyFailed() } }
+}
+
 private fun pulleyBody() = Body().apply {
     addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
     setMass(MassType.NORMAL)
@@ -51,8 +70,8 @@ private fun pulleyRadians(degrees: Double) = degrees * PI / 180.0
 
 private class PulleyTestBody : Body()
 
-class UpstreamPulleyJointModesCoverageTest {
-    @Test fun createSuccess() {
+private class UpstreamPulleyJointModesCoverageTestFixture  {
+fun createSuccess() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         var pa1 = Vector2(-1.0, 1.0)
@@ -82,7 +101,7 @@ class UpstreamPulleyJointModesCoverageTest {
         assertNotNull(pj.toString())
     }
 
-    @Test fun createWithNullAnchor1() {
+fun createWithNullAnchor1() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         assertFailsWith<NullPointerException> {
@@ -90,7 +109,7 @@ class UpstreamPulleyJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithNullAnchor2() {
+fun createWithNullAnchor2() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         assertFailsWith<NullPointerException> {
@@ -98,7 +117,7 @@ class UpstreamPulleyJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithNullAnchor3() {
+fun createWithNullAnchor3() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         assertFailsWith<NullPointerException> {
@@ -106,7 +125,7 @@ class UpstreamPulleyJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithNullAnchor4() {
+fun createWithNullAnchor4() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         assertFailsWith<NullPointerException> {
@@ -114,7 +133,7 @@ class UpstreamPulleyJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithSameBody() {
+fun createWithSameBody() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         assertFailsWith<IllegalArgumentException> {
@@ -122,7 +141,7 @@ class UpstreamPulleyJointModesCoverageTest {
         }
     }
 
-    @Test fun setRatio() {
+fun setRatio() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         var pj = PulleyJoint<Body>(b1, b2, Vector2(), Vector2(), Vector2(), Vector2())
@@ -130,7 +149,7 @@ class UpstreamPulleyJointModesCoverageTest {
         assertEquals(2.0, pj.getRatio())
     }
 
-    @Test fun setRatioNegative() {
+fun setRatioNegative() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         assertFailsWith<IllegalArgumentException> {
@@ -139,7 +158,7 @@ class UpstreamPulleyJointModesCoverageTest {
         }
     }
 
-    @Test fun setRatioZero() {
+fun setRatioZero() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         assertFailsWith<IllegalArgumentException> {
@@ -148,7 +167,7 @@ class UpstreamPulleyJointModesCoverageTest {
         }
     }
 
-    @Test fun setRatioSleep() {
+fun setRatioSleep() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         var pj = PulleyJoint<Body>(b1, b2, Vector2(), Vector2(), Vector2(), Vector2())
@@ -168,7 +187,7 @@ class UpstreamPulleyJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setSlackEnabled() {
+fun setSlackEnabled() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         var pj = PulleyJoint<Body>(b1, b2, Vector2(), Vector2(), Vector2(), Vector2())
@@ -179,7 +198,7 @@ class UpstreamPulleyJointModesCoverageTest {
         assertFalse(pj.isSlackEnabled())
     }
 
-    @Test fun setLength() {
+fun setLength() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         var pj = PulleyJoint<Body>(b1, b2, Vector2(), Vector2(), Vector2(), Vector2())
@@ -187,7 +206,7 @@ class UpstreamPulleyJointModesCoverageTest {
         assertEquals(2.0, pj.getLength())
     }
 
-    @Test fun setLengthNegative() {
+fun setLengthNegative() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         assertFailsWith<IllegalArgumentException> {
@@ -196,7 +215,7 @@ class UpstreamPulleyJointModesCoverageTest {
         }
     }
 
-    @Test fun setLengthSleep() {
+fun setLengthSleep() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         var pj = PulleyJoint<Body>(b1, b2, Vector2(), Vector2(), Vector2(), Vector2())
@@ -216,7 +235,7 @@ class UpstreamPulleyJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun shiftCoordinates() {
+fun shiftCoordinates() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         var pj = PulleyJoint<Body>(b1, b2, Vector2(1.0, 0.0), Vector2(-1.0, 1.0), Vector2(), Vector2())
@@ -227,7 +246,7 @@ class UpstreamPulleyJointModesCoverageTest {
         assertEquals( 3.0, pj.getPulleyAnchor2().y, 1.0e-3)
     }
 
-    @Test fun copyFailed() {
+fun copyFailed() {
         val b1 = pulleyBody()
         val b2 = pulleyBody()
         assertFailsWith<ClassCastException> {

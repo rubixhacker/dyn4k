@@ -25,7 +25,7 @@
 
 package org.dyn4j.coverage.collision.shapes.a
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -39,7 +39,14 @@ import org.dyn4j.collision.narrowphase.Sat
 import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.geometry.*
 
-class EllipseHalfEllipseTest {
+val EllipseHalfEllipseTest by testSuite {
+    test("detectSat") { EllipseHalfEllipseTestFixture().run { detectSat() } }
+    test("detectGjk") { EllipseHalfEllipseTestFixture().run { detectGjk() } }
+    test("gjkDistance") { EllipseHalfEllipseTestFixture().run { gjkDistance() } }
+    test("getClipManifold") { EllipseHalfEllipseTestFixture().run { getClipManifold() } }
+}
+
+private class EllipseHalfEllipseTestFixture  {
     private val sat = Sat()
     private val gjk = Gjk()
     private val cmfs = ClippingManifoldSolver()
@@ -49,16 +56,14 @@ class EllipseHalfEllipseTest {
         c1 = Ellipse(1.0, 0.5)
         c2 = HalfEllipse(0.5, 1.0)
     }
-    @Test
-    fun detectSat() {
+fun detectSat() {
         setup()
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
         assertFailsWith<UnsupportedOperationException> { sat.detect(c1, t1, c2, t2, p) }
     }
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -107,8 +112,7 @@ class EllipseHalfEllipseTest {
         assertFalse(gjk.detect(c2, t2, c1, t1, p))
         assertFalse(gjk.detect(c2, t2, c1, t1))
     }
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         setup()
         val s = Separation()
         val t1 = Transform()
@@ -175,8 +179,7 @@ class EllipseHalfEllipseTest {
         assertFiniteClose(-1.007, p2.x, 1.0e-3)
         assertFiniteClose(-0.043, p2.y, 1.0e-3)
     }
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         setup()
         val m = Manifold()
         val p = Penetration()

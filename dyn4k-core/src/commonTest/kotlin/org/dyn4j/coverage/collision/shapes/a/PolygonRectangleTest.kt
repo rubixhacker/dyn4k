@@ -25,7 +25,7 @@
 
 package org.dyn4j.coverage.collision.shapes.a
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -39,7 +39,15 @@ import org.dyn4j.collision.narrowphase.Sat
 import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.geometry.*
 
-class PolygonRectangleTest {
+val PolygonRectangleTest by testSuite {
+    test("detectSat") { PolygonRectangleTestFixture().run { detectSat() } }
+    test("detectGjk") { PolygonRectangleTestFixture().run { detectGjk() } }
+    test("gjkDistance") { PolygonRectangleTestFixture().run { gjkDistance() } }
+    test("getClipManifold") { PolygonRectangleTestFixture().run { getClipManifold() } }
+    test("nearZeroDistance1") { PolygonRectangleTestFixture().run { nearZeroDistance1() } }
+}
+
+private class PolygonRectangleTestFixture  {
     private val sat = Sat()
     private val gjk = Gjk()
     private val cmfs = ClippingManifoldSolver()
@@ -49,8 +57,7 @@ class PolygonRectangleTest {
         poly = Geometry.createUnitCirclePolygon(5, 1.0)
         rect = Rectangle(1.0, 1.0)
     }
-    @Test
-    fun detectSat() {
+fun detectSat() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -99,8 +106,7 @@ class PolygonRectangleTest {
         assertFalse(sat.detect(rect, t2, poly, t1, p))
         assertFalse(sat.detect(rect, t2, poly, t1))
     }
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -149,8 +155,7 @@ class PolygonRectangleTest {
         assertFalse(gjk.detect(rect, t2, poly, t1, p))
         assertFalse(gjk.detect(rect, t2, poly, t1))
     }
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         setup()
         val s = Separation()
         val t1 = Transform()
@@ -217,8 +222,7 @@ class PolygonRectangleTest {
         assertFiniteClose(-1.207, p2.x, 1.0e-3)
         assertFiniteClose(0.285, p2.y, 1.0e-3)
     }
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         setup()
         val m = Manifold()
         val p = Penetration()
@@ -308,8 +312,7 @@ class PolygonRectangleTest {
         assertFiniteClose(-0.500, p2.y, 1.0e-3)
         assertFiniteClose(0.136, mp2.getDepth(), 1.0e-3)
     }
-    @Test
-    fun nearZeroDistance1() {
+fun nearZeroDistance1() {
         setup()
         val c1 = Geometry.createUnitCirclePolygon(5, 0.1)
         val c2 = Geometry.createRectangle(20.0, 0.5)

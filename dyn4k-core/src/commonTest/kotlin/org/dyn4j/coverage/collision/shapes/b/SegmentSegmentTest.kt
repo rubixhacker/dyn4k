@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.collision.shapes.b
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.collision.narrowphase.Gjk
 import org.dyn4j.collision.narrowphase.Penetration
 import org.dyn4j.collision.narrowphase.Sat
@@ -31,29 +32,31 @@ import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.geometry.Segment
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
-import kotlin.test.BeforeTest
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
+val SegmentSegmentTest by testSuite {
+    test("detectSat") { SegmentSegmentTestFixture().apply { setup() }.run { detectSat() } }
+    test("detectGjk") { SegmentSegmentTestFixture().apply { setup() }.run { detectGjk() } }
+    test("gjkDistance") { SegmentSegmentTestFixture().apply { setup() }.run { gjkDistance() } }
+}
 
 
 
-class SegmentSegmentTest : AbstractNarrowphaseShapeTest() {
+
+private class SegmentSegmentTestFixture : AbstractNarrowphaseShapeTest()  {
     private lateinit var seg1: Segment
 
     private lateinit var seg2: Segment
 
-    @BeforeTest
     fun setup() {
         this.seg1 = Segment(Vector2(-0.3, -0.3), Vector2(0.2, 0.3))
         this.seg2 = Segment(Vector2(-0.5, 0.0), Vector2(0.5, 0.0))
     }
 
-    @Test
-    fun detectSat() {
+fun detectSat() {
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
@@ -90,8 +93,7 @@ class SegmentSegmentTest : AbstractNarrowphaseShapeTest() {
         assertFalse(this.sat.detect(seg2, t2, seg1, t1))
     }
 
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
@@ -128,8 +130,7 @@ class SegmentSegmentTest : AbstractNarrowphaseShapeTest() {
         assertFalse(this.gjk.detect(seg2, t2, seg1, t1))
     }
 
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         val s = Separation()
 
         val t1 = Transform()

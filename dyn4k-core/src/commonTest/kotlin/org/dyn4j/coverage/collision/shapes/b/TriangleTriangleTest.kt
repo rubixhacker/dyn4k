@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.collision.shapes.b
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.collision.manifold.ClippingManifoldSolver
 import org.dyn4j.collision.manifold.Manifold
 import org.dyn4j.collision.manifold.ManifoldPoint
@@ -34,22 +35,28 @@ import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Triangle
 import org.dyn4j.geometry.Vector2
-import kotlin.test.BeforeTest
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
+val TriangleTriangleTest by testSuite {
+    test("detectSat") { TriangleTriangleTestFixture().apply { setup() }.run { detectSat() } }
+    test("detectGjk") { TriangleTriangleTestFixture().apply { setup() }.run { detectGjk() } }
+    test("gjkDistance") { TriangleTriangleTestFixture().apply { setup() }.run { gjkDistance() } }
+    test("getClipManifold") { TriangleTriangleTestFixture().apply { setup() }.run { getClipManifold() } }
+    test("distanceNotFound") { TriangleTriangleTestFixture().apply { setup() }.run { distanceNotFound() } }
+    test("falsePenetration1") { TriangleTriangleTestFixture().apply { setup() }.run { falsePenetration1() } }
+}
 
 
 
-class TriangleTriangleTest : AbstractNarrowphaseShapeTest() {
+
+private class TriangleTriangleTestFixture : AbstractNarrowphaseShapeTest()  {
     private lateinit var tri1: Triangle
 
     private lateinit var tri2: Triangle
 
-    @BeforeTest
     fun setup() {
         this.tri1 = Triangle(
         Vector2(1.29, 0.25),
@@ -61,8 +68,7 @@ class TriangleTriangleTest : AbstractNarrowphaseShapeTest() {
         Vector2(-0.15, -0.22))
     }
 
-    @Test
-    fun detectSat() {
+fun detectSat() {
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
@@ -128,8 +134,7 @@ class TriangleTriangleTest : AbstractNarrowphaseShapeTest() {
         assertFalse(this.sat.detect(tri2, t2, tri1, t1))
     }
 
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
@@ -195,8 +200,7 @@ class TriangleTriangleTest : AbstractNarrowphaseShapeTest() {
         assertFalse(this.gjk.detect(tri2, t2, tri1, t1))
     }
 
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         val s = Separation()
 
         val t1 = Transform()
@@ -281,8 +285,7 @@ class TriangleTriangleTest : AbstractNarrowphaseShapeTest() {
         assertClose(0.551, p2.y, 1.0e-3)
     }
 
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         val m = Manifold()
         val p = Penetration()
 
@@ -391,8 +394,7 @@ class TriangleTriangleTest : AbstractNarrowphaseShapeTest() {
         assertClose(0.037, mp2.getDepth(), 1.0e-3)
     }
 
-    @Test
-    fun distanceNotFound() {
+fun distanceNotFound() {
         val s = Separation()
         val t1 = Transform()
         val t2 = Transform()
@@ -413,8 +415,7 @@ class TriangleTriangleTest : AbstractNarrowphaseShapeTest() {
         assertTrue(p2.y.isFinite())
     }
 
-    @Test
-    fun falsePenetration1() {
+fun falsePenetration1() {
         // this config would generate a penetration object with zero depth
         val t1 = Triangle(
         Vector2(-0.5877852522924732, -0.8090169943749473),

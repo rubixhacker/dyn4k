@@ -24,8 +24,7 @@
  */
 package org.dyn4j.coverage.dynamics.joint.core
 
-import kotlin.test.BeforeTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -42,19 +41,68 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
+val PrismaticJointCoreCoverageTest by testSuite {
+    test("createWithNullBody1") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { createWithNullBody1() } }
+    test("createWithNullBody2") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { createWithNullBody2() } }
+    test("createSuccess") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { createSuccess() } }
+    test("createWithNullAnchor") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { createWithNullAnchor() } }
+    test("createWithNullAxis") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { createWithNullAxis() } }
+    test("setMotorMaximumForce") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setMotorMaximumForce() } }
+    test("setNegativeMaximumMotorForce") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setNegativeMaximumMotorForce() } }
+    test("setMotorMaximumForceSleep") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setMotorMaximumForceSleep() } }
+    test("setMotorEnabled") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setMotorEnabled() } }
+    test("setMotorEnabledSleep") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setMotorEnabledSleep() } }
+    test("setMotorSpeed") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setMotorSpeed() } }
+    test("setMotorSpeedSleep") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setMotorSpeedSleep() } }
+    test("setReferenceAngle") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setReferenceAngle() } }
+    test("shift") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { shift() } }
+    test("setUpperLimitSuccess") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setUpperLimitSuccess() } }
+    test("setUpperLimitInvalid") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setUpperLimitInvalid() } }
+    test("setLowerLimit") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setLowerLimit() } }
+    test("setLowerLimitInvalid") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setLowerLimitInvalid() } }
+    test("setUpperAndLowerLimits") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setUpperAndLowerLimits() } }
+    test("setUpperAndLowerLimitsInvalid1") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setUpperAndLowerLimitsInvalid1() } }
+    test("setUpperAndLowerLimitsInvalid2") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setUpperAndLowerLimitsInvalid2() } }
+    test("setSameLimitValid") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setSameLimitValid() } }
+    test("setLimitsEnabledSleep") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsEnabledSleep() } }
+    test("setLimitsSameSleep") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsSameSleep() } }
+    test("setLimitsDifferentSleep") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsDifferentSleep() } }
+    test("setLowerLimitSleep") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setLowerLimitSleep() } }
+    test("setUpperLimitSleep") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setUpperLimitSleep() } }
+    test("setLimitsEnabledSameSleep") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsEnabledSameSleep() } }
+    test("setLimitsEnabledDifferentSleep") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsEnabledDifferentSleep() } }
+    test("isSpringEnabled") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { isSpringEnabled() } }
+    test("isSpringDamperEnabled") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { isSpringDamperEnabled() } }
+    test("setSpringRestOffset") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setSpringRestOffset() } }
+    test("setSpringDampingRatio") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setSpringDampingRatio() } }
+    test("setNegativeDampingRatio") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setNegativeDampingRatio() } }
+    test("setDampingRatioGreaterThan1") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setDampingRatioGreaterThan1() } }
+    test("setSpringFrequency") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setSpringFrequency() } }
+    test("setSpringMode") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setSpringMode() } }
+    test("setSpringStiffnessNegative") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setSpringStiffnessNegative() } }
+    test("setSpringStiffness") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setSpringStiffness() } }
+    test("setSpringFrequencyNegative") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setSpringFrequencyNegative() } }
+    test("setSpringMaximumForceNegative") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setSpringMaximumForceNegative() } }
+    test("setSpringMaximumForce") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setSpringMaximumForce() } }
+    test("setSpringRestOffsetAtRest") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { setSpringRestOffsetAtRest() } }
+    test("computeSpringStiffnessFrequency") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { computeSpringStiffnessFrequency() } }
+    test("copy") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { copy() } }
+    test("copyFailed") { PrismaticJointCoreCoverageTestFixture().apply { setup() }.run { copyFailed() } }
+}
+
 private class PrismaticCoefficientProbe(first: Body, second: Body, anchor: Vector2, axis: Vector2) :
     PrismaticJoint<Body>(first, second, anchor, axis) {
     fun updateCoefficients() = updateSpringCoefficients()
 }
 
-class PrismaticJointCoreCoverageTest {
+private class PrismaticJointCoreCoverageTestFixture  {
     private lateinit var b1: Body
     private lateinit var b2: Body
 
-    @Test fun createWithNullBody1() { assertFailsWith<NullPointerException> { PrismaticJoint<Body>(null, Body(), Vector2(), Vector2(0.0, 1.0)) } }
-    @Test fun createWithNullBody2() { assertFailsWith<NullPointerException> { PrismaticJoint<Body>(Body(), null, Vector2(), Vector2(0.0, 1.0)) } }
+fun createWithNullBody1() { assertFailsWith<NullPointerException> { PrismaticJoint<Body>(null, Body(), Vector2(), Vector2(0.0, 1.0)) } }
+fun createWithNullBody2() { assertFailsWith<NullPointerException> { PrismaticJoint<Body>(Body(), null, Vector2(), Vector2(0.0, 1.0)) } }
 
-    @BeforeTest fun setup() {
+    fun setup() {
         b1 = Body()
         b1.addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
         b1.setMass(MassType.NORMAL)
@@ -62,7 +110,7 @@ class PrismaticJointCoreCoverageTest {
         b2.addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
         b2.setMass(MassType.NORMAL)
     }
-    @Test fun createSuccess() {
+fun createSuccess() {
         var anchor = Vector2()
         var axis = Vector2(0.0, 1.0)
         var pj = PrismaticJoint<Body>(b1, b2, anchor, axis)
@@ -90,15 +138,15 @@ class PrismaticJointCoreCoverageTest {
         assertNotNull(pj.toString())
     }
 
-    @Test fun createWithNullAnchor() {
+fun createWithNullAnchor() {
         assertFailsWith<NullPointerException> { PrismaticJoint<Body>(b1, b2, null, Vector2(0.0, 1.0)) }
     }
 
-    @Test fun createWithNullAxis() {
+fun createWithNullAxis() {
         assertFailsWith<NullPointerException> { PrismaticJoint<Body>(b1, b2, Vector2(), null) }
     }
 
-    @Test fun setMotorMaximumForce() {
+fun setMotorMaximumForce() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setMaximumMotorForce(0.0)
         assertEquals(0.0, pj.getMaximumMotorForce())
@@ -108,12 +156,12 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(2548.0, pj.getMaximumMotorForce())
     }
 
-    @Test fun setNegativeMaximumMotorForce() {
+fun setNegativeMaximumMotorForce() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertFailsWith<IllegalArgumentException> { pj.setMaximumMotorForce(-2.0) }
     }
 
-    @Test fun setMotorMaximumForceSleep() {
+fun setMotorMaximumForceSleep() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertFalse(pj.isMotorEnabled())
         assertEquals(1000.0, pj.getMaximumMotorForce())
@@ -152,7 +200,7 @@ class PrismaticJointCoreCoverageTest {
         assertTrue(b2.isAtRest())
     }
 
-    @Test fun setMotorEnabled() {
+fun setMotorEnabled() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertFalse(pj.isMotorEnabled())
         pj.setMotorEnabled(true)
@@ -161,7 +209,7 @@ class PrismaticJointCoreCoverageTest {
         assertFalse(pj.isMotorEnabled())
     }
 
-    @Test fun setMotorEnabledSleep() {
+fun setMotorEnabledSleep() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertFalse(pj.isMotorEnabled())
         assertFalse(b1.isAtRest())
@@ -188,7 +236,7 @@ class PrismaticJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setMotorSpeed() {
+fun setMotorSpeed() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(0.0, pj.getMotorSpeed())
         pj.setMotorSpeed(2.0)
@@ -199,7 +247,7 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(0.0, pj.getMotorSpeed())
     }
 
-    @Test fun setMotorSpeedSleep() {
+fun setMotorSpeedSleep() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertFalse(pj.isMotorEnabled())
         assertEquals(0.0, pj.getMotorSpeed())
@@ -225,14 +273,14 @@ class PrismaticJointCoreCoverageTest {
         assertTrue(b2.isAtRest())
     }
 
-    @Test fun setReferenceAngle() {
+fun setReferenceAngle() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(0.0, pj.getReferenceAngle())
         pj.setReferenceAngle((30.0 * kotlin.math.PI / 180.0))
         assertEquals((30.0 * kotlin.math.PI / 180.0), pj.getReferenceAngle())
     }
 
-    @Test fun shift() {
+fun shift() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(1.0, 1.0), Vector2(0.0, 1.0))
         assertEquals(1.0, pj.getAnchor1().x)
         assertEquals(1.0, pj.getAnchor1().y)
@@ -245,7 +293,7 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(1.0, pj.getAnchor2().y)
     }
 
-    @Test fun setUpperLimitSuccess() {
+fun setUpperLimitSuccess() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setLowerLimit(-5.0)
         assertEquals(0.0, pj.getUpperLimit())
@@ -257,13 +305,13 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(0.0, pj.getUpperLimit(), 1e-6)
     }
 
-    @Test fun setUpperLimitInvalid() {
+fun setUpperLimitInvalid() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(0.0, pj.getUpperLimit())
         assertFailsWith<IllegalArgumentException> { pj.setUpperLimit(-0.5) }
     }
 
-    @Test fun setLowerLimit() {
+fun setLowerLimit() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setUpperLimit(5.0)
         assertEquals(0.0, pj.getLowerLimit())
@@ -275,13 +323,13 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(2.0, pj.getLowerLimit(), 1e-6)
     }
 
-    @Test fun setLowerLimitInvalid() {
+fun setLowerLimitInvalid() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(0.0, pj.getLowerLimit())
         assertFailsWith<IllegalArgumentException> { pj.setLowerLimit(1.5) }
     }
 
-    @Test fun setUpperAndLowerLimits() {
+fun setUpperAndLowerLimits() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(0.0, pj.getLowerLimit())
         assertEquals(0.0, pj.getUpperLimit())
@@ -302,21 +350,21 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(5.0, pj.getUpperLimit())
     }
 
-    @Test fun setUpperAndLowerLimitsInvalid1() {
+fun setUpperAndLowerLimitsInvalid1() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(0.0, pj.getLowerLimit())
         assertEquals(0.0, pj.getUpperLimit())
         assertFailsWith<IllegalArgumentException> { pj.setLimits(1.0, 0.0) }
     }
 
-    @Test fun setUpperAndLowerLimitsInvalid2() {
+fun setUpperAndLowerLimitsInvalid2() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(0.0, pj.getLowerLimit())
         assertEquals(0.0, pj.getUpperLimit())
         assertFailsWith<IllegalArgumentException> { pj.setLimits(0.0, -1.0) }
     }
 
-    @Test fun setSameLimitValid() {
+fun setSameLimitValid() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(0.0, pj.getLowerLimit())
         assertEquals(0.0, pj.getUpperLimit())
@@ -328,7 +376,7 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(-2.0, pj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledSleep() {
+fun setLimitsEnabledSleep() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setLowerLimitEnabled(true)
         pj.setUpperLimitEnabled(true)
@@ -365,7 +413,7 @@ class PrismaticJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setLimitsSameSleep() {
+fun setLimitsSameSleep() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setLowerLimitEnabled(true)
         pj.setUpperLimitEnabled(true)
@@ -426,7 +474,7 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(1.0, pj.getUpperLimit())
     }
 
-    @Test fun setLimitsDifferentSleep() {
+fun setLimitsDifferentSleep() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setLowerLimitEnabled(true)
         pj.setUpperLimitEnabled(true)
@@ -487,7 +535,7 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(2.0, pj.getUpperLimit())
     }
 
-    @Test fun setLowerLimitSleep() {
+fun setLowerLimitSleep() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setLowerLimitEnabled(true)
         pj.setUpperLimitEnabled(true)
@@ -520,7 +568,7 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(defaultUpperLimit, pj.getUpperLimit())
     }
 
-    @Test fun setUpperLimitSleep() {
+fun setUpperLimitSleep() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setLowerLimitEnabled(true)
         pj.setUpperLimitEnabled(true)
@@ -553,7 +601,7 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(3.0, pj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledSameSleep() {
+fun setLimitsEnabledSameSleep() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setLowerLimitEnabled(true)
         pj.setUpperLimitEnabled(true)
@@ -592,7 +640,7 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(1.0, pj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledDifferentSleep() {
+fun setLimitsEnabledDifferentSleep() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setLowerLimitEnabled(true)
         pj.setUpperLimitEnabled(true)
@@ -653,7 +701,7 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(4.0, pj.getUpperLimit())
     }
 
-    @Test fun isSpringEnabled() {
+fun isSpringEnabled() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertFalse(pj.isSpringEnabled())
         pj.setSpringFrequency(1.0)
@@ -668,7 +716,7 @@ class PrismaticJointCoreCoverageTest {
         assertFalse(pj.isSpringEnabled())
     }
 
-    @Test fun isSpringDamperEnabled() {
+fun isSpringDamperEnabled() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertFalse(pj.isSpringDamperEnabled())
         pj.setSpringFrequency(1.0)
@@ -688,7 +736,7 @@ class PrismaticJointCoreCoverageTest {
         assertTrue(pj.isSpringDamperEnabled())
     }
 
-    @Test fun setSpringRestOffset() {
+fun setSpringRestOffset() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setSpringRestOffset(0.0)
         assertEquals(0.0, pj.getSpringRestOffset())
@@ -698,7 +746,7 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(-1.0, pj.getSpringRestOffset())
     }
 
-    @Test fun setSpringDampingRatio() {
+fun setSpringDampingRatio() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setSpringDampingRatio(0.0)
         assertEquals(0.0, pj.getSpringDampingRatio())
@@ -729,17 +777,17 @@ class PrismaticJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setNegativeDampingRatio() {
+fun setNegativeDampingRatio() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertFailsWith<IllegalArgumentException> { pj.setSpringDampingRatio(-1.0) }
     }
 
-    @Test fun setDampingRatioGreaterThan1() {
+fun setDampingRatioGreaterThan1() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertFailsWith<IllegalArgumentException> { pj.setSpringDampingRatio(2.0) }
     }
 
-    @Test fun setSpringFrequency() {
+fun setSpringFrequency() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setSpringFrequency(0.0)
         assertEquals(0.0, pj.getSpringFrequency())
@@ -775,7 +823,7 @@ class PrismaticJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setSpringMode() {
+fun setSpringMode() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertEquals(Joint.SPRING_MODE_FREQUENCY, pj.getSpringMode())
         pj.setSpringStiffness(0.3)
@@ -784,12 +832,12 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(Joint.SPRING_MODE_FREQUENCY, pj.getSpringMode())
     }
 
-    @Test fun setSpringStiffnessNegative() {
+fun setSpringStiffnessNegative() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertFailsWith<IllegalArgumentException> { pj.setSpringStiffness(-0.3) }
     }
 
-    @Test fun setSpringStiffness() {
+fun setSpringStiffness() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setSpringStiffness(0.0)
         assertEquals(0.0, pj.getSpringStiffness())
@@ -824,17 +872,17 @@ class PrismaticJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setSpringFrequencyNegative() {
+fun setSpringFrequencyNegative() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertFailsWith<IllegalArgumentException> { pj.setSpringFrequency(-0.3) }
     }
 
-    @Test fun setSpringMaximumForceNegative() {
+fun setSpringMaximumForceNegative() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         assertFailsWith<IllegalArgumentException> { pj.setMaximumSpringForce(-1.0) }
     }
 
-    @Test fun setSpringMaximumForce() {
+fun setSpringMaximumForce() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         pj.setMaximumSpringForce(0.0)
         assertEquals(0.0, pj.getMaximumSpringForce())
@@ -873,7 +921,7 @@ class PrismaticJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setSpringRestOffsetAtRest() {
+fun setSpringRestOffsetAtRest() {
         var pj = PrismaticJoint<Body>(b1, b2, Vector2(), Vector2(0.0, 1.0))
         var distance = pj.getSpringRestOffset()
         pj.setSpringEnabled(true)
@@ -892,7 +940,7 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(10.0, pj.getSpringRestOffset())
     }
 
-    @Test fun computeSpringStiffnessFrequency() {
+fun computeSpringStiffnessFrequency() {
         val joint = PrismaticCoefficientProbe(b1, b2, Vector2(), Vector2(0.0, 1.0))
         joint.setSpringEnabled(true)
         joint.setSpringDamperEnabled(true)
@@ -911,7 +959,7 @@ class PrismaticJointCoreCoverageTest {
         assertEquals(1000.0, joint.getSpringStiffness(), 1e-3)
     }
 
-    @Test fun copy() {
+fun copy() {
         val joint = PrismaticJoint<Body>(b1, b2, Vector2(1.0, 1.0), Vector2(4.0, 1.0))
         joint.setCollisionAllowed(true)
         joint.setOwner(Any())
@@ -985,7 +1033,7 @@ class PrismaticJointCoreCoverageTest {
         assertSame(b2, secondShared.getBody2())
         assertSame(secondShared.getBody1(), secondShared.getBodies()[0])
     }
-    @Test fun copyFailed() {
+fun copyFailed() {
         class SubBody : Body()
         val joint = PrismaticJoint<Body>(SubBody(), SubBody(), Vector2(), Vector2(0.0, 1.0))
         assertFailsWith<CopyException> { joint.copy() }

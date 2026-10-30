@@ -24,14 +24,43 @@
  */
 package org.dyn4j.coverage
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.Epsilon
 import org.dyn4j.geometry.*
 import kotlin.math.*
 import kotlin.test.*
 
-class UpstreamMatrix33CoverageTest {
-    @Test
-    fun createFull() {
+val UpstreamMatrix33CoverageTest by testSuite {
+    test("createFull") { UpstreamMatrix33CoverageTestFixture().run { createFull() } }
+    test("createFullArray") { UpstreamMatrix33CoverageTestFixture().run { createFullArray() } }
+    test("createNullArray") { UpstreamMatrix33CoverageTestFixture().run { createNullArray() } }
+    test("createPartialArray") { UpstreamMatrix33CoverageTestFixture().run { createPartialArray() } }
+    test("equalsHashcode") { UpstreamMatrix33CoverageTestFixture().run { equalsHashcode() } }
+    test("copy") { UpstreamMatrix33CoverageTestFixture().run { copy() } }
+    test("add") { UpstreamMatrix33CoverageTestFixture().run { add() } }
+    test("sum") { UpstreamMatrix33CoverageTestFixture().run { sum() } }
+    test("subtract") { UpstreamMatrix33CoverageTestFixture().run { subtract() } }
+    test("difference") { UpstreamMatrix33CoverageTestFixture().run { difference() } }
+    test("multiplyMatrix") { UpstreamMatrix33CoverageTestFixture().run { multiplyMatrix() } }
+    test("productMatrix") { UpstreamMatrix33CoverageTestFixture().run { productMatrix() } }
+    test("multiplyVector") { UpstreamMatrix33CoverageTestFixture().run { multiplyVector() } }
+    test("productVector") { UpstreamMatrix33CoverageTestFixture().run { productVector() } }
+    test("multiplyVectorT") { UpstreamMatrix33CoverageTestFixture().run { multiplyVectorT() } }
+    test("productVectorT") { UpstreamMatrix33CoverageTestFixture().run { productVectorT() } }
+    test("multiplyScalar") { UpstreamMatrix33CoverageTestFixture().run { multiplyScalar() } }
+    test("productScalar") { UpstreamMatrix33CoverageTestFixture().run { productScalar() } }
+    test("identity") { UpstreamMatrix33CoverageTestFixture().run { identity() } }
+    test("transpose") { UpstreamMatrix33CoverageTestFixture().run { transpose() } }
+    test("getTranspose") { UpstreamMatrix33CoverageTestFixture().run { getTranspose() } }
+    test("determinant") { UpstreamMatrix33CoverageTestFixture().run { determinant() } }
+    test("invert") { UpstreamMatrix33CoverageTestFixture().run { invert() } }
+    test("getInverse") { UpstreamMatrix33CoverageTestFixture().run { getInverse() } }
+    test("solve22") { UpstreamMatrix33CoverageTestFixture().run { solve22() } }
+    test("solve33") { UpstreamMatrix33CoverageTestFixture().run { solve33() } }
+}
+
+private class UpstreamMatrix33CoverageTestFixture  {
+fun createFull() {
         var m = Matrix33(1.0, 2.0, 1.0,
             -3.0, 8.0, 2.0,
             1.0, 5.0, -1.0)
@@ -47,8 +76,7 @@ class UpstreamMatrix33CoverageTest {
         assertNotNull(m.toString())
     }
 
-    @Test
-    fun createFullArray() {
+fun createFullArray() {
         var m = Matrix33(doubleArrayOf(1.0, 2.0, 1.0,
             -3.0, 8.0, 2.0,
             1.0, 5.0, -1.0))
@@ -63,15 +91,13 @@ class UpstreamMatrix33CoverageTest {
         assertEquals(-1.0, m.m22)
     }
 
-    @Test
-    fun createNullArray() {
+fun createNullArray() {
         assertFailsWith<NullPointerException> {
             Matrix33(null)
         }
     }
 
-    @Test
-    fun createPartialArray() {
+fun createPartialArray() {
         assertFailsWith<IndexOutOfBoundsException> {
             Matrix33(doubleArrayOf(1.0, 2.0, 1.0,
                 -3.0, 8.0, 2.0,
@@ -79,8 +105,7 @@ class UpstreamMatrix33CoverageTest {
         }
     }
 
-    @Test
-    fun equalsHashcode() {
+fun equalsHashcode() {
         var m = Matrix33(1.0, 2.0, 1.0,
             -3.0, 8.0, 2.0,
             1.0, 5.0, -1.0)
@@ -99,8 +124,7 @@ class UpstreamMatrix33CoverageTest {
         assertFalse(m.equals(Any()))
     }
 
-    @Test
-    fun copy() {
+fun copy() {
         var m1 = Matrix33(0.0, 1.0, -1.0,
             2.0, -1.0, 3.0,
             3.0, 2.5, 0.5)
@@ -116,8 +140,7 @@ class UpstreamMatrix33CoverageTest {
         assertEquals(m2.m22, m1.m22)
     }
 
-    @Test
-    fun add() {
+fun add() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -136,8 +159,7 @@ class UpstreamMatrix33CoverageTest {
         assertEquals(0.0, m1.m22)
     }
 
-    @Test
-    fun sum() {
+fun sum() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -157,8 +179,7 @@ class UpstreamMatrix33CoverageTest {
         assertFalse(m1.equals(m3))
     }
 
-    @Test
-    fun subtract() {
+fun subtract() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -177,8 +198,7 @@ class UpstreamMatrix33CoverageTest {
         assertEquals(-2.0, m1.m22)
     }
 
-    @Test
-    fun difference() {
+fun difference() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -198,8 +218,7 @@ class UpstreamMatrix33CoverageTest {
         assertFalse(m1.equals(m3))
     }
 
-    @Test
-    fun multiplyMatrix() {
+fun multiplyMatrix() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -218,8 +237,7 @@ class UpstreamMatrix33CoverageTest {
         assertEquals(5.0, m1.m22)
     }
 
-    @Test
-    fun productMatrix() {
+fun productMatrix() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -239,8 +257,7 @@ class UpstreamMatrix33CoverageTest {
         assertFalse(m1.equals(m3))
     }
 
-    @Test
-    fun multiplyVector() {
+fun multiplyVector() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -251,8 +268,7 @@ class UpstreamMatrix33CoverageTest {
         assertEquals( 0.0, v1.z)
     }
 
-    @Test
-    fun productVector() {
+fun productVector() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -264,8 +280,7 @@ class UpstreamMatrix33CoverageTest {
         assertFalse(v1.equals(v2))
     }
 
-    @Test
-    fun multiplyVectorT() {
+fun multiplyVectorT() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -276,8 +291,7 @@ class UpstreamMatrix33CoverageTest {
         assertEquals(-3.0, v1.z)
     }
 
-    @Test
-    fun productVectorT() {
+fun productVectorT() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -289,8 +303,7 @@ class UpstreamMatrix33CoverageTest {
         assertFalse(v1.equals(v2))
     }
 
-    @Test
-    fun multiplyScalar() {
+fun multiplyScalar() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -306,8 +319,7 @@ class UpstreamMatrix33CoverageTest {
         assertEquals(-2.0, m1.m22)
     }
 
-    @Test
-    fun productScalar() {
+fun productScalar() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -324,8 +336,7 @@ class UpstreamMatrix33CoverageTest {
         assertFalse(m1.equals(m2))
     }
 
-    @Test
-    fun identity() {
+fun identity() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -341,8 +352,7 @@ class UpstreamMatrix33CoverageTest {
         assertEquals(1.0, m1.m22)
     }
 
-    @Test
-    fun transpose() {
+fun transpose() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -358,8 +368,7 @@ class UpstreamMatrix33CoverageTest {
         assertEquals(-1.0, m1.m22)
     }
 
-    @Test
-    fun getTranspose() {
+fun getTranspose() {
         var m1 = Matrix33(0.0, 2.0, 0.0,
             3.0, 1.0, 1.0,
             2.0, 0.0, -1.0)
@@ -376,8 +385,7 @@ class UpstreamMatrix33CoverageTest {
         assertFalse(m1.equals(m2))
     }
 
-    @Test
-    fun determinant() {
+fun determinant() {
         var m1 = Matrix33(1.0, 0.0, 5.0,
             2.0, 1.0, 6.0,
             3.0, 4.0, 0.0)
@@ -385,8 +393,7 @@ class UpstreamMatrix33CoverageTest {
         assertEquals(1.0, det)
     }
 
-    @Test
-    fun invert() {
+fun invert() {
         var m1 = Matrix33(1.0, 0.0, 5.0,
             2.0, 1.0, 6.0,
             3.0, 4.0, 0.0)
@@ -402,8 +409,7 @@ class UpstreamMatrix33CoverageTest {
         assertEquals(  1.0, m1.m22)
     }
 
-    @Test
-    fun getInverse() {
+fun getInverse() {
         var m1 = Matrix33(1.0, 0.0, 5.0,
             2.0, 1.0, 6.0,
             3.0, 4.0, 0.0)
@@ -420,8 +426,7 @@ class UpstreamMatrix33CoverageTest {
         assertFalse(m1.equals(m2))
     }
 
-    @Test
-    fun solve22() {
+fun solve22() {
         var A = Matrix33(3.0, -1.0, 0.0,
             -1.0, -1.0, 0.0,
             0.0,  0.0, 0.0)
@@ -431,8 +436,7 @@ class UpstreamMatrix33CoverageTest {
         assertEquals(-5.0, x.y)
     }
 
-    @Test
-    fun solve33() {
+fun solve33() {
         var A = Matrix33(1.0, -3.0, 3.0,
             2.0, 3.0, -1.0,
             4.0, -3.0, -1.0)

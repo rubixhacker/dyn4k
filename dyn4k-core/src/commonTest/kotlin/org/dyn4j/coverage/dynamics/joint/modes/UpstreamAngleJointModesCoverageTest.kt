@@ -24,10 +24,10 @@
  */
 package org.dyn4j.coverage.dynamics.joint.modes
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sqrt
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -42,6 +42,26 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
+val UpstreamAngleJointModesCoverageTest by testSuite {
+    test("create") { UpstreamAngleJointModesCoverageTestFixture().run { create() } }
+    test("setUpperLimitSuccess") { UpstreamAngleJointModesCoverageTestFixture().run { setUpperLimitSuccess() } }
+    test("setLowerLimit") { UpstreamAngleJointModesCoverageTestFixture().run { setLowerLimit() } }
+    test("setUpperAndLowerLimits") { UpstreamAngleJointModesCoverageTestFixture().run { setUpperAndLowerLimits() } }
+    test("setUpperAndLowerLimitsToSameValue") { UpstreamAngleJointModesCoverageTestFixture().run { setUpperAndLowerLimitsToSameValue() } }
+    test("setLimitsReferenceAngle") { UpstreamAngleJointModesCoverageTestFixture().run { setLimitsReferenceAngle() } }
+    test("setRatio") { UpstreamAngleJointModesCoverageTestFixture().run { setRatio() } }
+    test("setRatioZero") { UpstreamAngleJointModesCoverageTestFixture().run { setRatioZero() } }
+    test("setLimitEnabledSleep") { UpstreamAngleJointModesCoverageTestFixture().run { setLimitEnabledSleep() } }
+    test("setLimitsSameSleep") { UpstreamAngleJointModesCoverageTestFixture().run { setLimitsSameSleep() } }
+    test("setLimitsDifferentSleep") { UpstreamAngleJointModesCoverageTestFixture().run { setLimitsDifferentSleep() } }
+    test("setLowerLimitSleep") { UpstreamAngleJointModesCoverageTestFixture().run { setLowerLimitSleep() } }
+    test("setUpperLimitSleep") { UpstreamAngleJointModesCoverageTestFixture().run { setUpperLimitSleep() } }
+    test("setLimitsEnabledSameSleep") { UpstreamAngleJointModesCoverageTestFixture().run { setLimitsEnabledSameSleep() } }
+    test("setLimitsEnabledDifferentSleep") { UpstreamAngleJointModesCoverageTestFixture().run { setLimitsEnabledDifferentSleep() } }
+    test("shift") { UpstreamAngleJointModesCoverageTestFixture().run { shift() } }
+    test("copyFailed") { UpstreamAngleJointModesCoverageTestFixture().run { copyFailed() } }
+}
+
 private fun angleBody() = Body().apply {
     addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
     setMass(MassType.NORMAL)
@@ -51,8 +71,8 @@ private fun angleRadians(degrees: Double) = degrees * PI / 180.0
 
 private class AngleTestBody : Body()
 
-class UpstreamAngleJointModesCoverageTest {
-    @Test fun create() {
+private class UpstreamAngleJointModesCoverageTestFixture  {
+fun create() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -71,7 +91,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertNotNull(aj.toString())
     }
 
-    @Test fun setUpperLimitSuccess() {
+fun setUpperLimitSuccess() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -79,7 +99,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(angleRadians(10.0), aj.getUpperLimit(), 1e-6)
     }
 
-    @Test fun setLowerLimit() {
+fun setLowerLimit() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -87,7 +107,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(angleRadians(-10.0), aj.getLowerLimit(), 1e-6)
     }
 
-    @Test fun setUpperAndLowerLimits() {
+fun setUpperAndLowerLimits() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -96,7 +116,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(angleRadians(20.0), aj.getUpperLimit(), 1e-6)
     }
 
-    @Test fun setUpperAndLowerLimitsToSameValue() {
+fun setUpperAndLowerLimitsToSameValue() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -105,7 +125,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(angleRadians(30.0), aj.getUpperLimit(), 1e-6)
     }
 
-    @Test fun setLimitsReferenceAngle() {
+fun setLimitsReferenceAngle() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -114,7 +134,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(angleRadians(30.0), aj.getLimitsReferenceAngle())
     }
 
-    @Test fun setRatio() {
+fun setRatio() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -125,7 +145,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(-1.0, aj.getRatio())
     }
 
-    @Test fun setRatioZero() {
+fun setRatioZero() {
         val b1 = angleBody()
         val b2 = angleBody()
         assertFailsWith<IllegalArgumentException> {
@@ -134,7 +154,7 @@ class UpstreamAngleJointModesCoverageTest {
         }
     }
 
-    @Test fun setLimitEnabledSleep() {
+fun setLimitEnabledSleep() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -165,7 +185,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setLimitsSameSleep() {
+fun setLimitsSameSleep() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -220,7 +240,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(-PI, aj.getUpperLimit())
     }
 
-    @Test fun setLimitsDifferentSleep() {
+fun setLimitsDifferentSleep() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -275,7 +295,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(2*PI, aj.getUpperLimit())
     }
 
-    @Test fun setLowerLimitSleep() {
+fun setLowerLimitSleep() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -308,7 +328,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(defaultUpperLimit, aj.getUpperLimit())
     }
 
-    @Test fun setUpperLimitSleep() {
+fun setUpperLimitSleep() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -341,7 +361,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(2*PI, aj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledSameSleep() {
+fun setLimitsEnabledSameSleep() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -376,7 +396,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(PI, aj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledDifferentSleep() {
+fun setLimitsEnabledDifferentSleep() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -431,7 +451,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(PI, aj.getUpperLimit())
     }
 
-    @Test fun shift() {
+fun shift() {
         val b1 = angleBody()
         val b2 = angleBody()
         var aj = AngleJoint<Body>(b1, b2)
@@ -442,7 +462,7 @@ class UpstreamAngleJointModesCoverageTest {
         assertEquals(p2, b2.getWorldCenter())
     }
 
-    @Test fun copyFailed() {
+fun copyFailed() {
         val b1 = angleBody()
         val b2 = angleBody()
         assertFailsWith<ClassCastException> {

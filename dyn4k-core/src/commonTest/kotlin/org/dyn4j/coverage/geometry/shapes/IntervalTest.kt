@@ -24,13 +24,35 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class IntervalTest {
-    @Test
-    fun createMinGreaterThanMax() {
+val IntervalTest by testSuite {
+    test("createMinGreaterThanMax") { IntervalTestFixture().run { createMinGreaterThanMax() } }
+    test("create") { IntervalTestFixture().run { create() } }
+    test("createCopy") { IntervalTestFixture().run { createCopy() } }
+    test("setInvalidMax") { IntervalTestFixture().run { setInvalidMax() } }
+    test("setMax") { IntervalTestFixture().run { setMax() } }
+    test("setInvalidMin") { IntervalTestFixture().run { setInvalidMin() } }
+    test("setMin") { IntervalTestFixture().run { setMin() } }
+    test("includes") { IntervalTestFixture().run { includes() } }
+    test("overlaps") { IntervalTestFixture().run { overlaps() } }
+    test("contains") { IntervalTestFixture().run { contains() } }
+    test("clamp") { IntervalTestFixture().run { clamp() } }
+    test("degenerate") { IntervalTestFixture().run { degenerate() } }
+    test("union") { IntervalTestFixture().run { union() } }
+    test("intersection") { IntervalTestFixture().run { intersection() } }
+    test("distance") { IntervalTestFixture().run { distance() } }
+    test("expand") { IntervalTestFixture().run { expand() } }
+    test("getLength") { IntervalTestFixture().run { getLength() } }
+    test("copy") { IntervalTestFixture().run { copy() } }
+    test("set") { IntervalTestFixture().run { set() } }
+}
+
+private class IntervalTestFixture  {
+fun createMinGreaterThanMax() {
         assertFailsWith<IllegalArgumentException> {
 
 		Interval(0.0, -1.0);
@@ -38,16 +60,14 @@ class IntervalTest {
         }
     }
 
-    @Test
-    fun create() {
+fun create() {
 
 		var i = Interval(0.0, 2.0);
 		assertNotNull(i.toString());
 
     }
 
-    @Test
-    fun createCopy() {
+fun createCopy() {
 
 		var i1 = Interval(-1.0, 2.0);
 		var i2 = Interval(i1);
@@ -58,8 +78,7 @@ class IntervalTest {
 
     }
 
-    @Test
-    fun setInvalidMax() {
+fun setInvalidMax() {
         assertFailsWith<IllegalArgumentException> {
 
 		var i = Interval(0.0, 2.0);
@@ -68,16 +87,14 @@ class IntervalTest {
         }
     }
 
-    @Test
-    fun setMax() {
+fun setMax() {
 
 		var i = Interval(0.0, 2.0);
 		i.setMax(1.5);
 
     }
 
-    @Test
-    fun setInvalidMin() {
+fun setInvalidMin() {
         assertFailsWith<IllegalArgumentException> {
 
 		var i = Interval(0.0, 2.0);
@@ -86,16 +103,14 @@ class IntervalTest {
         }
     }
 
-    @Test
-    fun setMin() {
+fun setMin() {
 
 		var i = Interval(0.0, 2.0);
 		i.setMin(1.5);
 
     }
 
-    @Test
-    fun includes() {
+fun includes() {
 
 		var i = Interval(-2.5, 100.521);
 
@@ -119,8 +134,7 @@ class IntervalTest {
 
     }
 
-    @Test
-    fun overlaps() {
+fun overlaps() {
 
 		var i1 = Interval(-2.0, 5.0);
 		var i2 = Interval(-4.0, 1.0);
@@ -143,8 +157,7 @@ class IntervalTest {
 
     }
 
-    @Test
-    fun contains() {
+fun contains() {
 
 		var i1 = Interval(-2.0, 5.0);
 		var i2 = Interval(-1.0, 3.0);
@@ -199,8 +212,7 @@ class IntervalTest {
 
     }
 
-    @Test
-    fun clamp() {
+fun clamp() {
 
 		var i = Interval(-1.0, 6.5);
 
@@ -211,8 +223,7 @@ class IntervalTest {
 
     }
 
-    @Test
-    fun degenerate() {
+fun degenerate() {
 
 		var i = Interval(2.0, 2.0);
 
@@ -229,8 +240,7 @@ class IntervalTest {
 
     }
 
-    @Test
-    fun union() {
+fun union() {
 
 		var i1 = Interval(-2.0, 3.0);
 		var i2 = Interval(-1.0, 4.0);
@@ -260,8 +270,7 @@ class IntervalTest {
 
     }
 
-    @Test
-    fun intersection() {
+fun intersection() {
 
 		var i1 = Interval(-2.0, 3.0);
 		var i2 = Interval(-1.0, 4.0);
@@ -291,8 +300,7 @@ class IntervalTest {
 
     }
 
-    @Test
-    fun distance() {
+fun distance() {
 
 		var i1 = Interval(-2.0, 3.0);
 		var i2 = Interval(-1.0, 4.0);
@@ -306,8 +314,7 @@ class IntervalTest {
 
     }
 
-    @Test
-    fun expand() {
+fun expand() {
 
 		var i = Interval(-2.0, 2.0);
 		lateinit var ci: Interval;
@@ -353,8 +360,7 @@ class IntervalTest {
 
     }
 
-    @Test
-    fun getLength() {
+fun getLength() {
 
 		var i = Interval(-2.0, 2.0);
 		assertEquals(4.0, i.getLength());
@@ -377,8 +383,7 @@ class IntervalTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var i = Interval(-1.0, 0.0);
 		var copy = i.copy();
@@ -389,8 +394,7 @@ class IntervalTest {
 
     }
 
-    @Test
-    fun set() {
+fun set() {
 
 		var i = Interval(-1.0, 0.0);
 		var o = Interval(0.0, 0.0);

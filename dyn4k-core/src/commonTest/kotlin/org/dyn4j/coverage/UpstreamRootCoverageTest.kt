@@ -24,26 +24,38 @@
  */
 package org.dyn4j.coverage
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.Reference
 import org.dyn4j.Version
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class UpstreamReferenceCoverageTest {
-    @Test fun testCreate() {
+val UpstreamReferenceCoverageTest by testSuite {
+    test("testCreate") { UpstreamReferenceCoverageTestFixture().run { testCreate() } }
+    test("testToString") { UpstreamReferenceCoverageTestFixture().run { testToString() } }
+    test("testEquals") { UpstreamReferenceCoverageTestFixture().run { testEquals() } }
+    test("testHashcode") { UpstreamReferenceCoverageTestFixture().run { testHashcode() } }
+}
+
+val UpstreamVersionCoverageTest by testSuite {
+    test("versions") { UpstreamVersionCoverageTestFixture().run { versions() } }
+    test("getVersionString") { UpstreamVersionCoverageTestFixture().run { getVersionString() } }
+}
+
+private class UpstreamReferenceCoverageTestFixture  {
+fun testCreate() {
         Reference<Int>()
         Reference(5)
     }
 
-    @Test fun testToString() {
+fun testToString() {
         assertEquals("null", Reference<Int>().toString())
         assertEquals(5.toString(), Reference(5).toString())
     }
 
-    @Test fun testEquals() {
+fun testEquals() {
         val test = Reference(5)
         assertEquals(Reference<Int>(), Reference<Int>())
         assertEquals(Reference(5), Reference(5))
@@ -64,7 +76,7 @@ class UpstreamReferenceCoverageTest {
         assertFalse(test.equals(null))
     }
 
-    @Test fun testHashcode() {
+fun testHashcode() {
         val test = Reference(5)
         assertEquals(Reference<Int>().hashCode(), Reference<Int>().hashCode())
         assertEquals(Reference(5).hashCode(), Reference(5).hashCode())
@@ -84,15 +96,15 @@ class UpstreamReferenceCoverageTest {
         assertFalse(test.hashCode() == Reference(4).hashCode())
     }
 }
-class UpstreamVersionCoverageTest {
-    @Test fun versions() {
+private class UpstreamVersionCoverageTestFixture  {
+fun versions() {
         val version = Version.getVersionNumbers()
         assertEquals(Version.getMajorNumber(), version[0])
         assertEquals(Version.getMinorNumber(), version[1])
         assertEquals(Version.getRevisionNumber(), version[2])
     }
 
-    @Test fun getVersionString() {
+fun getVersionString() {
         val version = Version.getVersion()
         assertNotNull(version)
         assertTrue(version.isNotEmpty())

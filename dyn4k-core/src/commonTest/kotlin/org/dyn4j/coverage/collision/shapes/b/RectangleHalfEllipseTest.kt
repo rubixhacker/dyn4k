@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.collision.shapes.b
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.collision.manifold.ClippingManifoldSolver
 import org.dyn4j.collision.manifold.Manifold
 import org.dyn4j.collision.manifold.ManifoldPoint
@@ -34,29 +35,32 @@ import org.dyn4j.geometry.HalfEllipse
 import org.dyn4j.geometry.Rectangle
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
-import kotlin.test.BeforeTest
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
+val RectangleHalfEllipseTest by testSuite {
+    test("detectSat") { RectangleHalfEllipseTestFixture().apply { setup() }.run { detectSat() } }
+    test("detectGjk") { RectangleHalfEllipseTestFixture().apply { setup() }.run { detectGjk() } }
+    test("gjkDistance") { RectangleHalfEllipseTestFixture().apply { setup() }.run { gjkDistance() } }
+    test("getClipManifold") { RectangleHalfEllipseTestFixture().apply { setup() }.run { getClipManifold() } }
+}
 
 
 
-class RectangleHalfEllipseTest : AbstractNarrowphaseShapeTest() {
+
+private class RectangleHalfEllipseTestFixture : AbstractNarrowphaseShapeTest()  {
     private lateinit var r: Rectangle
 
     private lateinit var e: HalfEllipse
 
-    @BeforeTest
     fun setup() {
         this.r = Rectangle(1.0, 1.5)
         this.e = HalfEllipse(2.0, 0.5)
     }
 
-    @Test
-    fun detectSat() {
+fun detectSat() {
         assertFailsWith<UnsupportedOperationException> {
             val p = Penetration()
             val t1 = Transform()
@@ -66,8 +70,7 @@ class RectangleHalfEllipseTest : AbstractNarrowphaseShapeTest() {
         }
     }
 
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
@@ -133,8 +136,7 @@ class RectangleHalfEllipseTest : AbstractNarrowphaseShapeTest() {
         assertFalse(this.gjk.detect(e, t2, r, t1))
     }
 
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         val s = Separation()
 
         val t1 = Transform()
@@ -219,8 +221,7 @@ class RectangleHalfEllipseTest : AbstractNarrowphaseShapeTest() {
         assertClose(-0.750, p2.y, 1.0e-3)
     }
 
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         val m = Manifold()
         val p = Penetration()
 

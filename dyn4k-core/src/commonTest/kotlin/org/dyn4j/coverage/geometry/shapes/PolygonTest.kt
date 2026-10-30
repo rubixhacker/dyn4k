@@ -24,14 +24,41 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class PolygonTest {
+val PolygonTest by testSuite {
+    test("createNotEnoughPoints") { PolygonTestFixture().run { createNotEnoughPoints() } }
+    test("createNotCCW") { PolygonTestFixture().run { createNotCCW() } }
+    test("createCCW") { PolygonTestFixture().run { createCCW() } }
+    test("createCoincident") { PolygonTestFixture().run { createCoincident() } }
+    test("createNonConvex") { PolygonTestFixture().run { createNonConvex() } }
+    test("createDegenerate") { PolygonTestFixture().run { createDegenerate() } }
+    test("createNullPoint") { PolygonTestFixture().run { createNullPoint() } }
+    test("createSuccess") { PolygonTestFixture().run { createSuccess() } }
+    test("contains") { PolygonTestFixture().run { contains() } }
+    test("project") { PolygonTestFixture().run { project() } }
+    test("getFarthest") { PolygonTestFixture().run { getFarthest() } }
+    test("getAxes") { PolygonTestFixture().run { getAxes() } }
+    test("getFoci") { PolygonTestFixture().run { getFoci() } }
+    test("rotate") { PolygonTestFixture().run { rotate() } }
+    test("translate") { PolygonTestFixture().run { translate() } }
+    test("createAABB") { PolygonTestFixture().run { createAABB() } }
+    test("containsPointCoIncidentStart") { PolygonTestFixture().run { containsPointCoIncidentStart() } }
+    test("containsPointCoIncidentMid") { PolygonTestFixture().run { containsPointCoIncidentMid() } }
+    test("containsPointCoIncidentWithCoincidentEdges") { PolygonTestFixture().run { containsPointCoIncidentWithCoincidentEdges() } }
+    test("containsPointCoIncidentWithCoincidentEdges2") { PolygonTestFixture().run { containsPointCoIncidentWithCoincidentEdges2() } }
+    test("getNormals") { PolygonTestFixture().run { getNormals() } }
+    test("createMass") { PolygonTestFixture().run { createMass() } }
+    test("getArea") { PolygonTestFixture().run { getArea() } }
+    test("copy") { PolygonTestFixture().run { copy() } }
+}
+
+private class PolygonTestFixture  {
     private val IDENTITY = Transform()
-    @Test
-    fun createNotEnoughPoints() {
+fun createNotEnoughPoints() {
         assertFailsWith<IllegalArgumentException> {
 
 		Polygon(*arrayOf(
@@ -42,8 +69,7 @@ class PolygonTest {
         }
     }
 
-    @Test
-    fun createNotCCW() {
+fun createNotCCW() {
         assertFailsWith<IllegalArgumentException> {
 
 		Polygon(*arrayOf(
@@ -55,8 +81,7 @@ class PolygonTest {
         }
     }
 
-    @Test
-    fun createCCW() {
+fun createCCW() {
 
 		Polygon(*arrayOf(
 			Vector2(0.5, 0.5),
@@ -66,8 +91,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun createCoincident() {
+fun createCoincident() {
         assertFailsWith<IllegalArgumentException> {
 
 		Polygon(*arrayOf(
@@ -80,8 +104,7 @@ class PolygonTest {
         }
     }
 
-    @Test
-    fun createNonConvex() {
+fun createNonConvex() {
         assertFailsWith<IllegalArgumentException> {
 
 		Polygon(*arrayOf(
@@ -95,8 +118,7 @@ class PolygonTest {
         }
     }
 
-    @Test
-    fun createDegenerate() {
+fun createDegenerate() {
         assertFailsWith<IllegalArgumentException> {
 
 		Polygon(*arrayOf(
@@ -108,8 +130,7 @@ class PolygonTest {
         }
     }
 
-    @Test
-    fun createNullPoint() {
+fun createNullPoint() {
         assertFailsWith<NullPointerException> {
 
 		Polygon(*arrayOf(
@@ -121,8 +142,7 @@ class PolygonTest {
         }
     }
 
-    @Test
-    fun createSuccess() {
+fun createSuccess() {
 
 		Polygon(*arrayOf(
 			Vector2(0.0, 1.0),
@@ -132,8 +152,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun contains() {
+fun contains() {
 
 		var vertices = arrayOf(
 			Vector2(0.0, 1.0),
@@ -170,8 +189,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun project() {
+fun project() {
 
 		var vertices = arrayOf(
 				Vector2(0.0, 1.0),
@@ -199,8 +217,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun getFarthest() {
+fun getFarthest() {
 
 		var vertices = arrayOf(
 				Vector2(0.0, 1.0),
@@ -234,8 +251,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun getAxes() {
+fun getAxes() {
 
 		var vertices = arrayOf(
 				Vector2(0.0, 1.0),
@@ -265,8 +281,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun getFoci() {
+fun getFoci() {
 
 		var vertices = arrayOf(
 				Vector2(0.0, 1.0),
@@ -281,8 +296,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun rotate() {
+fun rotate() {
 
 		var vertices = arrayOf(
 				Vector2(0.0, 1.0),
@@ -304,8 +318,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun translate() {
+fun translate() {
 
 		var vertices = arrayOf(
 				Vector2(0.0, 1.0),
@@ -327,8 +340,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun createAABB() {
+fun createAABB() {
 
 		var vertices = arrayOf(
 				Vector2(0.0, 1.0),
@@ -360,8 +372,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun containsPointCoIncidentStart() {
+fun containsPointCoIncidentStart() {
 
 		var vertices = arrayOf(
 				Vector2(2.0, 0.0),
@@ -379,8 +390,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun containsPointCoIncidentMid() {
+fun containsPointCoIncidentMid() {
 
 		var vertices = arrayOf(
 				Vector2(0.0, 4.0),
@@ -398,8 +408,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun containsPointCoIncidentWithCoincidentEdges() {
+fun containsPointCoIncidentWithCoincidentEdges() {
 
 		var vertices = arrayOf(
 				Vector2(2.0, 0.0),
@@ -418,8 +427,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun containsPointCoIncidentWithCoincidentEdges2() {
+fun containsPointCoIncidentWithCoincidentEdges2() {
 
 		var vertices = arrayOf(
 				Vector2(2.0, 0.0),
@@ -438,8 +446,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun getNormals() {
+fun getNormals() {
 
 		var vertices = arrayOf(
 			Vector2(0.0, 1.0),
@@ -469,8 +476,7 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun createMass() {
+fun createMass() {
 
 		var p = Geometry.createUnitCirclePolygon(5, 0.5);
 		var m = p.createMass(1.0);
@@ -489,16 +495,14 @@ class PolygonTest {
 
     }
 
-    @Test
-    fun getArea() {
+fun getArea() {
 
 		var p = Geometry.createUnitCirclePolygon(5, 0.5);
 		assertEquals(0.594, p.getArea(), 1.0e-3);
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var poly = Geometry.createUnitCirclePolygon(5, 0.5);
 		poly.setUserData(Any());

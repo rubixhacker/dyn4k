@@ -25,7 +25,7 @@
 
 package org.dyn4j.coverage.collision.shapes.a
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -39,7 +39,14 @@ import org.dyn4j.collision.narrowphase.Sat
 import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.geometry.*
 
-class CircleHalfEllipseTest {
+val CircleHalfEllipseTest by testSuite {
+    test("detectSat") { CircleHalfEllipseTestFixture().run { detectSat() } }
+    test("detectGjk") { CircleHalfEllipseTestFixture().run { detectGjk() } }
+    test("gjkDistance") { CircleHalfEllipseTestFixture().run { gjkDistance() } }
+    test("getClipManifold") { CircleHalfEllipseTestFixture().run { getClipManifold() } }
+}
+
+private class CircleHalfEllipseTestFixture  {
     private val sat = Sat()
     private val gjk = Gjk()
     private val cmfs = ClippingManifoldSolver()
@@ -49,16 +56,14 @@ class CircleHalfEllipseTest {
         c = Circle(0.5)
         e = HalfEllipse(2.0, 0.5)
     }
-    @Test
-    fun detectSat() {
+fun detectSat() {
         setup()
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
         assertFailsWith<UnsupportedOperationException> { sat.detect(c, t1, e, t2, p) }
     }
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -107,8 +112,7 @@ class CircleHalfEllipseTest {
         assertFalse(gjk.detect(e, t2, c, t1, p))
         assertFalse(gjk.detect(e, t2, c, t1))
     }
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         setup()
         val s = Separation()
         val t1 = Transform()
@@ -175,8 +179,7 @@ class CircleHalfEllipseTest {
         assertFiniteClose(-0.368, p2.x, 1.0e-3)
         assertFiniteClose(-0.323, p2.y, 1.0e-3)
     }
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         setup()
         val m = Manifold()
         val p = Penetration()

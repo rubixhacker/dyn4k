@@ -25,7 +25,7 @@
 
 package org.dyn4j.coverage.collision.shapes.a
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -39,7 +39,14 @@ import org.dyn4j.collision.narrowphase.Sat
 import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.geometry.*
 
-class CircleSliceTest {
+val CircleSliceTest by testSuite {
+    test("detectSat") { CircleSliceTestFixture().run { detectSat() } }
+    test("detectGjk") { CircleSliceTestFixture().run { detectGjk() } }
+    test("gjkDistance") { CircleSliceTestFixture().run { gjkDistance() } }
+    test("getClipManifold") { CircleSliceTestFixture().run { getClipManifold() } }
+}
+
+private class CircleSliceTestFixture  {
     private val sat = Sat()
     private val gjk = Gjk()
     private val cmfs = ClippingManifoldSolver()
@@ -49,8 +56,7 @@ class CircleSliceTest {
         circle = Circle(0.5)
         slice = Slice(0.5, radians(50.0))
     }
-    @Test
-    fun detectSat() {
+fun detectSat() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -99,8 +105,7 @@ class CircleSliceTest {
         assertFalse(sat.detect(slice, t2, circle, t1, p))
         assertFalse(sat.detect(slice, t2, circle, t1))
     }
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -149,8 +154,7 @@ class CircleSliceTest {
         assertFalse(gjk.detect(slice, t2, circle, t1, p))
         assertFalse(gjk.detect(slice, t2, circle, t1))
     }
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         setup()
         val s = Separation()
         val t1 = Transform()
@@ -217,8 +221,7 @@ class CircleSliceTest {
         assertFiniteClose( 0.220, p2.x, 1.0e-3)
         assertFiniteClose( 0.169, p2.y, 1.0e-3)
     }
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         setup()
         val m = Manifold()
         val p = Penetration()

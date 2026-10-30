@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.simulation
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.dynamics.joint.PrismaticJoint
@@ -31,13 +32,18 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class PrismaticJointSimulationTest {
-    @Test
-    fun noLimitsNoMotor() {
+val PrismaticJointSimulationTest by testSuite {
+    test("noLimitsNoMotor") { PrismaticJointSimulationTestFixture().run { noLimitsNoMotor() } }
+    test("limits") { PrismaticJointSimulationTestFixture().run { limits() } }
+    test("motorWithAndWithoutLimits") { PrismaticJointSimulationTestFixture().run { motorWithAndWithoutLimits() } }
+    test("springOnly") { PrismaticJointSimulationTestFixture().run { springOnly() } }
+}
+
+private class PrismaticJointSimulationTestFixture  {
+fun noLimitsNoMotor() {
         val w = World<Body>()
         var g = Body()
         var gf = g.addFixture(Geometry.createRectangle(10.0, 0.5))
@@ -79,8 +85,7 @@ class PrismaticJointSimulationTest {
         assertEquals(0.0, b.getTransform().getRotationAngle())
         assertEquals(-0.52359, dj.getReactionTorque(invdt), 1e-5)
     }
-    @Test
-    fun limits() {
+fun limits() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()
@@ -122,8 +127,7 @@ class PrismaticJointSimulationTest {
         assertEquals(3.0, p.distance(v2), 1e-5)
         assertEquals(753.982, dj.getReactionForce(invdt).getMagnitude(), 1e-3)
     }
-    @Test
-    fun motorWithAndWithoutLimits() {
+fun motorWithAndWithoutLimits() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()
@@ -204,8 +208,7 @@ class PrismaticJointSimulationTest {
         assertEquals(-1000.0000, dj.getMotorForce(invdt), 1e-3)
         assertEquals(0.0000, dj.getReactionForce(invdt).getMagnitude(), 1e-3)
     }
-    @Test
-    fun springOnly() {
+fun springOnly() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()

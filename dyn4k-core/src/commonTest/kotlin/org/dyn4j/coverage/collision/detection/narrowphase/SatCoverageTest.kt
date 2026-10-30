@@ -24,8 +24,8 @@
  */
 package org.dyn4j.coverage.collision.detection.narrowphase
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import org.dyn4j.collision.narrowphase.Containment
 import org.dyn4j.collision.narrowphase.Sat
@@ -34,7 +34,22 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 
-class SatCoverageTest {
+val SatCoverageTest by testSuite {
+    test("containsPolygonCompletely") { SatCoverageTestFixture().run { containsPolygonCompletely() } }
+    test("doesNotContainPolygon") { SatCoverageTestFixture().run { doesNotContainPolygon() } }
+    test("containPolygonButNotInclusive") { SatCoverageTestFixture().run { containPolygonButNotInclusive() } }
+    test("samePolygon") { SatCoverageTestFixture().run { samePolygon() } }
+    test("differentPolygons") { SatCoverageTestFixture().run { differentPolygons() } }
+    test("differentPolygonsNoContainment") { SatCoverageTestFixture().run { differentPolygonsNoContainment() } }
+    test("slice") { SatCoverageTestFixture().run { slice() } }
+    test("sliceNoContainment") { SatCoverageTestFixture().run { sliceNoContainment() } }
+    test("segmentSegment") { SatCoverageTestFixture().run { segmentSegment() } }
+    test("circleCircle") { SatCoverageTestFixture().run { circleCircle() } }
+    test("segmentCircle") { SatCoverageTestFixture().run { segmentCircle() } }
+    test("capsuleCircle") { SatCoverageTestFixture().run { capsuleCircle() } }
+}
+
+private class SatCoverageTestFixture  {
     private val sat = Sat()
     private val containment = Containment()
     private fun both(first: Convex, firstTransform: Transform, second: Convex, secondTransform: Transform, expected: Boolean) {
@@ -47,27 +62,27 @@ class SatCoverageTest {
         val secondTransform = Transform(); secondTransform.translate(shift, 0.0)
         both(first, Transform(), second, secondTransform, expected)
     }
-    @Test fun containsPolygonCompletely() = polygons(0.2, expected = true)
-    @Test fun doesNotContainPolygon() = polygons(0.2, shift = 0.3, expected = false)
-    @Test fun containPolygonButNotInclusive() = polygons(0.2, shift = 0.2, expected = false)
-    @Test fun samePolygon() = polygons(0.4, expected = false)
-    @Test fun differentPolygons() = both(Geometry.createUnitCirclePolygon(5, 0.4), Transform(), Geometry.createSquare(1.0), Transform(), true)
-    @Test fun differentPolygonsNoContainment() {
+fun containsPolygonCompletely() = polygons(0.2, expected = true)
+fun doesNotContainPolygon() = polygons(0.2, shift = 0.3, expected = false)
+fun containPolygonButNotInclusive() = polygons(0.2, shift = 0.2, expected = false)
+fun samePolygon() = polygons(0.4, expected = false)
+fun differentPolygons() = both(Geometry.createUnitCirclePolygon(5, 0.4), Transform(), Geometry.createSquare(1.0), Transform(), true)
+fun differentPolygonsNoContainment() {
         val shifted = Transform(); shifted.translate(0.2, 0.0)
         both(Geometry.createUnitCirclePolygon(5, 0.4), shifted, Geometry.createSquare(1.0), Transform(), false)
     }
-    @Test fun slice() {
+fun slice() {
         val polygon = Geometry.createUnitCirclePolygon(5, 0.4)
         both(polygon, Transform(), Geometry.createSlice(0.2, 30.0 * PI / 180.0), Transform(), true)
         val shifted = Transform(); shifted.translate(-0.7, 0.0)
         both(polygon, Transform(), Geometry.createSlice(2.0, 120.0 * PI / 180.0), shifted, true)
     }
-    @Test fun sliceNoContainment() = both(Geometry.createUnitCirclePolygon(5, 0.4), Transform(), Geometry.createSlice(0.5, 30.0 * PI / 180.0), Transform(), false)
-    @Test fun segmentSegment() {
+fun sliceNoContainment() = both(Geometry.createUnitCirclePolygon(5, 0.4), Transform(), Geometry.createSlice(0.5, 30.0 * PI / 180.0), Transform(), false)
+fun segmentSegment() {
         both(Geometry.createSegment(Vector2(1.0, 1.0)), Transform(), Geometry.createSegment(Vector2(1.0, 1.0)), Transform(), false)
         both(Geometry.createSegment(Vector2(1.0, 1.0)), Transform(), Geometry.createSegment(Vector2(-1.0, 1.0)), Transform(), false)
     }
-    @Test fun circleCircle() {
+fun circleCircle() {
         val large = Geometry.createCircle(1.0); var small = Geometry.createCircle(1.0)
         val shifted = Transform(); val identity = Transform()
         both(large, shifted, small, identity, false)
@@ -75,7 +90,7 @@ class SatCoverageTest {
         small = Geometry.createCircle(0.5); both(large, shifted, small, identity, false)
         shifted.identity(); both(large, shifted, small, identity, true)
     }
-    @Test fun segmentCircle() {
+fun segmentCircle() {
         val segment = Geometry.createSegment(Vector2(0.0, 0.4)); val circle = Geometry.createCircle(0.6)
         val shifted = Transform(); val identity = Transform()
         fun check(expected: Boolean) {
@@ -84,7 +99,7 @@ class SatCoverageTest {
         }
         check(true); shifted.translate(0.6, 0.0); check(false); shifted.translate(0.25, 0.0); check(false)
     }
-    @Test fun capsuleCircle() {
+fun capsuleCircle() {
         val capsule = Geometry.createCapsule(1.0, 0.5); val circle = Geometry.createCircle(0.6)
         val shifted = Transform(); val identity = Transform()
         fun check(expected: Boolean) {

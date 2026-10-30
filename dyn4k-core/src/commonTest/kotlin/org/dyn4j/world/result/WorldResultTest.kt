@@ -1,6 +1,6 @@
 package org.dyn4j.world.result
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
 import kotlin.test.assertNull
@@ -13,7 +13,15 @@ import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.geometry.Geometry
 
-class WorldResultTest {
+val WorldResultTest by testSuite {
+    test("kotlinResultSubclassesKeepProtectedDetailObjects") { WorldResultTestFixture().run { kotlinResultSubclassesKeepProtectedDetailObjects() } }
+    test("kotlinDetectSubclassKeepsProtectedBodyAndFixture") { WorldResultTestFixture().run { kotlinDetectSubclassKeepsProtectedBodyAndFixture() } }
+    test("detectResultSharesBodyAndFixtureAcrossCopies") { WorldResultTestFixture().run { detectResultSharesBodyAndFixtureAcrossCopies() } }
+    test("detailedResultsCopyValuesAndKeepLiveDetailObjects") { WorldResultTestFixture().run { detailedResultsCopyValuesAndKeepLiveDetailObjects() } }
+    test("rayAndCastResultsOrderByDistanceAndTime") { WorldResultTestFixture().run { rayAndCastResultsOrderByDistanceAndTime() } }
+}
+
+private class WorldResultTestFixture  {
     private class ExtendedResult : DetectResult<Body, BodyFixture>() {
         fun protectedValuesMatchPublic(): Boolean = body === getBody() && fixture === getFixture()
         fun replaceProtected(bodyValue: Body, fixtureValue: BodyFixture) {
@@ -34,15 +42,13 @@ class WorldResultTest {
         fun protectedDetailMatchesPublic(): Boolean = raycast === getRaycast()
     }
 
-    @Test
-    fun kotlinResultSubclassesKeepProtectedDetailObjects() {
+fun kotlinResultSubclassesKeepProtectedDetailObjects() {
         assertTrue(ExtendedCast().protectedDetailMatchesPublic())
         assertTrue(ExtendedDetect().protectedDetailMatchesPublic())
         assertTrue(ExtendedRay().protectedDetailMatchesPublic())
     }
 
-    @Test
-    fun kotlinDetectSubclassKeepsProtectedBodyAndFixture() {
+fun kotlinDetectSubclassKeepsProtectedBodyAndFixture() {
         val body = Body()
         val fixture = BodyFixture(Geometry.createCircle(0.5))
         val result = ExtendedResult()
@@ -56,8 +62,7 @@ class WorldResultTest {
         assertSame(fixture, copy.getFixture())
     }
 
-    @Test
-    fun detectResultSharesBodyAndFixtureAcrossCopies() {
+fun detectResultSharesBodyAndFixtureAcrossCopies() {
         val body = Body()
         val fixture = BodyFixture(Geometry.createCircle(0.5))
         val source = DetectResult<Body, BodyFixture>()
@@ -77,8 +82,7 @@ class WorldResultTest {
         assertSame(body, source.getBody())
     }
 
-    @Test
-    fun detailedResultsCopyValuesAndKeepLiveDetailObjects() {
+fun detailedResultsCopyValuesAndKeepLiveDetailObjects() {
         val body = Body()
         val fixture = BodyFixture(Geometry.createCircle(0.5))
         val penetration = Penetration().apply { setDepth(5.0) }
@@ -133,8 +137,7 @@ class WorldResultTest {
         assertEquals(0.5, castDetail.getTime())
     }
 
-    @Test
-    fun rayAndCastResultsOrderByDistanceAndTime() {
+fun rayAndCastResultsOrderByDistanceAndTime() {
         val near = RaycastResult<Body, BodyFixture>()
         val far = RaycastResult<Body, BodyFixture>()
         near.getRaycast().setDistance(1.0)

@@ -1,6 +1,6 @@
 package org.dyn4j.dynamics.joint
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
@@ -11,9 +11,14 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
-class JointDistanceAnglePulleyJourneyTest {
-    @Test
-    fun angleJointLocksRotationAndAllowsRatioMotion() {
+val JointDistanceAnglePulleyJourneyTest by testSuite {
+    test("angleJointLocksRotationAndAllowsRatioMotion") { JointDistanceAnglePulleyJourneyTestFixture().run { angleJointLocksRotationAndAllowsRatioMotion() } }
+    test("distanceJointKeepsConfiguredSpringAndLimits") { JointDistanceAnglePulleyJourneyTestFixture().run { distanceJointKeepsConfiguredSpringAndLimits() } }
+    test("pulleyJointUsesRatioAndTracksRopeLength") { JointDistanceAnglePulleyJourneyTestFixture().run { pulleyJointUsesRatioAndTracksRopeLength() } }
+}
+
+private class JointDistanceAnglePulleyJourneyTestFixture  {
+fun angleJointLocksRotationAndAllowsRatioMotion() {
         val first = dynamicBody()
         val second = dynamicBody()
         val joint = AngleJoint(first, second)
@@ -32,8 +37,7 @@ class JointDistanceAnglePulleyJourneyTest {
         assertEquals(2.0 * first.getAngularVelocity(), second.getAngularVelocity(), 1e-12)
     }
 
-    @Test
-    fun distanceJointKeepsConfiguredSpringAndLimits() {
+fun distanceJointKeepsConfiguredSpringAndLimits() {
         val first = dynamicBody()
         val second = dynamicBody()
         second.translate(2.0, 0.0)
@@ -59,8 +63,7 @@ class JointDistanceAnglePulleyJourneyTest {
         assertEquals(1.0, joint.getCurrentDistance(), 1e-12)
     }
 
-    @Test
-    fun pulleyJointUsesRatioAndTracksRopeLength() {
+fun pulleyJointUsesRatioAndTracksRopeLength() {
         val first = dynamicBody()
         val second = dynamicBody()
         val joint = PulleyJoint(first, second, Vector2(-2.0, 2.0), Vector2(2.0, 2.0), Vector2(-2.0, 0.0), Vector2(2.0, 0.0))

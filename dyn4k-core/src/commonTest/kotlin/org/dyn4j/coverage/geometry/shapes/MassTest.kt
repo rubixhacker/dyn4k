@@ -24,13 +24,38 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class MassTest {
-    @Test
-    fun createNegativeMass() {
+val MassTest by testSuite {
+    test("createNegativeMass") { MassTestFixture().run { createNegativeMass() } }
+    test("createNegativeInertia") { MassTestFixture().run { createNegativeInertia() } }
+    test("createNullCenter") { MassTestFixture().run { createNullCenter() } }
+    test("createSuccess") { MassTestFixture().run { createSuccess() } }
+    test("createInfinite") { MassTestFixture().run { createInfinite() } }
+    test("createFixedLinearVelocity") { MassTestFixture().run { createFixedLinearVelocity() } }
+    test("createFixedAngularVelocity") { MassTestFixture().run { createFixedAngularVelocity() } }
+    test("createCopyNull") { MassTestFixture().run { createCopyNull() } }
+    test("createCopy") { MassTestFixture().run { createCopy() } }
+    test("createList") { MassTestFixture().run { createList() } }
+    test("createListInfinite") { MassTestFixture().run { createListInfinite() } }
+    test("createListOneElement") { MassTestFixture().run { createListOneElement() } }
+    test("createListNull") { MassTestFixture().run { createListNull() } }
+    test("createListEmpty") { MassTestFixture().run { createListEmpty() } }
+    test("createListOneNullElement") { MassTestFixture().run { createListOneNullElement() } }
+    test("createListNullElement") { MassTestFixture().run { createListNullElement() } }
+    test("setType") { MassTestFixture().run { setType() } }
+    test("setNullType") { MassTestFixture().run { setNullType() } }
+    test("setTypeIgnored") { MassTestFixture().run { setTypeIgnored() } }
+    test("polygonInertiaAndCOM") { MassTestFixture().run { polygonInertiaAndCOM() } }
+    test("polygonInertiaAndMass") { MassTestFixture().run { polygonInertiaAndMass() } }
+    test("equals") { MassTestFixture().run { equals() } }
+}
+
+private class MassTestFixture  {
+fun createNegativeMass() {
         assertFailsWith<IllegalArgumentException> {
 
 		Mass(Vector2(), -1.0, 1.0);
@@ -38,8 +63,7 @@ class MassTest {
         }
     }
 
-    @Test
-    fun createNegativeInertia() {
+fun createNegativeInertia() {
         assertFailsWith<IllegalArgumentException> {
 
 		Mass(Vector2(), 1.0, -1.0);
@@ -47,8 +71,7 @@ class MassTest {
         }
     }
 
-    @Test
-    fun createNullCenter() {
+fun createNullCenter() {
         assertFailsWith<NullPointerException> {
 
 		Mass(null, 1.0, 1.0);
@@ -56,8 +79,7 @@ class MassTest {
         }
     }
 
-    @Test
-    fun createSuccess() {
+fun createSuccess() {
 
 		var m = Mass(Vector2(), 1.0, 1.0);
 		assertTrue(m.getCenter().equals(Vector2()));
@@ -66,8 +88,7 @@ class MassTest {
 
     }
 
-    @Test
-    fun createInfinite() {
+fun createInfinite() {
 
 		var m = Mass(Vector2(), 0.0, 0.0);
 		assertTrue(m.isInfinite());
@@ -77,8 +98,7 @@ class MassTest {
 
     }
 
-    @Test
-    fun createFixedLinearVelocity() {
+fun createFixedLinearVelocity() {
 
 		var m = Mass(Vector2(), 0.0, 1.0);
 		assertFalse(m.isInfinite());
@@ -89,8 +109,7 @@ class MassTest {
 
     }
 
-    @Test
-    fun createFixedAngularVelocity() {
+fun createFixedAngularVelocity() {
 
 		var m = Mass(Vector2(), 1.0, 0.0);
 		assertFalse(m.isInfinite());
@@ -101,8 +120,7 @@ class MassTest {
 
     }
 
-    @Test
-    fun createCopyNull() {
+fun createCopyNull() {
         assertFailsWith<NullPointerException> {
 
 		Mass(null);
@@ -110,8 +128,7 @@ class MassTest {
         }
     }
 
-    @Test
-    fun createCopy() {
+fun createCopy() {
 
 		var m = Mass(Vector2(1.0, 0.0), 2.0, 1.0);
 		var m2 = Mass(m);
@@ -135,8 +152,7 @@ class MassTest {
 
     }
 
-    @Test
-    fun createList() {
+fun createList() {
 
 		var m1 = Mass(Vector2( 1.0,  1.0), 3.00, 1.00);
 		var m2 = Mass(Vector2(-1.0,  0.0), 0.50, 0.02);
@@ -155,8 +171,7 @@ class MassTest {
 
     }
 
-    @Test
-    fun createListInfinite() {
+fun createListInfinite() {
 
 		var m1 = Mass();
 		var m2 = Mass();
@@ -176,8 +191,7 @@ class MassTest {
 
     }
 
-    @Test
-    fun createListOneElement() {
+fun createListOneElement() {
 
 		var m1 = Mass(Vector2(), 1.0, 2.0);
 		var masses = mutableListOf<Mass?>();
@@ -194,8 +208,7 @@ class MassTest {
 
     }
 
-    @Test
-    fun createListNull() {
+fun createListNull() {
         assertFailsWith<NullPointerException> {
 
 		Mass.create(null);
@@ -203,8 +216,7 @@ class MassTest {
         }
     }
 
-    @Test
-    fun createListEmpty() {
+fun createListEmpty() {
         assertFailsWith<IllegalArgumentException> {
 
 		Mass.create(mutableListOf<Mass?>());
@@ -212,8 +224,7 @@ class MassTest {
         }
     }
 
-    @Test
-    fun createListOneNullElement() {
+fun createListOneNullElement() {
         assertFailsWith<NullPointerException> {
 
 		var masses = mutableListOf<Mass?>();
@@ -223,8 +234,7 @@ class MassTest {
         }
     }
 
-    @Test
-    fun createListNullElement() {
+fun createListNullElement() {
         assertFailsWith<NullPointerException> {
 
 		var m1 = Mass(Vector2(), 1.0, 2.0);
@@ -238,8 +248,7 @@ class MassTest {
         }
     }
 
-    @Test
-    fun setType() {
+fun setType() {
 
 		var c = Geometry.createCircle(2.0);
 		var mi = c.createMass(1.0);
@@ -263,8 +272,7 @@ class MassTest {
 
     }
 
-    @Test
-    fun setNullType() {
+fun setNullType() {
         assertFailsWith<NullPointerException> {
 
 		var m = Mass();
@@ -273,8 +281,7 @@ class MassTest {
         }
     }
 
-    @Test
-    fun setTypeIgnored() {
+fun setTypeIgnored() {
 
 		var m = Mass();
 		assertEquals(MassType.INFINITE, m.getType());
@@ -314,8 +321,7 @@ class MassTest {
 
     }
 
-    @Test
-    fun polygonInertiaAndCOM() {
+fun polygonInertiaAndCOM() {
 
 		var p = Geometry.createUnitCirclePolygon(4, Math.hypot(0.5, 0.5));
 		var r = Geometry.createSquare(1.0);
@@ -328,8 +334,7 @@ class MassTest {
 
     }
 
-    @Test
-    fun polygonInertiaAndMass() {
+fun polygonInertiaAndMass() {
 
 		var p = Geometry.createUnitCirclePolygon(4, Math.hypot(0.5, 0.5));
 		var m1 = p.createMass(10.0);
@@ -342,8 +347,7 @@ class MassTest {
 
     }
 
-    @Test
-    fun equals() {
+fun equals() {
 
 		var m1 = Mass();
 		var m2 = Mass();

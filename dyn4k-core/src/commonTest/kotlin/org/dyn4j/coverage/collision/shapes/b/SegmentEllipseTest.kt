@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.collision.shapes.b
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.collision.manifold.ClippingManifoldSolver
 import org.dyn4j.collision.manifold.Manifold
 import org.dyn4j.collision.manifold.ManifoldPoint
@@ -34,29 +35,32 @@ import org.dyn4j.geometry.Ellipse
 import org.dyn4j.geometry.Segment
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
-import kotlin.test.BeforeTest
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
+val SegmentEllipseTest by testSuite {
+    test("detectSat") { SegmentEllipseTestFixture().apply { setup() }.run { detectSat() } }
+    test("detectGjk") { SegmentEllipseTestFixture().apply { setup() }.run { detectGjk() } }
+    test("gjkDistance") { SegmentEllipseTestFixture().apply { setup() }.run { gjkDistance() } }
+    test("getClipManifold") { SegmentEllipseTestFixture().apply { setup() }.run { getClipManifold() } }
+}
 
 
 
-class SegmentEllipseTest : AbstractNarrowphaseShapeTest() {
+
+private class SegmentEllipseTestFixture : AbstractNarrowphaseShapeTest()  {
     private lateinit var s: Segment
 
     private lateinit var e: Ellipse
 
-    @BeforeTest
     fun setup() {
         this.s = Segment(Vector2(-1.5, 1.0), Vector2(1.5, -1.0))
         this.e = Ellipse(1.0, 0.5)
     }
 
-    @Test
-    fun detectSat() {
+fun detectSat() {
         assertFailsWith<UnsupportedOperationException> {
             val p = Penetration()
             val t1 = Transform()
@@ -66,8 +70,7 @@ class SegmentEllipseTest : AbstractNarrowphaseShapeTest() {
         }
     }
 
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         val p = Penetration()
         val t1 = Transform()
         val t2 = Transform()
@@ -133,8 +136,7 @@ class SegmentEllipseTest : AbstractNarrowphaseShapeTest() {
         assertFalse(this.gjk.detect(e, t2, s, t1))
     }
 
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         val se = Separation()
 
         val t1 = Transform()
@@ -219,8 +221,7 @@ class SegmentEllipseTest : AbstractNarrowphaseShapeTest() {
         assertClose(-1.000, p2.y, 1.0e-3)
     }
 
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         val m = Manifold()
         val p = Penetration()
 

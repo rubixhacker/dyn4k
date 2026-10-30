@@ -1,6 +1,6 @@
 package org.dyn4j.world
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
@@ -16,9 +16,14 @@ import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.Vector2
 
-class WorldContractCollisionDataTest {
-    @Test
-    fun resetClearsDetectionStagesAndPreservesContactData() {
+val WorldContractCollisionDataTest by testSuite {
+    test("resetClearsDetectionStagesAndPreservesContactData") { WorldContractCollisionDataTestFixture().run { resetClearsDetectionStagesAndPreservesContactData() } }
+    test("shiftMovesManifoldPointsWithoutChangingPenetration") { WorldContractCollisionDataTestFixture().run { shiftMovesManifoldPointsWithoutChangingPenetration() } }
+    test("nullCollisionItemValuesRemainObservable") { WorldContractCollisionDataTestFixture().run { nullCollisionItemValuesRemainObservable() } }
+}
+
+private class WorldContractCollisionDataTestFixture  {
+fun resetClearsDetectionStagesAndPreservesContactData() {
         val body1 = Body()
         val body2 = Body()
         val fixture1 = body1.addFixture(Circle(1.0))
@@ -57,8 +62,7 @@ class WorldContractCollisionDataTest {
         assertEquals(0.0, manifold.getNormal().x)
     }
 
-    @Test
-    fun shiftMovesManifoldPointsWithoutChangingPenetration() {
+fun shiftMovesManifoldPointsWithoutChangingPenetration() {
         val body = Body()
         val fixture = body.addFixture(Circle(1.0))
         val pair: CollisionPair<CollisionItem<Body, BodyFixture>> = BasicCollisionPair(
@@ -79,8 +83,7 @@ class WorldContractCollisionDataTest {
         assertEquals(1.25, data.getPenetration().getDepth())
     }
 
-    @Test
-    fun nullCollisionItemValuesRemainObservable() {
+fun nullCollisionItemValuesRemainObservable() {
         val body = Body()
         val fixture = body.addFixture(Circle(1.0))
         val pair: CollisionPair<CollisionItem<Body, BodyFixture>> = BasicCollisionPair(

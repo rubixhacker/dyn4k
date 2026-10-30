@@ -24,12 +24,32 @@
  */
 package org.dyn4j.coverage.collision.detection.narrowphase
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
 import kotlin.test.*
 import org.dyn4j.collision.narrowphase.*
 import org.dyn4j.geometry.*
 
-class FallbackCoverageTest {
+val FallbackCoverageTest by testSuite {
+    test("fallbackCreateSuccess") { FallbackCoverageTestFixture().run { fallbackCreateSuccess() } }
+    test("fallbackCreateNullPrimary") { FallbackCoverageTestFixture().run { fallbackCreateNullPrimary() } }
+    test("fallbackCreateNullSecondary") { FallbackCoverageTestFixture().run { fallbackCreateNullSecondary() } }
+    test("fallbackNoConditions") { FallbackCoverageTestFixture().run { fallbackNoConditions() } }
+    test("fallbackAddRemoveCondition") { FallbackCoverageTestFixture().run { fallbackAddRemoveCondition() } }
+    test("fallbackSingleTypedCondition") { FallbackCoverageTestFixture().run { fallbackSingleTypedCondition() } }
+    test("fallbackSingleTypedConditionStrict") { FallbackCoverageTestFixture().run { fallbackSingleTypedConditionStrict() } }
+    test("fallbackSingleTypedConditionOrder") { FallbackCoverageTestFixture().run { fallbackSingleTypedConditionOrder() } }
+    test("fallbackPairwiseTypedCondition") { FallbackCoverageTestFixture().run { fallbackPairwiseTypedCondition() } }
+    test("fallbackPairwiseTypedConditionStrict") { FallbackCoverageTestFixture().run { fallbackPairwiseTypedConditionStrict() } }
+    test("fallbackPairwiseTypedConditionStrictOne") { FallbackCoverageTestFixture().run { fallbackPairwiseTypedConditionStrictOne() } }
+    test("fallbackDetect") { FallbackCoverageTestFixture().run { fallbackDetect() } }
+    test("singleTypedCreate") { FallbackCoverageTestFixture().run { singleTypedCreate() } }
+    test("singleTypedIsMatch") { FallbackCoverageTestFixture().run { singleTypedIsMatch() } }
+    test("pairwiseTypedCreate") { FallbackCoverageTestFixture().run { pairwiseTypedCreate() } }
+    test("pairwiseTypedIsMatch") { FallbackCoverageTestFixture().run { pairwiseTypedIsMatch() } }
+}
+
+private class FallbackCoverageTestFixture  {
     private val shapes: List<Convex> = listOf(
         Geometry.createCapsule(1.0, 0.5), Geometry.createCircle(0.5), Geometry.createEllipse(1.0, 0.5),
         Geometry.createHalfEllipse(1.0, 0.25), Geometry.createHorizontalSegment(1.0),
@@ -44,7 +64,7 @@ class FallbackCoverageTest {
         }
     }
 
-    @Test fun fallbackCreateSuccess() {
+fun fallbackCreateSuccess() {
         val primary = Sat(); val secondary = Gjk(); val conditions = mutableListOf<FallbackCondition?>()
         val detector = FallbackNarrowphaseDetector(primary, secondary, conditions)
         assertSame(primary, detector.getPrimaryNarrowphaseDetector())
@@ -52,14 +72,14 @@ class FallbackCoverageTest {
         detector.addCondition(SingleTypedFallbackCondition(convexClassOf(Capsule::class)))
         assertEquals(1, conditions.size)
     }
-    @Test fun fallbackCreateNullPrimary() { assertFailsWith<NullPointerException> { FallbackNarrowphaseDetector(null, Gjk()) } }
-    @Test fun fallbackCreateNullSecondary() { assertFailsWith<NullPointerException> { FallbackNarrowphaseDetector(Sat(), null) } }
-    @Test fun fallbackNoConditions() {
+fun fallbackCreateNullPrimary() { assertFailsWith<NullPointerException> { FallbackNarrowphaseDetector(null, Gjk()) } }
+fun fallbackCreateNullSecondary() { assertFailsWith<NullPointerException> { FallbackNarrowphaseDetector(Sat(), null) } }
+fun fallbackNoConditions() {
         val detector = detector()
         for (i in shapes.indices) for (j in i until shapes.size) assertFalse(detector.isFallbackRequired(shapes[i], shapes[j]))
         assertEquals(0, detector.getConditionCount())
     }
-    @Test fun fallbackAddRemoveCondition() {
+fun fallbackAddRemoveCondition() {
         val detector = detector(); val condition = SingleTypedFallbackCondition(convexClassOf(Capsule::class))
         detector.addCondition(condition)
         assertTrue(detector.containsCondition(condition)); assertEquals(1, detector.getConditionCount())
@@ -70,9 +90,9 @@ class FallbackCoverageTest {
         assertTrue(detector.removeCondition(condition)); assertEquals(0, detector.getConditionCount())
         assertFalse(detector.containsCondition(condition))
     }
-    @Test fun fallbackSingleTypedCondition() = matrix(SingleTypedFallbackCondition(convexClassOf(Ellipse::class))) { i, j -> i == 2 || j == 2 }
-    @Test fun fallbackSingleTypedConditionStrict() = matrix(SingleTypedFallbackCondition(convexClassOf(Polygon::class), true)) { i, j -> i == 7 || j == 7 }
-    @Test fun fallbackSingleTypedConditionOrder() {
+fun fallbackSingleTypedCondition() = matrix(SingleTypedFallbackCondition(convexClassOf(Ellipse::class))) { i, j -> i == 2 || j == 2 }
+fun fallbackSingleTypedConditionStrict() = matrix(SingleTypedFallbackCondition(convexClassOf(Polygon::class), true)) { i, j -> i == 7 || j == 7 }
+fun fallbackSingleTypedConditionOrder() {
         val detector = detector()
         val polygon = SingleTypedFallbackCondition(convexClassOf(Polygon::class), 1, true)
         val rectangle = SingleTypedFallbackCondition(convexClassOf(Rectangle::class), 0, true)
@@ -81,10 +101,10 @@ class FallbackCoverageTest {
         for (i in shapes.indices) for (j in i until shapes.size)
             assertEquals(i == 5 || i == 7 || j == 5 || j == 7, detector.isFallbackRequired(shapes[i], shapes[j]))
     }
-    @Test fun fallbackPairwiseTypedCondition() = matrix(PairwiseTypedFallbackCondition(convexClassOf(Ellipse::class), convexClassOf(Ellipse::class))) { i, j -> i == 2 && j == 2 }
-    @Test fun fallbackPairwiseTypedConditionStrict() = matrix(PairwiseTypedFallbackCondition(convexClassOf(Polygon::class), convexClassOf(Ellipse::class), true)) { i, j -> (i == 7 && j == 2) || (i == 2 && j == 7) }
-    @Test fun fallbackPairwiseTypedConditionStrictOne() = matrix(PairwiseTypedFallbackCondition(convexClassOf(Polygon::class), true, convexClassOf(Polygon::class), false)) { i, j -> (i == 7 && j in 5..8 && j != 6) || (j == 7 && i in 5..8 && i != 6) }
-    @Test fun fallbackDetect() {
+fun fallbackPairwiseTypedCondition() = matrix(PairwiseTypedFallbackCondition(convexClassOf(Ellipse::class), convexClassOf(Ellipse::class))) { i, j -> i == 2 && j == 2 }
+fun fallbackPairwiseTypedConditionStrict() = matrix(PairwiseTypedFallbackCondition(convexClassOf(Polygon::class), convexClassOf(Ellipse::class), true)) { i, j -> (i == 7 && j == 2) || (i == 2 && j == 7) }
+fun fallbackPairwiseTypedConditionStrictOne() = matrix(PairwiseTypedFallbackCondition(convexClassOf(Polygon::class), true, convexClassOf(Polygon::class), false)) { i, j -> (i == 7 && j in 5..8 && j != 6) || (j == 7 && i in 5..8 && i != 6) }
+fun fallbackDetect() {
         val detector = detector()
         detector.addCondition(SingleTypedFallbackCondition(convexClassOf(Ellipse::class)))
         detector.addCondition(SingleTypedFallbackCondition(convexClassOf(HalfEllipse::class)))
@@ -98,7 +118,7 @@ class FallbackCoverageTest {
         }
     }
 
-    @Test fun singleTypedCreate() {
+fun singleTypedCreate() {
         val type = convexClassOf(Ellipse::class)
         val variants = listOf(SingleTypedFallbackCondition(type), SingleTypedFallbackCondition(type, 1), SingleTypedFallbackCondition(type, false), SingleTypedFallbackCondition(type, 1, false))
         variants.forEachIndexed { index, condition ->
@@ -106,7 +126,7 @@ class FallbackCoverageTest {
             assertEquals(if (index % 2 == 0) 0 else 1, condition.getSortIndex()); assertNotNull(condition.toString())
         }
     }
-    @Test fun singleTypedIsMatch() {
+fun singleTypedIsMatch() {
         val polygon = convexClassOf(Polygon::class); val rectangle = convexClassOf(Rectangle::class); val circle = convexClassOf(Circle::class)
         for (strict in listOf(true, false)) {
             val condition = SingleTypedFallbackCondition(polygon, strict)
@@ -117,7 +137,7 @@ class FallbackCoverageTest {
             assertFalse(condition.isMatch(circle, circle))
         }
     }
-    @Test fun pairwiseTypedCreate() {
+fun pairwiseTypedCreate() {
         val ellipse = convexClassOf(Ellipse::class); val circle = convexClassOf(Circle::class)
         val variants = listOf(
             PairwiseTypedFallbackCondition(ellipse, circle), PairwiseTypedFallbackCondition(ellipse, circle, 1),
@@ -130,7 +150,7 @@ class FallbackCoverageTest {
             assertEquals(index % 2, condition.getSortIndex()); assertNotNull(condition.toString())
         }
     }
-    @Test fun pairwiseTypedIsMatch() {
+fun pairwiseTypedIsMatch() {
         val p = convexClassOf(Polygon::class); val r = convexClassOf(Rectangle::class); val c = convexClassOf(Circle::class)
         val strict = PairwiseTypedFallbackCondition(p, p)
         val loose = PairwiseTypedFallbackCondition(p, false, p, false)

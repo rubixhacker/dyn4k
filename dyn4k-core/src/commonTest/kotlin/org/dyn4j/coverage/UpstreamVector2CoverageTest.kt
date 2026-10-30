@@ -24,14 +24,44 @@
  */
 package org.dyn4j.coverage
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.math.*
 import kotlin.test.*
 
-class UpstreamVector2CoverageTest {
-    @Test
-    fun create() {
+val UpstreamVector2CoverageTest by testSuite {
+    test("create") { UpstreamVector2CoverageTestFixture().run { create() } }
+    test("copy") { UpstreamVector2CoverageTestFixture().run { copy() } }
+    test("distance") { UpstreamVector2CoverageTestFixture().run { distance() } }
+    test("distanceBugInVersions_1_1_0_to_3_1_7") { UpstreamVector2CoverageTestFixture().run { distanceBugInVersions_1_1_0_to_3_1_7() } }
+    test("tripleProduct") { UpstreamVector2CoverageTestFixture().run { tripleProduct() } }
+    test("equals") { UpstreamVector2CoverageTestFixture().run { equals() } }
+    test("set") { UpstreamVector2CoverageTestFixture().run { set() } }
+    test("get") { UpstreamVector2CoverageTestFixture().run { get() } }
+    test("add") { UpstreamVector2CoverageTestFixture().run { add() } }
+    test("subtract") { UpstreamVector2CoverageTestFixture().run { subtract() } }
+    test("to") { UpstreamVector2CoverageTestFixture().run { to() } }
+    test("multiply") { UpstreamVector2CoverageTestFixture().run { multiply() } }
+    test("divide") { UpstreamVector2CoverageTestFixture().run { divide() } }
+    test("dot") { UpstreamVector2CoverageTestFixture().run { dot() } }
+    test("cross") { UpstreamVector2CoverageTestFixture().run { cross() } }
+    test("isOrthogonal") { UpstreamVector2CoverageTestFixture().run { isOrthogonal() } }
+    test("isZero") { UpstreamVector2CoverageTestFixture().run { isZero() } }
+    test("negate") { UpstreamVector2CoverageTestFixture().run { negate() } }
+    test("zero") { UpstreamVector2CoverageTestFixture().run { zero() } }
+    test("rotate") { UpstreamVector2CoverageTestFixture().run { rotate() } }
+    test("project") { UpstreamVector2CoverageTestFixture().run { project() } }
+    test("left") { UpstreamVector2CoverageTestFixture().run { left() } }
+    test("right") { UpstreamVector2CoverageTestFixture().run { right() } }
+    test("normalize") { UpstreamVector2CoverageTestFixture().run { normalize() } }
+    test("getAngleBetweenRange") { UpstreamVector2CoverageTestFixture().run { getAngleBetweenRange() } }
+    test("interpolate") { UpstreamVector2CoverageTestFixture().run { interpolate() } }
+    test("equalsEpsilon") { UpstreamVector2CoverageTestFixture().run { equalsEpsilon() } }
+}
+
+private class UpstreamVector2CoverageTestFixture  {
+fun create() {
         var v1 = Vector2()
         assertEquals(0.0, v1.x)
         assertEquals(0.0, v1.y)
@@ -56,8 +86,7 @@ class UpstreamVector2CoverageTest {
         assertEquals( 1.000, v6.y, 1.0e-3)
     }
 
-    @Test
-    fun copy() {
+fun copy() {
         var v = Vector2(1.0, 3.0)
         var vc = v.copy()
         assertFalse(v === vc)
@@ -65,8 +94,7 @@ class UpstreamVector2CoverageTest {
         assertEquals(v.y, vc.y)
     }
 
-    @Test
-    fun distance() {
+fun distance() {
         var v = Vector2()
         assertEquals(4.000, v.distanceSquared(2.0, 0.0), 1.0e-3)
         assertEquals(5.000, v.distanceSquared(2.0, -1.0), 1.0e-3)
@@ -78,8 +106,7 @@ class UpstreamVector2CoverageTest {
         assertEquals(5.000, v.distance(Vector2(3.0, 4.0)), 1.0e-3)
     }
 
-    @Test
-    fun distanceBugInVersions_1_1_0_to_3_1_7() {
+fun distanceBugInVersions_1_1_0_to_3_1_7() {
         var v = Vector2(1.0, 2.0)
         assertEquals(2.236, v.getMagnitude(), 1.0e-3)
         assertEquals(2.236, v.distance(2.0, 0.0), 1.0e-3)
@@ -88,8 +115,7 @@ class UpstreamVector2CoverageTest {
         assertEquals(4.242, v.distance(-2.0, -1.0), 1.0e-3)
     }
 
-    @Test
-    fun tripleProduct() {
+fun tripleProduct() {
         var v1 = Vector2(1.0, 1.0)
         var v2 = Vector2(1.0, -1.0)
         var r = Vector2.tripleProduct(v1, v2, v2)
@@ -97,8 +123,7 @@ class UpstreamVector2CoverageTest {
         assertEquals(-2.000, r.y, 1.0e-3)
     }
 
-    @Test
-    fun equals() {
+fun equals() {
         var v = Vector2(1.0, 2.0)
         assertTrue(v.equals(v))
         assertTrue(v.equals(v.copy()))
@@ -111,8 +136,7 @@ class UpstreamVector2CoverageTest {
         assertTrue(v.equals((Vector2(1.0, 2.0) as Any)))
     }
 
-    @Test
-    fun set() {
+fun set() {
         var v = Vector2()
         var v2 = Vector2(1.0, -3.0)
         v.set(v2)
@@ -138,8 +162,7 @@ class UpstreamVector2CoverageTest {
         assertEquals( 0.0, v.y)
     }
 
-    @Test
-    fun get() {
+fun get() {
         var v = Vector2(3.0, 4.0)
         var x = v.getXComponent()
         var y = v.getYComponent()
@@ -166,8 +189,7 @@ class UpstreamVector2CoverageTest {
         assertEquals(0.800, v2.y, 1.0e-3)
     }
 
-    @Test
-    fun add() {
+fun add() {
         var v1 = Vector2(1.0, 2.0)
         var v2 = Vector2(-2.0, 1.0)
         var v3 = v1.sum(v2)
@@ -184,8 +206,7 @@ class UpstreamVector2CoverageTest {
         assertEquals( 4.0, v1.y)
     }
 
-    @Test
-    fun subtract() {
+fun subtract() {
         var v1 = Vector2(1.0, 2.0)
         var v2 = Vector2(-2.0, 1.0)
         var v3 = v1.difference(v2)
@@ -202,8 +223,7 @@ class UpstreamVector2CoverageTest {
         assertEquals( 0.0, v1.y)
     }
 
-    @Test
-    fun to() {
+fun to() {
         var p1 = Vector2(1.0, 1.0)
         var p2 = Vector2(0.0, 1.0)
         var r = p1.to(p2)
@@ -214,8 +234,7 @@ class UpstreamVector2CoverageTest {
         assertEquals(-1.0, r.y)
     }
 
-    @Test
-    fun multiply() {
+fun multiply() {
         var v1 = Vector2(2.0, 1.0)
         var r = v1.product(-1.5)
         assertEquals(-3.0, r.x)
@@ -225,8 +244,7 @@ class UpstreamVector2CoverageTest {
         assertEquals(-1.5, v1.y)
     }
 
-    @Test
-    fun divide() {
+fun divide() {
         var v1 = Vector2(2.0, 1.0)
         var r = v1.quotient(-2.0)
         assertEquals(-1.0, r.x)
@@ -236,8 +254,7 @@ class UpstreamVector2CoverageTest {
         assertEquals(-0.5, r.y)
     }
 
-    @Test
-    fun dot() {
+fun dot() {
         var v1 = Vector2(1.0, 1.0)
         var v2 = Vector2(0.0, 1.0)
         assertEquals(1.0, v1.dot(v2))
@@ -248,8 +265,7 @@ class UpstreamVector2CoverageTest {
         assertEquals(2.0, v1.dot(1.0, 1.0))
     }
 
-    @Test
-    fun cross() {
+fun cross() {
         var v1 = Vector2(1.0, 1.0)
         var v2 = Vector2(0.0, 1.0)
         assertEquals(0.0, v1.cross(v1))
@@ -263,8 +279,7 @@ class UpstreamVector2CoverageTest {
         assertEquals( 3.0, r.y)
     }
 
-    @Test
-    fun isOrthogonal() {
+fun isOrthogonal() {
         var v1 = Vector2(1.0, 1.0)
         var v2 = Vector2(0.0, 1.0)
         assertFalse(v1.isOrthogonal(v2))
@@ -278,8 +293,7 @@ class UpstreamVector2CoverageTest {
         assertTrue(v1.isOrthogonal(0.0, 0.0))
     }
 
-    @Test
-    fun isZero() {
+fun isZero() {
         var v = Vector2()
         assertTrue(v.isZero())
         v.set(1.0, 0.0)
@@ -290,24 +304,21 @@ class UpstreamVector2CoverageTest {
         assertFalse(v.isZero())
     }
 
-    @Test
-    fun negate() {
+fun negate() {
         var v = Vector2(1.0, -6.0)
         v.negate()
         assertEquals(-1.0, v.x)
         assertEquals( 6.0, v.y)
     }
 
-    @Test
-    fun zero() {
+fun zero() {
         var v = Vector2(1.0, -2.0)
         v.zero()
         assertEquals( 0.0, v.x)
         assertEquals( 0.0, v.y)
     }
 
-    @Test
-    fun rotate() {
+fun rotate() {
         var v = Vector2(2.0, 1.0)
         v.rotate(radians(90.0))
         assertEquals(-1.000, v.x, 1.0e-3)
@@ -343,8 +354,7 @@ class UpstreamVector2CoverageTest {
         assertEquals(-2.000, v.y, 1.0e-3)
     }
 
-    @Test
-    fun project() {
+fun project() {
         var v1 = Vector2(1.0, 1.0)
         var v2 = Vector2(0.5, 1.0)
         var r = v1.project(v2)
@@ -355,32 +365,28 @@ class UpstreamVector2CoverageTest {
         assertEquals( 0.000, r.y, 1.0e-3)
     }
 
-    @Test
-    fun left() {
+fun left() {
         var v = Vector2(11.0, 2.5)
         v.left()
         assertEquals( 2.5, v.x)
         assertEquals( -11.0, v.y)
     }
 
-    @Test
-    fun right() {
+fun right() {
         var v = Vector2(11.0, 2.5)
         v.right()
         assertEquals( -2.5, v.x)
         assertEquals( 11.0, v.y)
     }
 
-    @Test
-    fun normalize() {
+fun normalize() {
         var v = Vector2(3.0, 4.0)
         v.normalize()
         assertEquals( 3.0 / 5.0, v.x, 1.0e-3)
         assertEquals( 4.0 / 5.0, v.y, 1.0e-3)
     }
 
-    @Test
-    fun getAngleBetweenRange() {
+fun getAngleBetweenRange() {
         var v1 = Vector2(-1.0, 2.0)
         var v2 = Vector2(-2.0, -1.0)
         assertTrue(abs(v1.getAngleBetween(v2)) <= PI)
@@ -393,8 +399,7 @@ class UpstreamVector2CoverageTest {
         assertTrue(angle <= PI)
     }
 
-    @Test
-    fun interpolate() {
+fun interpolate() {
         var start = Vector2(1.0, 1.0)
         var end = Vector2(2.0, 2.0)
         start.lerp(end, 0.5)
@@ -462,8 +467,7 @@ class UpstreamVector2CoverageTest {
         assertEquals(end.y, 2.0)
     }
 
-    @Test
-    fun equalsEpsilon() {
+fun equalsEpsilon() {
         var v1 = Vector2(1.0, 1.0)
         var v2 = Vector2(2.0, 2.0)
         assertFalse(v1.equals(v2, 0.0))

@@ -24,7 +24,7 @@
  */
 package org.dyn4j.coverage.world.core
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -68,6 +68,71 @@ import org.dyn4j.world.listener.ContactListenerAdapter
 import org.dyn4j.world.listener.StepListenerAdapter
 import org.dyn4j.world.listener.TimeOfImpactListenerAdapter
 import org.dyn4j.world.PhysicsWorld
+
+val PhysicsWorldCoreCoverageTest by testSuite {
+    test("createSuccess") { PhysicsWorldCoreCoverageTestFixture().run { createSuccess() } }
+    test("addBody") { PhysicsWorldCoreCoverageTestFixture().run { addBody() } }
+    test("addJoint") { PhysicsWorldCoreCoverageTestFixture().run { addJoint() } }
+    test("addNullJoint") { PhysicsWorldCoreCoverageTestFixture().run { addNullJoint() } }
+    test("addJointFromOtherWorld") { PhysicsWorldCoreCoverageTestFixture().run { addJointFromOtherWorld() } }
+    test("addSameJointToSameWorld") { PhysicsWorldCoreCoverageTestFixture().run { addSameJointToSameWorld() } }
+    test("addJointWithoutBodies") { PhysicsWorldCoreCoverageTestFixture().run { addJointWithoutBodies() } }
+    test("getJointsAndAdd") { PhysicsWorldCoreCoverageTestFixture().run { getJointsAndAdd() } }
+    test("getJointsAndRemove") { PhysicsWorldCoreCoverageTestFixture().run { getJointsAndRemove() } }
+    test("getJointAtIndex") { PhysicsWorldCoreCoverageTestFixture().run { getJointAtIndex() } }
+    test("getJointAtNegativeIndex") { PhysicsWorldCoreCoverageTestFixture().run { getJointAtNegativeIndex() } }
+    test("getJointAtBadIndex") { PhysicsWorldCoreCoverageTestFixture().run { getJointAtBadIndex() } }
+    test("getJointCount") { PhysicsWorldCoreCoverageTestFixture().run { getJointCount() } }
+    test("getJointIterator") { PhysicsWorldCoreCoverageTestFixture().run { getJointIterator() } }
+    test("getJointIteratorFailure") { PhysicsWorldCoreCoverageTestFixture().run { getJointIteratorFailure() } }
+    test("containsJoint") { PhysicsWorldCoreCoverageTestFixture().run { containsJoint() } }
+    test("removeJointNegativeIndex") { PhysicsWorldCoreCoverageTestFixture().run { removeJointNegativeIndex() } }
+    test("removeJointBadIndex") { PhysicsWorldCoreCoverageTestFixture().run { removeJointBadIndex() } }
+    test("removeJoint") { PhysicsWorldCoreCoverageTestFixture().run { removeJoint() } }
+    test("removeAllJoints") { PhysicsWorldCoreCoverageTestFixture().run { removeAllJoints() } }
+    test("fixtureModification") { PhysicsWorldCoreCoverageTestFixture().run { fixtureModification() } }
+    test("listeners") { PhysicsWorldCoreCoverageTestFixture().run { listeners() } }
+    test("savedListenerViewIteratorFailsAfterStructuralMutation") { PhysicsWorldCoreCoverageTestFixture().run { savedListenerViewIteratorFailsAfterStructuralMutation() } }
+    test("getSetAccumulatedTime") { PhysicsWorldCoreCoverageTestFixture().run { getSetAccumulatedTime() } }
+    test("getSetValueMixer") { PhysicsWorldCoreCoverageTestFixture().run { getSetValueMixer() } }
+    test("setNullVaueMixer") { PhysicsWorldCoreCoverageTestFixture().run { setNullVaueMixer() } }
+    test("getSetContactConstraintSolver") { PhysicsWorldCoreCoverageTestFixture().run { getSetContactConstraintSolver() } }
+    test("setNullContactConstraintSolver") { PhysicsWorldCoreCoverageTestFixture().run { setNullContactConstraintSolver() } }
+    test("getSetGravity") { PhysicsWorldCoreCoverageTestFixture().run { getSetGravity() } }
+    test("setNullGravity") { PhysicsWorldCoreCoverageTestFixture().run { setNullGravity() } }
+    test("setNullCCDBroadphaseDetector") { PhysicsWorldCoreCoverageTestFixture().run { setNullCCDBroadphaseDetector() } }
+    test("getAndSetCCDBroadphaseDetector") { PhysicsWorldCoreCoverageTestFixture().run { getAndSetCCDBroadphaseDetector() } }
+    test("isJoined") { PhysicsWorldCoreCoverageTestFixture().run { isJoined() } }
+    test("isJointCollisionAllowed") { PhysicsWorldCoreCoverageTestFixture().run { isJointCollisionAllowed() } }
+    test("getJoinedBodies") { PhysicsWorldCoreCoverageTestFixture().run { getJoinedBodies() } }
+    test("getJointsForBody") { PhysicsWorldCoreCoverageTestFixture().run { getJointsForBody() } }
+    test("getInContactBodies") { PhysicsWorldCoreCoverageTestFixture().run { getInContactBodies() } }
+    test("getContacts") { PhysicsWorldCoreCoverageTestFixture().run { getContacts() } }
+    test("isInContact") { PhysicsWorldCoreCoverageTestFixture().run { isInContact() } }
+    test("getJoinedBodiesMulti") { PhysicsWorldCoreCoverageTestFixture().run { getJoinedBodiesMulti() } }
+    test("getInContactBodiesMulti") { PhysicsWorldCoreCoverageTestFixture().run { getInContactBodiesMulti() } }
+    test("setSettings") { PhysicsWorldCoreCoverageTestFixture().run { setSettings() } }
+    test("setNullSettings") { PhysicsWorldCoreCoverageTestFixture().run { setNullSettings() } }
+    test("getSetTimeOfImpactSolver") { PhysicsWorldCoreCoverageTestFixture().run { getSetTimeOfImpactSolver() } }
+    test("setNullTimeOfImpactSolver") { PhysicsWorldCoreCoverageTestFixture().run { setNullTimeOfImpactSolver() } }
+    test("getTimeStep") { PhysicsWorldCoreCoverageTestFixture().run { getTimeStep() } }
+    test("isEmpty") { PhysicsWorldCoreCoverageTestFixture().run { isEmpty() } }
+    test("getSetUpdateRequired") { PhysicsWorldCoreCoverageTestFixture().run { getSetUpdateRequired() } }
+    test("shift") { PhysicsWorldCoreCoverageTestFixture().run { shift() } }
+    test("update") { PhysicsWorldCoreCoverageTestFixture().run { update() } }
+    test("updatev") { PhysicsWorldCoreCoverageTestFixture().run { updatev() } }
+    test("stepInt") { PhysicsWorldCoreCoverageTestFixture().run { stepInt() } }
+    test("stepIntElapsed") { PhysicsWorldCoreCoverageTestFixture().run { stepIntElapsed() } }
+    test("removeBody") { PhysicsWorldCoreCoverageTestFixture().run { removeBody() } }
+    test("removeBodyAtIndex") { PhysicsWorldCoreCoverageTestFixture().run { removeBodyAtIndex() } }
+    test("removeBodyMemoryLeak") { PhysicsWorldCoreCoverageTestFixture().run { removeBodyMemoryLeak() } }
+    test("removeAll") { PhysicsWorldCoreCoverageTestFixture().run { removeAll() } }
+    test("removeAllBodies") { PhysicsWorldCoreCoverageTestFixture().run { removeAllBodies() } }
+    test("removeBodyIllegalStateException") { PhysicsWorldCoreCoverageTestFixture().run { removeBodyIllegalStateException() } }
+    test("disabledAndSensor") { PhysicsWorldCoreCoverageTestFixture().run { disabledAndSensor() } }
+    test("sensorRemovalShouldNotClearAtRestState") { PhysicsWorldCoreCoverageTestFixture().run { sensorRemovalShouldNotClearAtRestState() } }
+    test("solvedFlag") { PhysicsWorldCoreCoverageTestFixture().run { solvedFlag() } }
+}
 
 private class CorePhysicsWorld(bodyCapacity: Int = 10, jointCapacity: Int = 10) :
     AbstractPhysicsWorld<Body, WorldCollisionData<Body>>(bodyCapacity, jointCapacity) {
@@ -121,8 +186,8 @@ private fun removalWorld(): Pair<CorePhysicsWorld, RemovalEvents> {
     return world to events
 }
 
-class PhysicsWorldCoreCoverageTest {
-    @Test fun createSuccess() {
+private class PhysicsWorldCoreCoverageTestFixture  {
+fun createSuccess() {
         for ((bodies, joints) in listOf(10 to 10, 16 to 2, -16 to 2, 0 to 2, 5 to -2, 5 to 0, -5 to -2, 0 to 0)) {
             val world = CorePhysicsWorld(bodies, joints)
             assertTrue(world.getBodies().isEmpty())
@@ -148,7 +213,7 @@ class PhysicsWorldCoreCoverageTest {
         }
     }
 
-    @Test fun addBody() {
+fun addBody() {
         val world = CorePhysicsWorld()
         val body = Body().also { it.addFixture(Geometry.createCapsule(1.0, 0.5)) }
         assertFalse(world.graphContains(body))
@@ -158,7 +223,7 @@ class PhysicsWorldCoreCoverageTest {
         assertTrue(world.containsBody(body))
     }
 
-    @Test fun addJoint() {
+fun addJoint() {
         val world = CorePhysicsWorld()
         val first = Body().also(world::addBody)
         val second = Body().also(world::addBody)
@@ -178,46 +243,46 @@ class PhysicsWorldCoreCoverageTest {
         assertEquals(1, world.graphJointCount(second))
     }
 
-    @Test fun addNullJoint() = assertFailsWith<NullPointerException> { World<Body>().addJoint(null) }.let { Unit }
-    @Test fun addJointFromOtherWorld() {
+fun addNullJoint() = assertFailsWith<NullPointerException> { World<Body>().addJoint(null) }.let { Unit }
+fun addJointFromOtherWorld() {
         val (firstWorld, first, second) = pairedWorld()
         val joint = AngleJoint(first, second)
         firstWorld.addJoint(joint)
         assertFailsWith<IllegalArgumentException> { World<Body>().addJoint(joint) }
         assertSame(firstWorld, joint.getOwner())
     }
-    @Test fun addSameJointToSameWorld() {
+fun addSameJointToSameWorld() {
         val (world, first, second) = pairedWorld()
         val joint = AngleJoint(first, second)
         world.addJoint(joint)
         assertFailsWith<IllegalArgumentException> { world.addJoint(joint) }
         assertEquals(1, world.getJointCount())
     }
-    @Test fun addJointWithoutBodies() {
+fun addJointWithoutBodies() {
         val joint = AngleJoint(Body(), Body())
         assertFailsWith<IllegalArgumentException> { World<Body>().addJoint(joint) }
     }
-    @Test fun getJointsAndAdd() {
+fun getJointsAndAdd() {
         assertFailsWith<UnsupportedOperationException> { (World<Body>().getJoints() as MutableList<Joint<Body>>).add(AngleJoint(Body(), Body())) }
     }
-    @Test fun getJointsAndRemove() {
+fun getJointsAndRemove() {
         assertFailsWith<UnsupportedOperationException> { (World<Body>().getJoints() as MutableList<Joint<Body>>).removeAt(0) }
     }
-    @Test fun getJointAtIndex() {
+fun getJointAtIndex() {
         val (world, first, second) = pairedWorld()
         val joint = AngleJoint(first, second)
         world.addJoint(joint)
         assertSame(joint, world.getJoint(0))
     }
-    @Test fun getJointAtNegativeIndex() = assertFailsWith<IndexOutOfBoundsException> { World<Body>().getJoint(-1) }.let { Unit }
-    @Test fun getJointAtBadIndex() = assertFailsWith<IndexOutOfBoundsException> { World<Body>().getJoint(1) }.let { Unit }
-    @Test fun getJointCount() {
+fun getJointAtNegativeIndex() = assertFailsWith<IndexOutOfBoundsException> { World<Body>().getJoint(-1) }.let { Unit }
+fun getJointAtBadIndex() = assertFailsWith<IndexOutOfBoundsException> { World<Body>().getJoint(1) }.let { Unit }
+fun getJointCount() {
         val (world, first, second) = pairedWorld()
         assertEquals(0, world.getJointCount())
         world.addJoint(AngleJoint(first, second))
         assertEquals(1, world.getJointCount())
     }
-    @Test fun getJointIterator() {
+fun getJointIterator() {
         val (world, first, second) = pairedWorld()
         val one = AngleJoint(first, second)
         val two = AngleJoint(first, second)
@@ -232,7 +297,7 @@ class PhysicsWorldCoreCoverageTest {
         iterator.remove()
         assertEquals(0, world.getJointCount())
     }
-    @Test fun getJointIteratorFailure() {
+fun getJointIteratorFailure() {
         val (world, first, second) = pairedWorld()
         world.addJoint(AngleJoint(first, second))
         world.addJoint(AngleJoint(first, second))
@@ -250,7 +315,7 @@ class PhysicsWorldCoreCoverageTest {
         world.removeAllJoints()
         assertFailsWith<IndexOutOfBoundsException> { modified.remove() }
     }
-    @Test fun containsJoint() {
+fun containsJoint() {
         val (world, first, second) = pairedWorld()
         val joint = AngleJoint(first, second)
         world.addJoint(joint)
@@ -258,9 +323,9 @@ class PhysicsWorldCoreCoverageTest {
         assertFalse(world.containsJoint(null))
         assertFalse(world.containsJoint(AngleJoint(first, second)))
     }
-    @Test fun removeJointNegativeIndex() = assertFailsWith<IndexOutOfBoundsException> { World<Body>().removeJoint(-1) }.let { Unit }
-    @Test fun removeJointBadIndex() = assertFailsWith<IndexOutOfBoundsException> { World<Body>().removeJoint(2) }.let { Unit }
-    @Test fun removeJoint() {
+fun removeJointNegativeIndex() = assertFailsWith<IndexOutOfBoundsException> { World<Body>().removeJoint(-1) }.let { Unit }
+fun removeJointBadIndex() = assertFailsWith<IndexOutOfBoundsException> { World<Body>().removeJoint(2) }.let { Unit }
+fun removeJoint() {
         val (world, first, second) = pairedWorld()
         assertFalse(world.removeJoint(null as Joint<Body>?))
         val joint = DistanceJoint(first, second, Vector2(), Vector2())
@@ -273,7 +338,7 @@ class PhysicsWorldCoreCoverageTest {
         assertTrue(world.getJoints(first).isEmpty())
         assertTrue(world.getJoints(second).isEmpty())
     }
-    @Test fun removeAllJoints() {
+fun removeAllJoints() {
         val (world, first, second) = pairedWorld()
         var destroyed = 0
         world.addDestructionListener(object : DestructionListenerAdapter<Body>() {
@@ -295,7 +360,7 @@ class PhysicsWorldCoreCoverageTest {
         assertTrue(world.getJoints(second).isEmpty())
     }
 
-    @Test fun fixtureModification() {
+fun fixtureModification() {
         val world = CorePhysicsWorld()
         val first = Body().also { it.addFixture(Circle(1.0)); it.setMass(MassType.NORMAL) }
         val second = Body().also { it.addFixture(Geometry.createEquilateralTriangle(0.5)); it.setMass(MassType.NORMAL) }
@@ -341,7 +406,7 @@ class PhysicsWorldCoreCoverageTest {
         assertEquals(0, world.graphContactCount(second))
     }
 
-    @Test fun listeners() {
+fun listeners() {
         val world = object : World<Body>() {
             fun listenerBackingSizes() = listOf(
                 collisionListeners.size, boundsListeners.size, contactListeners.size,
@@ -433,7 +498,7 @@ class PhysicsWorldCoreCoverageTest {
         assertFreshViews(0, 0, 0, 0)
     }
 
-    @Test fun savedListenerViewIteratorFailsAfterStructuralMutation() {
+fun savedListenerViewIteratorFailsAfterStructuralMutation() {
         val world = World<Body>()
         val first = StepListenerAdapter<Body>()
         val second = StepListenerAdapter<Body>()
@@ -445,7 +510,7 @@ class PhysicsWorldCoreCoverageTest {
         assertFailsWith<ConcurrentModificationException> { iterator.next() }
     }
 
-    @Test fun getSetAccumulatedTime() {
+fun getSetAccumulatedTime() {
         val world = World<Body>()
         val half = Settings.DEFAULT_STEP_FREQUENCY * 0.5
         assertEquals(0.0, world.getAccumulatedTime())
@@ -462,7 +527,7 @@ class PhysicsWorldCoreCoverageTest {
         assertEquals(half, world.getAccumulatedTime())
     }
 
-    @Test fun getSetValueMixer() {
+fun getSetValueMixer() {
         val world = World<Body>()
         assertSame(ValueMixer.DEFAULT_MIXER, world.getValueMixer())
         val mixer = object : ValueMixer {
@@ -473,15 +538,15 @@ class PhysicsWorldCoreCoverageTest {
         world.setValueMixer(mixer)
         assertSame(mixer, world.getValueMixer())
     }
-    @Test fun setNullVaueMixer() = assertFailsWith<NullPointerException> { World<Body>().setValueMixer(null) }.let { Unit }
-    @Test fun getSetContactConstraintSolver() {
+fun setNullVaueMixer() = assertFailsWith<NullPointerException> { World<Body>().setValueMixer(null) }.let { Unit }
+fun getSetContactConstraintSolver() {
         val world = World<Body>()
         val solver = object : SequentialImpulses<Body>() {}
         world.setContactConstraintSolver(solver)
         assertSame(solver, world.getContactConstraintSolver())
     }
-    @Test fun setNullContactConstraintSolver() = assertFailsWith<NullPointerException> { World<Body>().setContactConstraintSolver(null) }.let { Unit }
-    @Test fun getSetGravity() {
+fun setNullContactConstraintSolver() = assertFailsWith<NullPointerException> { World<Body>().setContactConstraintSolver(null) }.let { Unit }
+fun getSetGravity() {
         val world = World<Body>()
         assertEquals(0.0, world.getGravity().x)
         assertEquals(-9.8, world.getGravity().y)
@@ -489,16 +554,16 @@ class PhysicsWorldCoreCoverageTest {
         world.setGravity(gravity)
         assertEquals(gravity, world.getGravity())
     }
-    @Test fun setNullGravity() {
+fun setNullGravity() {
         val world = World<Body>()
         world.setGravity(0.0, -4.0)
         world.setGravity(null)
         assertEquals(0.0, world.getGravity().x)
         assertEquals(-4.0, world.getGravity().y)
     }
-    @Test fun setNullCCDBroadphaseDetector() =
+fun setNullCCDBroadphaseDetector() =
         assertFailsWith<NullPointerException> { World<Body>().setContinuousCollisionDetectionBroadphaseDetector(null) }.let { Unit }
-    @Test fun getAndSetCCDBroadphaseDetector() {
+fun getAndSetCCDBroadphaseDetector() {
         val world = World<Body>()
         val body = Body().also { it.addFixture(Circle(1.0)) }
         world.addBody(body)
@@ -514,7 +579,7 @@ class PhysicsWorldCoreCoverageTest {
         assertTrue(replacement.contains(body))
     }
 
-    @Test fun isJoined() {
+fun isJoined() {
         val world = World<Body>()
         val bodies = List(3) { Body().also(world::addBody) }
         assertFalse(world.isJoined(bodies[0], null))
@@ -523,7 +588,7 @@ class PhysicsWorldCoreCoverageTest {
         assertFalse(world.isJoined(bodies[0], bodies[2]))
         assertTrue(world.isJoined(bodies[0], bodies[1]))
     }
-    @Test fun isJointCollisionAllowed() {
+fun isJointCollisionAllowed() {
         val (world, first, second) = pairedWorld()
         val revolute = RevoluteJoint(first, second, Vector2())
         val angle = AngleJoint(first, second)
@@ -533,20 +598,20 @@ class PhysicsWorldCoreCoverageTest {
         angle.setCollisionAllowed(true)
         assertTrue(world.isJointCollisionAllowed(first, second))
     }
-    @Test fun getJoinedBodies() {
+fun getJoinedBodies() {
         val (world, first, second) = pairedWorld()
         assertTrue(world.getJoinedBodies(first).isEmpty())
         world.addJoint(DistanceJoint(first, second, Vector2(), Vector2()))
         assertEquals(listOf(second), world.getJoinedBodies(first))
     }
-    @Test fun getJointsForBody() {
+fun getJointsForBody() {
         val (world, first, second) = pairedWorld()
         assertTrue(world.getJoints(first).isEmpty())
         val joint = DistanceJoint(first, second, Vector2(), Vector2())
         world.addJoint(joint)
         assertEquals(listOf(joint), world.getJoints(first))
     }
-    @Test fun getInContactBodies() {
+fun getInContactBodies() {
         val (world, first, second) = pairedWorld()
         assertTrue(world.getInContactBodies(first, false).isEmpty())
         assertTrue(world.getInContactBodies(first, true).isEmpty())
@@ -557,25 +622,25 @@ class PhysicsWorldCoreCoverageTest {
         assertTrue(world.getInContactBodies(first, false).isEmpty())
         assertEquals(listOf(second), world.getInContactBodies(first, true))
     }
-    @Test fun getContacts() {
+fun getContacts() {
         val (world, first, _) = pairedWorld()
         assertTrue(world.getContacts(first).isEmpty())
         world.step(1)
         assertTrue(world.getContacts(first).isNotEmpty())
     }
-    @Test fun isInContact() {
+fun isInContact() {
         val (world, first, second) = pairedWorld()
         assertFalse(world.isInContact(first, second))
         world.step(1)
         assertTrue(world.isInContact(first, second))
     }
-    @Test fun getJoinedBodiesMulti() {
+fun getJoinedBodiesMulti() {
         val (world, first, second) = pairedWorld()
         world.addJoint(AngleJoint(first, second))
         world.addJoint(AngleJoint(first, second))
         assertEquals(listOf(second), world.getJoinedBodies(first))
     }
-    @Test fun getInContactBodiesMulti() {
+fun getInContactBodiesMulti() {
         val world = World<Body>()
         val first = Body().also { it.addFixture(Geometry.createRectangle(15.0, 1.0)); it.setMass(MassType.NORMAL) }
         val second = Body().also {
@@ -590,7 +655,7 @@ class PhysicsWorldCoreCoverageTest {
         assertEquals(listOf(second), world.getInContactBodies(first, false))
     }
 
-    @Test fun setSettings() {
+fun setSettings() {
         val world = World<Body>()
         val settings = Settings()
         settings.setLinearTolerance(10000.0)
@@ -598,21 +663,21 @@ class PhysicsWorldCoreCoverageTest {
         assertNotSame(settings, world.getSettings())
         assertEquals(10000.0, world.getSettings().getLinearTolerance())
     }
-    @Test fun setNullSettings() {
+fun setNullSettings() {
         val world = World<Body>()
         world.getSettings().setAngularTolerance(4.0)
         world.setSettings(null)
         assertEquals(4.0, world.getSettings().getAngularTolerance())
     }
-    @Test fun getSetTimeOfImpactSolver() {
+fun getSetTimeOfImpactSolver() {
         val world = World<Body>()
         val solver = ForceCollisionTimeOfImpactSolver<Body>()
         world.setTimeOfImpactSolver(solver)
         assertSame(solver, world.getTimeOfImpactSolver())
     }
-    @Test fun setNullTimeOfImpactSolver() =
+fun setNullTimeOfImpactSolver() =
         assertFailsWith<NullPointerException> { World<Body>().setTimeOfImpactSolver(null) }.let { Unit }
-    @Test fun getTimeStep() {
+fun getTimeStep() {
         val world = World<Body>()
         val step = world.getTimeStep()
         assertEquals(Settings.DEFAULT_STEP_FREQUENCY, step.getDeltaTime())
@@ -620,7 +685,7 @@ class PhysicsWorldCoreCoverageTest {
         assertSame(step, world.getTimeStep())
         assertEquals(Settings.DEFAULT_STEP_FREQUENCY, step.getDeltaTime())
     }
-    @Test fun isEmpty() {
+fun isEmpty() {
         val world = World<Body>()
         assertTrue(world.isEmpty())
         val first = Body()
@@ -636,7 +701,7 @@ class PhysicsWorldCoreCoverageTest {
         world.addJoint(joint)
         assertFalse(world.isEmpty())
     }
-    @Test fun getSetUpdateRequired() {
+fun getSetUpdateRequired() {
         val world = World<Body>()
         assertTrue(world.isUpdateRequired())
         world.step(1)
@@ -644,7 +709,7 @@ class PhysicsWorldCoreCoverageTest {
         world.setUpdateRequired(true)
         assertTrue(world.isUpdateRequired())
     }
-    @Test fun shift() {
+fun shift() {
         val (world, first, _) = pairedWorld()
         world.setBounds(AxisAlignedBounds(20.0, 20.0))
         val joint = PinJoint(first, Vector2())
@@ -653,7 +718,7 @@ class PhysicsWorldCoreCoverageTest {
         assertEquals(5.0, joint.getAnchor().x)
         assertEquals(6.0, joint.getAnchor().y)
     }
-    @Test fun update() {
+fun update() {
         val world = World<Body>()
         val frequency = Settings.DEFAULT_STEP_FREQUENCY
         assertTrue(world.update(frequency))
@@ -668,7 +733,7 @@ class PhysicsWorldCoreCoverageTest {
         assertTrue(world.update(frequency * 4, 0.01, 5))
         assertEquals(0.0, world.getAccumulatedTime(), 1.0e-8)
     }
-    @Test fun updatev() {
+fun updatev() {
         val world = World<Body>()
         var steps = 0
         world.addStepListener(object : StepListenerAdapter<Body>() {
@@ -680,7 +745,7 @@ class PhysicsWorldCoreCoverageTest {
         world.updatev(-1.0)
         assertEquals(1, steps)
     }
-    @Test fun stepInt() {
+fun stepInt() {
         val world = World<Body>()
         var steps = 0
         world.addStepListener(object : StepListenerAdapter<Body>() {
@@ -692,7 +757,7 @@ class PhysicsWorldCoreCoverageTest {
         world.step(-2)
         assertEquals(3, steps)
     }
-    @Test fun stepIntElapsed() {
+fun stepIntElapsed() {
         val world = World<Body>()
         var steps = 0
         world.addStepListener(object : StepListenerAdapter<Body>() {
@@ -707,7 +772,7 @@ class PhysicsWorldCoreCoverageTest {
         assertEquals(3, steps)
     }
 
-    @Test fun removeBody() {
+fun removeBody() {
         val (world, events) = removalWorld()
         assertFalse(world.removeBody(null as Body?))
         assertFalse(world.removeBody(Body()))
@@ -757,7 +822,7 @@ class PhysicsWorldCoreCoverageTest {
         assertEquals(0, world.collisionCount())
     }
 
-    @Test fun removeBodyAtIndex() {
+fun removeBodyAtIndex() {
         val (world, events) = removalWorld()
         val first = Body().also { it.addFixture(Circle(1.0)); it.setMass(MassType.NORMAL) }
         val second = Body().also { it.addFixture(Geometry.createEquilateralTriangle(0.5)); it.setMass(MassType.NORMAL) }
@@ -796,7 +861,7 @@ class PhysicsWorldCoreCoverageTest {
         assertFalse(world.graphContains(second))
     }
 
-    @Test fun removeBodyMemoryLeak() {
+fun removeBodyMemoryLeak() {
         val (world, events) = removalWorld()
         val first = Body().also { it.addFixture(Geometry.createSquare(1.0)); it.setMass(MassType.NORMAL); it.translate(0.5, 1.1) }
         val second = Body().also { it.addFixture(Geometry.createSquare(1.0)); it.setMass(MassType.NORMAL) }
@@ -833,7 +898,7 @@ class PhysicsWorldCoreCoverageTest {
         assertEquals(0, world.collisionCount())
     }
 
-    @Test fun removeAll() {
+fun removeAll() {
         val (world, events) = removalWorld()
         val first = Body().also { it.addFixture(Circle(1.0)); it.setMass(MassType.NORMAL) }
         val second = Body().also { it.addFixture(Geometry.createEquilateralTriangle(0.5)); it.setMass(MassType.NORMAL) }
@@ -854,7 +919,7 @@ class PhysicsWorldCoreCoverageTest {
         assertEquals(4, events.destruction)
     }
 
-    @Test fun removeAllBodies() {
+fun removeAllBodies() {
         val (world, events) = removalWorld()
         val first = Body().also { it.addFixture(Circle(1.0)); it.setMass(MassType.NORMAL) }
         val second = Body().also { it.addFixture(Geometry.createEquilateralTriangle(0.5)); it.setMass(MassType.NORMAL) }
@@ -887,7 +952,7 @@ class PhysicsWorldCoreCoverageTest {
         assertEquals(0, events.destroyedContact)
     }
 
-    @Test fun removeBodyIllegalStateException() {
+fun removeBodyIllegalStateException() {
         val world = World<Body>()
         val first = Body().also { it.addFixture(Circle(1.0)); it.setMass(MassType.NORMAL) }
         val second = Body().also { it.addFixture(Circle(1.0)); it.setMass(MassType.NORMAL) }
@@ -904,7 +969,7 @@ class PhysicsWorldCoreCoverageTest {
         assertSame(first, world.getBody(0))
     }
 
-    @Test fun disabledAndSensor() {
+fun disabledAndSensor() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val first = Body().also { it.addFixture(Geometry.createUnitCirclePolygon(6, 0.7)); it.setMass(MassType.NORMAL) }
@@ -933,7 +998,7 @@ class PhysicsWorldCoreCoverageTest {
         assertTrue(initialized > 0)
     }
 
-    @Test fun sensorRemovalShouldNotClearAtRestState() {
+fun sensorRemovalShouldNotClearAtRestState() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val sensorBody = Body().also { it.addFixture(Circle(1.0)); it.getFixture(0).setSensor(true); it.translate(-0.5, 0.0) }
@@ -964,7 +1029,7 @@ class PhysicsWorldCoreCoverageTest {
         assertTrue(movingBody.isAtRest())
     }
 
-    @Test fun solvedFlag() {
+fun solvedFlag() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val first = Body().also { it.addFixture(Geometry.createSquare(0.5)); it.setMass(MassType.NORMAL); it.translate(0.450, 0.499) }

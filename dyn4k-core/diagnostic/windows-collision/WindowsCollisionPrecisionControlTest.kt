@@ -1,11 +1,11 @@
 package org.dyn4j.collision.narrowphase
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.alloc
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlin.math.sqrt
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import org.dyn4j.coverage.collision.shapes.a.CapsuleSliceTest
 import org.dyn4j.coverage.collision.shapes.a.CirclePolygonTest
@@ -18,8 +18,22 @@ import platform.posix.fenv_t
 import platform.posix.fesetenv
 import platform.windows.GetCurrentThreadId
 
+val WindowsCollisionPrecisionControlTest by testSuite {
+    test("scalarVectorsPc53") { WindowsCollisionPrecisionControlTestFixture().run { scalarVectorsPc53() } }
+    test("tracePc53") { WindowsCollisionPrecisionControlTestFixture().run { tracePc53() } }
+    test("capsuleSliceDetectGjkPc53") { WindowsCollisionPrecisionControlTestFixture().run { capsuleSliceDetectGjkPc53() } }
+    test("capsuleSliceGetClipManifoldPc53") { WindowsCollisionPrecisionControlTestFixture().run { capsuleSliceGetClipManifoldPc53() } }
+    test("circlePolygonDetectGjkPc53") { WindowsCollisionPrecisionControlTestFixture().run { circlePolygonDetectGjkPc53() } }
+    test("circleSegmentDetectGjkPc53") { WindowsCollisionPrecisionControlTestFixture().run { circleSegmentDetectGjkPc53() } }
+    test("circleSliceDetectGjkPc53") { WindowsCollisionPrecisionControlTestFixture().run { circleSliceDetectGjkPc53() } }
+    test("polygonCapsuleDetectSatPc53") { WindowsCollisionPrecisionControlTestFixture().run { polygonCapsuleDetectSatPc53() } }
+    test("polygonCapsuleGetClipManifoldPc53") { WindowsCollisionPrecisionControlTestFixture().run { polygonCapsuleGetClipManifoldPc53() } }
+    test("polygonPolygonDetectSatPc53") { WindowsCollisionPrecisionControlTestFixture().run { polygonPolygonDetectSatPc53() } }
+    test("polygonPolygonGetClipManifoldPc53") { WindowsCollisionPrecisionControlTestFixture().run { polygonPolygonGetClipManifoldPc53() } }
+}
+
 @OptIn(ExperimentalForeignApi::class)
-class WindowsCollisionPrecisionControlTest {
+private class WindowsCollisionPrecisionControlTestFixture  {
     private data class ScalarInput(val id: String, val xBits: Long, val yBits: Long, val rootBits: Long, val reciprocalBits: Long)
 
     private val inputs = listOf(
@@ -32,7 +46,7 @@ class WindowsCollisionPrecisionControlTest {
         ScalarInput("PolygonCapsule.sat4", 4605462196814083239L, -4619902518423102882L, 4607182418800017407L, 4607182418800017409L)
     )
 
-    @Test fun scalarVectorsPc53() {
+fun scalarVectorsPc53() {
         inputs.forEach { emitScalar("before", it) }
         withPc53("scalarVectors") {
             val measured = inputs.map { input -> input to emitScalar("pc53", input) }
@@ -44,7 +58,7 @@ class WindowsCollisionPrecisionControlTest {
         }
     }
 
-    @Test fun tracePc53() {
+fun tracePc53() {
         val diagnostic = WindowsCollisionIntermediateDiagnosticTest()
         withPc53("trace") {
             diagnostic.capsuleSlice()
@@ -56,47 +70,47 @@ class WindowsCollisionPrecisionControlTest {
         }
     }
 
-    @Test fun capsuleSliceDetectGjkPc53() {
+fun capsuleSliceDetectGjkPc53() {
         val fixture = CapsuleSliceTest()
         withPc53("CapsuleSlice.detectGjk") { fixture.detectGjk() }
     }
 
-    @Test fun capsuleSliceGetClipManifoldPc53() {
+fun capsuleSliceGetClipManifoldPc53() {
         val fixture = CapsuleSliceTest()
         withPc53("CapsuleSlice.getClipManifold") { fixture.getClipManifold() }
     }
 
-    @Test fun circlePolygonDetectGjkPc53() {
+fun circlePolygonDetectGjkPc53() {
         val fixture = CirclePolygonTest()
         withPc53("CirclePolygon.detectGjk") { fixture.detectGjk() }
     }
 
-    @Test fun circleSegmentDetectGjkPc53() {
+fun circleSegmentDetectGjkPc53() {
         val fixture = CircleSegmentTest()
         withPc53("CircleSegment.detectGjk") { fixture.detectGjk() }
     }
 
-    @Test fun circleSliceDetectGjkPc53() {
+fun circleSliceDetectGjkPc53() {
         val fixture = CircleSliceTest()
         withPc53("CircleSlice.detectGjk") { fixture.detectGjk() }
     }
 
-    @Test fun polygonCapsuleDetectSatPc53() {
+fun polygonCapsuleDetectSatPc53() {
         val fixture = PolygonCapsuleTest()
         withPc53("PolygonCapsule.detectSat") { fixture.detectSat() }
     }
 
-    @Test fun polygonCapsuleGetClipManifoldPc53() {
+fun polygonCapsuleGetClipManifoldPc53() {
         val fixture = PolygonCapsuleTest()
         withPc53("PolygonCapsule.getClipManifold") { fixture.getClipManifold() }
     }
 
-    @Test fun polygonPolygonDetectSatPc53() {
+fun polygonPolygonDetectSatPc53() {
         val fixture = PolygonPolygonTest()
         withPc53("PolygonPolygon.detectSat") { fixture.detectSat() }
     }
 
-    @Test fun polygonPolygonGetClipManifoldPc53() {
+fun polygonPolygonGetClipManifoldPc53() {
         val fixture = PolygonPolygonTest()
         withPc53("PolygonPolygon.getClipManifold") { fixture.getClipManifold() }
     }

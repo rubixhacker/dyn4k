@@ -1,7 +1,7 @@
 package org.dyn4j.dynamics.joint
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.abs
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotSame
@@ -14,9 +14,16 @@ import org.dyn4j.geometry.Circle
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
-class JointMotorPinJourneyTest {
-    @Test
-    fun motorTargetsWakeBodiesAndStayIndependentAcrossCopies() {
+val JointMotorPinJourneyTest by testSuite {
+    test("motorTargetsWakeBodiesAndStayIndependentAcrossCopies") { JointMotorPinJourneyTestFixture().run { motorTargetsWakeBodiesAndStayIndependentAcrossCopies() } }
+    test("motorSolverLimitsLinearForceAndAngularTorque") { JointMotorPinJourneyTestFixture().run { motorSolverLimitsLinearForceAndAngularTorque() } }
+    test("pinSwitchesBetweenSpringAndCorrectionWithSeparateForceCaps") { JointMotorPinJourneyTestFixture().run { pinSwitchesBetweenSpringAndCorrectionWithSeparateForceCaps() } }
+    test("pinStiffnessModeCanRunWithoutTheSpringForceCap") { JointMotorPinJourneyTestFixture().run { pinStiffnessModeCanRunWithoutTheSpringForceCap() } }
+    test("jointSubclassesCanUseProtectedTargetsAndOverrideSolverHooks") { JointMotorPinJourneyTestFixture().run { jointSubclassesCanUseProtectedTargetsAndOverrideSolverHooks() } }
+}
+
+private class JointMotorPinJourneyTestFixture  {
+fun motorTargetsWakeBodiesAndStayIndependentAcrossCopies() {
         val first = Body()
         val second = Body()
         second.translate(2.0, 1.0)
@@ -42,8 +49,7 @@ class JointMotorPinJourneyTest {
         assertSame(first, joint.copy(first, null).getBody1())
     }
 
-    @Test
-    fun motorSolverLimitsLinearForceAndAngularTorque() {
+fun motorSolverLimitsLinearForceAndAngularTorque() {
         val first = dynamicBody()
         val second = dynamicBody()
         val joint = MotorJoint(first, second)
@@ -63,8 +69,7 @@ class JointMotorPinJourneyTest {
         assertTrue(joint.getReactionForce(60.0).getMagnitude() > 0.0)
     }
 
-    @Test
-    fun pinSwitchesBetweenSpringAndCorrectionWithSeparateForceCaps() {
+fun pinSwitchesBetweenSpringAndCorrectionWithSeparateForceCaps() {
         val body = dynamicBody()
         val joint = PinJoint(body, Vector2())
         assertTrue(joint.isSpringEnabled())
@@ -98,8 +103,7 @@ class JointMotorPinJourneyTest {
         assertFalse(copy.isSpringEnabled())
     }
 
-    @Test
-    fun pinStiffnessModeCanRunWithoutTheSpringForceCap() {
+fun pinStiffnessModeCanRunWithoutTheSpringForceCap() {
         val body = dynamicBody()
         val joint = PinJoint(body, Vector2())
         joint.setSpringEnabled(false)
@@ -124,8 +128,7 @@ class JointMotorPinJourneyTest {
         assertTrue(joint.getSpringForce(60.0) > joint.getMaximumSpringForce())
     }
 
-    @Test
-    fun jointSubclassesCanUseProtectedTargetsAndOverrideSolverHooks() {
+fun jointSubclassesCanUseProtectedTargetsAndOverrideSolverHooks() {
         val first = dynamicBody()
         val second = dynamicBody()
         val motor = TrackingMotor(first, second)

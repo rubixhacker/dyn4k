@@ -25,7 +25,7 @@
 
 package org.dyn4j.coverage.collision.shapes.a
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -39,7 +39,16 @@ import org.dyn4j.collision.narrowphase.Sat
 import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.geometry.*
 
-class PolygonSegmentTest {
+val PolygonSegmentTest by testSuite {
+    test("detectSat") { PolygonSegmentTestFixture().run { detectSat() } }
+    test("detectGjk") { PolygonSegmentTestFixture().run { detectGjk() } }
+    test("gjkDistance") { PolygonSegmentTestFixture().run { gjkDistance() } }
+    test("getClipManifold") { PolygonSegmentTestFixture().run { getClipManifold() } }
+    test("noManifoldPoints") { PolygonSegmentTestFixture().run { noManifoldPoints() } }
+    test("testBadPoints1") { PolygonSegmentTestFixture().run { testBadPoints1() } }
+}
+
+private class PolygonSegmentTestFixture  {
     private val sat = Sat()
     private val gjk = Gjk()
     private val cmfs = ClippingManifoldSolver()
@@ -49,8 +58,7 @@ class PolygonSegmentTest {
         poly = Geometry.createUnitCirclePolygon(5, 1.0)
         seg = Segment(Vector2(-0.5, 0.0), Vector2(0.0, 0.5))
     }
-    @Test
-    fun detectSat() {
+fun detectSat() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -99,8 +107,7 @@ class PolygonSegmentTest {
         assertFalse(sat.detect(seg, t2, poly, t1, p))
         assertFalse(sat.detect(seg, t2, poly, t1))
     }
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -149,8 +156,7 @@ class PolygonSegmentTest {
         assertFalse(gjk.detect(seg, t2, poly, t1, p))
         assertFalse(gjk.detect(seg, t2, poly, t1))
     }
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         setup()
         val s = Separation()
         val t1 = Transform()
@@ -217,8 +223,7 @@ class PolygonSegmentTest {
         assertFiniteClose(-1.445, p2.x, 1.0e-3)
         assertFiniteClose(0.613, p2.y, 1.0e-3)
     }
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         setup()
         val m = Manifold()
         val p = Penetration()
@@ -286,8 +291,7 @@ class PolygonSegmentTest {
         assertFiniteClose(0.000, p1.y, 1.0e-3)
         assertFiniteClose(0.404, mp.getDepth(), 1.0e-3)
     }
-    @Test
-    fun noManifoldPoints() {
+fun noManifoldPoints() {
         setup()
         val m = Manifold()
         val p = Penetration()
@@ -348,8 +352,7 @@ class PolygonSegmentTest {
         assertFiniteClose(-0.628, p2.y, 1.0e-3)
         assertFiniteClose(0.270, mp2.getDepth(), 1.0e-3)
     }
-    @Test
-    fun testBadPoints1() {
+fun testBadPoints1() {
         setup()
         val p = Geometry.createUnitCirclePolygon(5, 1.0)
         val s = Segment(Vector2(-0.5, 0.0), Vector2(0.5, 0.0))

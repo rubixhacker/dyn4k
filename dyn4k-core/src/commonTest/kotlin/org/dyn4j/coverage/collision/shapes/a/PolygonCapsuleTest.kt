@@ -25,7 +25,7 @@
 
 package org.dyn4j.coverage.collision.shapes.a
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -39,7 +39,14 @@ import org.dyn4j.collision.narrowphase.Sat
 import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.geometry.*
 
-class PolygonCapsuleTest {
+val PolygonCapsuleTest by testSuite {
+    test("detectSat") { PolygonCapsuleTestFixture().run { detectSat() } }
+    test("detectGjk") { PolygonCapsuleTestFixture().run { detectGjk() } }
+    test("gjkDistance") { PolygonCapsuleTestFixture().run { gjkDistance() } }
+    test("getClipManifold") { PolygonCapsuleTestFixture().run { getClipManifold() } }
+}
+
+private class PolygonCapsuleTestFixture  {
     private val sat = Sat()
     private val gjk = Gjk()
     private val cmfs = ClippingManifoldSolver()
@@ -49,8 +56,7 @@ class PolygonCapsuleTest {
         polygon = Geometry.createUnitCirclePolygon(5, 0.5)
         capsule = Capsule(1.0, 0.5)
     }
-    @Test
-    fun detectSat() {
+fun detectSat() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -99,8 +105,7 @@ class PolygonCapsuleTest {
         assertFalse(sat.detect(capsule, t2, polygon, t1, p))
         assertFalse(sat.detect(capsule, t2, polygon, t1))
     }
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -149,8 +154,7 @@ class PolygonCapsuleTest {
         assertFalse(gjk.detect(capsule, t2, polygon, t1, p))
         assertFalse(gjk.detect(capsule, t2, polygon, t1))
     }
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         setup()
         val s = Separation()
         val t1 = Transform()
@@ -217,8 +221,7 @@ class PolygonCapsuleTest {
         assertFiniteClose( 0.000, p2.x, 1.0e-3)
         assertFiniteClose( 0.000, p2.y, 1.0e-3)
     }
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         setup()
         val m = Manifold()
         val p = Penetration()

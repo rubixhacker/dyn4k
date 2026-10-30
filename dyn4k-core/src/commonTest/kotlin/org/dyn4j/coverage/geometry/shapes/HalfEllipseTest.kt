@@ -24,14 +24,35 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class HalfEllipseTest {
+val HalfEllipseTest by testSuite {
+    test("createZeroWidth") { HalfEllipseTestFixture().run { createZeroWidth() } }
+    test("createNegativeWidth") { HalfEllipseTestFixture().run { createNegativeWidth() } }
+    test("createZeroHeight") { HalfEllipseTestFixture().run { createZeroHeight() } }
+    test("createNegativeHeight") { HalfEllipseTestFixture().run { createNegativeHeight() } }
+    test("createSuccess") { HalfEllipseTestFixture().run { createSuccess() } }
+    test("contains") { HalfEllipseTestFixture().run { contains() } }
+    test("project") { HalfEllipseTestFixture().run { project() } }
+    test("getFarthest") { HalfEllipseTestFixture().run { getFarthest() } }
+    test("getAxes") { HalfEllipseTestFixture().run { getAxes() } }
+    test("getFoci") { HalfEllipseTestFixture().run { getFoci() } }
+    test("rotate") { HalfEllipseTestFixture().run { rotate() } }
+    test("translate") { HalfEllipseTestFixture().run { translate() } }
+    test("createAABB") { HalfEllipseTestFixture().run { createAABB() } }
+    test("createMass") { HalfEllipseTestFixture().run { createMass() } }
+    test("getArea") { HalfEllipseTestFixture().run { getArea() } }
+    test("getRadius") { HalfEllipseTestFixture().run { getRadius() } }
+    test("getRadiusAboveXAxisBelowEvolute") { HalfEllipseTestFixture().run { getRadiusAboveXAxisBelowEvolute() } }
+    test("copy") { HalfEllipseTestFixture().run { copy() } }
+}
+
+private class HalfEllipseTestFixture  {
     private val IDENTITY = Transform()
-    @Test
-    fun createZeroWidth() {
+fun createZeroWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		HalfEllipse(0.0, 1.0);
@@ -39,8 +60,7 @@ class HalfEllipseTest {
         }
     }
 
-    @Test
-    fun createNegativeWidth() {
+fun createNegativeWidth() {
         assertFailsWith<IllegalArgumentException> {
 
 		HalfEllipse(-1.0, 1.0);
@@ -48,8 +68,7 @@ class HalfEllipseTest {
         }
     }
 
-    @Test
-    fun createZeroHeight() {
+fun createZeroHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		HalfEllipse(1.0, 0.0);
@@ -57,8 +76,7 @@ class HalfEllipseTest {
         }
     }
 
-    @Test
-    fun createNegativeHeight() {
+fun createNegativeHeight() {
         assertFailsWith<IllegalArgumentException> {
 
 		HalfEllipse(1.0, -1.0);
@@ -66,8 +84,7 @@ class HalfEllipseTest {
         }
     }
 
-    @Test
-    fun createSuccess() {
+fun createSuccess() {
 
 		var he = HalfEllipse(1.0, 2.0);
 
@@ -79,8 +96,7 @@ class HalfEllipseTest {
 
     }
 
-    @Test
-    fun contains() {
+fun contains() {
 
 		var e = HalfEllipse(2.0, 0.5);
 		var t = Transform();
@@ -122,8 +138,7 @@ class HalfEllipseTest {
 
     }
 
-    @Test
-    fun project() {
+fun project() {
 
 		var e = HalfEllipse(2.0, 0.5);
 		var t = Transform();
@@ -161,8 +176,7 @@ class HalfEllipseTest {
 
     }
 
-    @Test
-    fun getFarthest() {
+fun getFarthest() {
 
 		var e = HalfEllipse(2.0, 0.5);
 		var t = Transform();
@@ -196,8 +210,7 @@ class HalfEllipseTest {
 
     }
 
-    @Test
-    fun getAxes() {
+fun getAxes() {
         assertFailsWith<UnsupportedOperationException> {
 
 		var e = HalfEllipse(1.0, 0.5);
@@ -206,8 +219,7 @@ class HalfEllipseTest {
         }
     }
 
-    @Test
-    fun getFoci() {
+fun getFoci() {
         assertFailsWith<UnsupportedOperationException> {
 
 		var e = HalfEllipse(1.0, 0.5);
@@ -216,8 +228,7 @@ class HalfEllipseTest {
         }
     }
 
-    @Test
-    fun rotate() {
+fun rotate() {
 
 		var e = HalfEllipse(1.0, 0.25);
 
@@ -244,8 +255,7 @@ class HalfEllipseTest {
 
     }
 
-    @Test
-    fun translate() {
+fun translate() {
 
 		var e = HalfEllipse(1.0, 0.25);
 
@@ -256,8 +266,7 @@ class HalfEllipseTest {
 
     }
 
-    @Test
-    fun createAABB() {
+fun createAABB() {
 
 		var e = HalfEllipse(1.0, 0.25);
 
@@ -316,8 +325,7 @@ class HalfEllipseTest {
 
     }
 
-    @Test
-    fun createMass() {
+fun createMass() {
 
 		var he = HalfEllipse(1.0, 0.5);
 		var mass = he.createMass(1.0);
@@ -341,16 +349,14 @@ class HalfEllipseTest {
 
     }
 
-    @Test
-    fun getArea() {
+fun getArea() {
 
 		var he = HalfEllipse(1.0, 0.5);
 		assertEquals(0.392, he.getArea(), 1e-3);
 
     }
 
-    @Test
-    fun getRadius() {
+fun getRadius() {
 
 		var he = HalfEllipse(1.0, 0.5);
 
@@ -376,8 +382,7 @@ class HalfEllipseTest {
 
     }
 
-    @Test
-    fun getRadiusAboveXAxisBelowEvolute() {
+fun getRadiusAboveXAxisBelowEvolute() {
 
 		var he = HalfEllipse(4.0, 4.0);
 		var x = 1.0;
@@ -388,8 +393,7 @@ class HalfEllipseTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var he = HalfEllipse(1.0, 1.0);
 		he.setUserData(Any());

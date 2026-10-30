@@ -1,22 +1,53 @@
 package org.dyn4j
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.random.Random
 import kotlin.test.*
 
-class UpstreamAVLTreeCoverageTest {
+val UpstreamAVLTreeCoverageTest by testSuite {
+    test("insertDuplicate") { UpstreamAVLTreeCoverageTestFixture().run { insertDuplicate() } }
+    test("insertSequential") { UpstreamAVLTreeCoverageTestFixture().run { insertSequential() } }
+    test("insertInOrder") { UpstreamAVLTreeCoverageTestFixture().run { insertInOrder() } }
+    test("insertReverseOrder") { UpstreamAVLTreeCoverageTestFixture().run { insertReverseOrder() } }
+    test("insertReverseOrderSorted") { UpstreamAVLTreeCoverageTestFixture().run { insertReverseOrderSorted() } }
+    test("insertShuffled") { UpstreamAVLTreeCoverageTestFixture().run { insertShuffled() } }
+    test("sequentialRemoval") { UpstreamAVLTreeCoverageTestFixture().run { sequentialRemoval() } }
+    test("removeRoot") { UpstreamAVLTreeCoverageTestFixture().run { removeRoot() } }
+    test("removeRootNodeAndReplaceWithRight") { UpstreamAVLTreeCoverageTestFixture().run { removeRootNodeAndReplaceWithRight() } }
+    test("random") { UpstreamAVLTreeCoverageTestFixture().run { random() } }
+    test("remove") { UpstreamAVLTreeCoverageTestFixture().run { remove() } }
+    test("removeNotFound") { UpstreamAVLTreeCoverageTestFixture().run { removeNotFound() } }
+    test("getDepth") { UpstreamAVLTreeCoverageTestFixture().run { getDepth() } }
+    test("getMinimum") { UpstreamAVLTreeCoverageTestFixture().run { getMinimum() } }
+    test("getMaximum") { UpstreamAVLTreeCoverageTestFixture().run { getMaximum() } }
+    test("isEmpty") { UpstreamAVLTreeCoverageTestFixture().run { isEmpty() } }
+    test("clear") { UpstreamAVLTreeCoverageTestFixture().run { clear() } }
+    test("contains") { UpstreamAVLTreeCoverageTestFixture().run { contains() } }
+    test("get") { UpstreamAVLTreeCoverageTestFixture().run { get() } }
+    test("size") { UpstreamAVLTreeCoverageTestFixture().run { size() } }
+    test("iterator") { UpstreamAVLTreeCoverageTestFixture().run { iterator() } }
+    test("tailIterator") { UpstreamAVLTreeCoverageTestFixture().run { tailIterator() } }
+    test("headIterator") { UpstreamAVLTreeCoverageTestFixture().run { headIterator() } }
+    test("subsetIterator") { UpstreamAVLTreeCoverageTestFixture().run { subsetIterator() } }
+    test("tailIteratorMissing") { UpstreamAVLTreeCoverageTestFixture().run { tailIteratorMissing() } }
+    test("headIteratorMissing") { UpstreamAVLTreeCoverageTestFixture().run { headIteratorMissing() } }
+    test("subsetIteratorMissing") { UpstreamAVLTreeCoverageTestFixture().run { subsetIteratorMissing() } }
+    test("goncaloMarquesIssue") { UpstreamAVLTreeCoverageTestFixture().run { goncaloMarquesIssue() } }
+    test("insertSimple") { UpstreamAVLTreeCoverageTestFixture().run { insertSimple() } }
+}
+
+private class UpstreamAVLTreeCoverageTestFixture  {
     private val VALUES = intArrayOf(10, 3, -3, 4, 0, 1, 11, 19, 6, -1, 2, 9, -4, -8, 14, -5, 7, 31, 20, 8, -15, -11, -6, 16, -40)
     private val tree = AVLTree<Int>().apply { VALUES.forEach { insert(it) } }
     private val list = VALUES.toMutableList()
 
-    @Test
-    fun insertDuplicate() {
+fun insertDuplicate() {
         assertFailsWith<IllegalArgumentException> {
             tree.insert(3)
         }
     }
 
-    @Test
-    fun insertSequential() {
+fun insertSequential() {
         var tree = AVLTree<Int>()
         for (i in 0 until VALUES.size) {
             tree.insert(VALUES[i])
@@ -27,8 +58,7 @@ class UpstreamAVLTreeCoverageTest {
         }
     }
 
-    @Test
-    fun insertInOrder() {
+fun insertInOrder() {
         var tree = AVLTree<Int>()
         list.sort()
         for (i in 0 until list.size) {
@@ -40,8 +70,7 @@ class UpstreamAVLTreeCoverageTest {
         }
     }
 
-    @Test
-    fun insertReverseOrder() {
+fun insertReverseOrder() {
         var tree = AVLTree<Int>()
         list.reverse()
         for (i in 0 until list.size) {
@@ -53,8 +82,7 @@ class UpstreamAVLTreeCoverageTest {
         }
     }
 
-    @Test
-    fun insertReverseOrderSorted() {
+fun insertReverseOrderSorted() {
         var tree = AVLTree<Int>()
         list.sort()
         list.reverse()
@@ -67,8 +95,7 @@ class UpstreamAVLTreeCoverageTest {
         }
     }
 
-    @Test
-    fun insertShuffled() {
+fun insertShuffled() {
         var tree = AVLTree<Int>()
         val javaSeed17Order = intArrayOf(
             7, -11, 10, -40, -3, 2, -15, 1, 0, -6, 11, -1, 9, 31, -5, 8, 14, 4, 20, -8, 19, 16, 6, -4, 3
@@ -82,8 +109,7 @@ class UpstreamAVLTreeCoverageTest {
         }
     }
 
-    @Test
-    fun sequentialRemoval() {
+fun sequentialRemoval() {
         tree.remove(4)
         assertEquals(VALUES.size - 1, tree.size())
         assertTrue(tree.isBalanced())
@@ -136,8 +162,7 @@ class UpstreamAVLTreeCoverageTest {
         assertFalse(tree.contains(3))
     }
 
-    @Test
-    fun removeRoot() {
+fun removeRoot() {
         tree.remove(19)
         assertEquals(VALUES.size - 1, tree.size())
         assertTrue(tree.isBalanced())
@@ -150,8 +175,7 @@ class UpstreamAVLTreeCoverageTest {
         assertFalse(tree.contains(3))
     }
 
-    @Test
-    fun removeRootNodeAndReplaceWithRight() {
+fun removeRootNodeAndReplaceWithRight() {
         tree.remove(3)
         tree.remove(-8)
         tree.remove(11)
@@ -195,8 +219,7 @@ class UpstreamAVLTreeCoverageTest {
         assertFalse(tree.contains(7))
     }
 
-    @Test
-    fun random() {
+fun random() {
         for (n in 0 until 1000) {
             var tree = AVLTree<Int>()
             for (i in 0 until VALUES.size) {
@@ -219,8 +242,7 @@ class UpstreamAVLTreeCoverageTest {
         }
     }
 
-    @Test
-    fun remove() {
+fun remove() {
         assertNotNull(tree.remove(-3))
         assertFalse(tree.contains(-3))
         assertTrue(tree.contains(-4))
@@ -253,20 +275,17 @@ class UpstreamAVLTreeCoverageTest {
         assertEquals(size - 4, tree.size())
     }
 
-    @Test
-    fun removeNotFound() {
+fun removeNotFound() {
         assertFalse(tree.remove(44))
     }
 
-    @Test
-    fun getDepth() {
+fun getDepth() {
         assertEquals(5, tree.getHeight())
         var node = tree.get(-3)
         assertEquals(2, tree.getHeight(node))
     }
 
-    @Test
-    fun getMinimum() {
+fun getMinimum() {
         assertEquals(-40, tree.getMinimum())
         var node = tree.get(10)
         assertEquals(4, tree.getMinimum(node)!!.comparable)
@@ -274,8 +293,7 @@ class UpstreamAVLTreeCoverageTest {
         assertEquals(1, tree.getMinimum(node)!!.comparable)
     }
 
-    @Test
-    fun getMaximum() {
+fun getMaximum() {
         assertEquals(31, tree.getMaximum())
         var node = tree.get(-3)
         assertEquals(-1, tree.getMaximum(node)!!.comparable)
@@ -283,15 +301,13 @@ class UpstreamAVLTreeCoverageTest {
         assertEquals(9, tree.getMaximum(node)!!.comparable)
     }
 
-    @Test
-    fun isEmpty() {
+fun isEmpty() {
         assertFalse(tree.isEmpty())
         var test = AVLTree<Int>()
         assertTrue(test.isEmpty())
     }
 
-    @Test
-    fun clear() {
+fun clear() {
         assertFalse(tree.isEmpty())
         assertEquals(VALUES.size, tree.size())
         tree.clear()
@@ -301,27 +317,23 @@ class UpstreamAVLTreeCoverageTest {
         assertEquals(null, tree.getRoot())
     }
 
-    @Test
-    fun contains() {
+fun contains() {
         assertTrue(tree.contains(9))
         assertFalse(tree.contains(-60))
     }
 
-    @Test
-    fun get() {
+fun get() {
         assertNotNull(tree.get(-3))
         assertNull(tree.get(45))
     }
 
-    @Test
-    fun size() {
+fun size() {
         assertEquals(VALUES.size, tree.size())
         var node = tree.get(-3)
         assertEquals(3, tree.size(node))
     }
 
-    @Test
-    fun iterator() {
+fun iterator() {
         var it = tree.inOrderIterator()
         var last = Int.MIN_VALUE
         while (it.hasNext()) {
@@ -343,8 +355,7 @@ class UpstreamAVLTreeCoverageTest {
         }
     }
 
-    @Test
-    fun tailIterator() {
+fun tailIterator() {
         var it = tree.tailIterator(0)
         var last = Int.MIN_VALUE
         var n = 0
@@ -359,8 +370,7 @@ class UpstreamAVLTreeCoverageTest {
         assertEquals(16, n)
     }
 
-    @Test
-    fun headIterator() {
+fun headIterator() {
         var it = tree.headIterator(6)
         var last = Int.MIN_VALUE
         var n = 0
@@ -375,8 +385,7 @@ class UpstreamAVLTreeCoverageTest {
         assertEquals(15, n)
     }
 
-    @Test
-    fun subsetIterator() {
+fun subsetIterator() {
         var it = tree.subsetIterator(1, 6)
         var last = Int.MIN_VALUE
         var n = 0
@@ -391,8 +400,7 @@ class UpstreamAVLTreeCoverageTest {
         assertEquals(5, n)
     }
 
-    @Test
-    fun tailIteratorMissing() {
+fun tailIteratorMissing() {
         var it = tree.tailIterator(5)
         var last = Int.MIN_VALUE
         var n = 0
@@ -407,8 +415,7 @@ class UpstreamAVLTreeCoverageTest {
         assertEquals(11, n)
     }
 
-    @Test
-    fun headIteratorMissing() {
+fun headIteratorMissing() {
         var it = tree.headIterator(5)
         var last = Int.MIN_VALUE
         var n = 0
@@ -423,8 +430,7 @@ class UpstreamAVLTreeCoverageTest {
         assertEquals(14, n)
     }
 
-    @Test
-    fun subsetIteratorMissing() {
+fun subsetIteratorMissing() {
         var it = tree.subsetIterator(-2, 5)
         var last = Int.MIN_VALUE
         var n = 0
@@ -439,8 +445,7 @@ class UpstreamAVLTreeCoverageTest {
         assertEquals(6, n)
     }
 
-    @Test
-    fun goncaloMarquesIssue() {
+fun goncaloMarquesIssue() {
         var tree = AVLTree<Int>()
         tree.insert(3)
         tree.insert(1)
@@ -450,8 +455,7 @@ class UpstreamAVLTreeCoverageTest {
         assertEquals(2, tree.getHeight())
     }
 
-    @Test
-    fun insertSimple() {
+fun insertSimple() {
         var tree = AVLTree<Int>()
         tree.insert(5)
         tree.insert(1)

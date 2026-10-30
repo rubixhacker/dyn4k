@@ -24,8 +24,8 @@
  */
 package org.dyn4j.coverage.dynamics.joint.modes
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.abs
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotSame
@@ -46,6 +46,19 @@ import org.dyn4j.dynamics.joint.WheelJoint
 import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
+
+val UpstreamJointModesCopyAndCoefficientsTest by testSuite {
+    test("angleCopy") { UpstreamJointModesCopyAndCoefficientsTestFixture().run { angleCopy() } }
+    test("frictionCopy") { UpstreamJointModesCopyAndCoefficientsTestFixture().run { frictionCopy() } }
+    test("motorCopy") { UpstreamJointModesCopyAndCoefficientsTestFixture().run { motorCopy() } }
+    test("pinCopy") { UpstreamJointModesCopyAndCoefficientsTestFixture().run { pinCopy() } }
+    test("pulleyCopy") { UpstreamJointModesCopyAndCoefficientsTestFixture().run { pulleyCopy() } }
+    test("weldCopy") { UpstreamJointModesCopyAndCoefficientsTestFixture().run { weldCopy() } }
+    test("wheelCopy") { UpstreamJointModesCopyAndCoefficientsTestFixture().run { wheelCopy() } }
+    test("pinComputeSpringStiffnessFrequency") { UpstreamJointModesCopyAndCoefficientsTestFixture().run { pinComputeSpringStiffnessFrequency() } }
+    test("weldComputeSpringStiffnessFrequency") { UpstreamJointModesCopyAndCoefficientsTestFixture().run { weldComputeSpringStiffnessFrequency() } }
+    test("wheelComputeSpringStiffnessFrequency") { UpstreamJointModesCopyAndCoefficientsTestFixture().run { wheelComputeSpringStiffnessFrequency() } }
+}
 
 private fun copyBody() = Body().apply {
     addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
@@ -83,8 +96,8 @@ private class WheelCoefficientProbe(first: Body, second: Body) :
     fun update() = updateSpringCoefficients()
 }
 
-class UpstreamJointModesCopyAndCoefficientsTest {
-    @Test fun angleCopy() {
+private class UpstreamJointModesCopyAndCoefficientsTestFixture  {
+fun angleCopy() {
         val first = copyBody()
         val second = copyBody()
         val joint = AngleJoint(first, second)
@@ -110,7 +123,7 @@ class UpstreamJointModesCopyAndCoefficientsTest {
         assertSame(second, joint.copy(null, second).getBody2())
     }
 
-    @Test fun frictionCopy() {
+fun frictionCopy() {
         val first = copyBody()
         val second = copyBody()
         val joint = FrictionJoint(first, second, Vector2(1.0, 1.0))
@@ -136,7 +149,7 @@ class UpstreamJointModesCopyAndCoefficientsTest {
         assertSame(second, joint.copy(null, second).getBody2())
     }
 
-    @Test fun motorCopy() {
+fun motorCopy() {
         val first = copyBody()
         val second = copyBody()
         val joint = MotorJoint(first, second)
@@ -166,7 +179,7 @@ class UpstreamJointModesCopyAndCoefficientsTest {
         assertSame(second, joint.copy(null, second).getBody2())
     }
 
-    @Test fun pinCopy() {
+fun pinCopy() {
         val body = copyBody()
         val joint = PinJoint(body, Vector2())
         joint.setOwner(Any())
@@ -194,7 +207,7 @@ class UpstreamJointModesCopyAndCoefficientsTest {
         assertSame(body, joint.copy(body).getBody())
     }
 
-    @Test fun pulleyCopy() {
+fun pulleyCopy() {
         val first = copyBody()
         val second = copyBody()
         val joint = PulleyJoint(first, second, Vector2(-2.0, 2.0), Vector2(2.0, 2.0), Vector2(-2.0, 0.0), Vector2(2.0, 0.0))
@@ -223,7 +236,7 @@ class UpstreamJointModesCopyAndCoefficientsTest {
         assertSame(second, joint.copy(null, second).getBody2())
     }
 
-    @Test fun weldCopy() {
+fun weldCopy() {
         val first = copyBody()
         val second = copyBody()
         val joint = WeldJoint(first, second, Vector2(1.0, 1.0))
@@ -254,7 +267,7 @@ class UpstreamJointModesCopyAndCoefficientsTest {
         assertSame(second, joint.copy(null, second).getBody2())
     }
 
-    @Test fun wheelCopy() {
+fun wheelCopy() {
         val first = copyBody()
         val second = copyBody()
         val joint = WheelJoint(first, second, Vector2(1.0, 2.0), Vector2(-3.0, 0.5))
@@ -292,7 +305,7 @@ class UpstreamJointModesCopyAndCoefficientsTest {
         assertSame(second, joint.copy(null, second).getBody2())
     }
 
-    @Test fun pinComputeSpringStiffnessFrequency() {
+fun pinComputeSpringStiffnessFrequency() {
         val joint = PinCoefficientProbe(copyBody())
         joint.setSpringEnabled(true)
         joint.setSpringDamperEnabled(true)
@@ -311,7 +324,7 @@ class UpstreamJointModesCopyAndCoefficientsTest {
         assertEquals(1000.0, joint.getSpringStiffness(), 1e-3)
     }
 
-    @Test fun weldComputeSpringStiffnessFrequency() {
+fun weldComputeSpringStiffnessFrequency() {
         val joint = WeldCoefficientProbe(copyBody(), copyBody())
         joint.setSpringEnabled(true)
         joint.setSpringDamperEnabled(true)
@@ -330,7 +343,7 @@ class UpstreamJointModesCopyAndCoefficientsTest {
         assertEquals(1000.0, joint.getSpringStiffness(), 1e-3)
     }
 
-    @Test fun wheelComputeSpringStiffnessFrequency() {
+fun wheelComputeSpringStiffnessFrequency() {
         val joint = WheelCoefficientProbe(copyBody(), copyBody())
         joint.setSpringEnabled(true)
         joint.setSpringDamperEnabled(true)

@@ -24,14 +24,17 @@
  */
 package org.dyn4j.coverage.epsilon
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.dyn4j.Epsilon
 
-class UpstreamEpsilonCoverageTest {
-    @Test
-    fun compute() {
+val UpstreamEpsilonCoverageTest by testSuite {
+    test("compute") { UpstreamEpsilonCoverageTestFixture().run { compute() } }
+}
+
+private class UpstreamEpsilonCoverageTestFixture  {
+fun compute() {
         assertTrue(Epsilon.E != 0.0)
         val computed = Epsilon.compute()
         assertEquals(Epsilon.E, computed)

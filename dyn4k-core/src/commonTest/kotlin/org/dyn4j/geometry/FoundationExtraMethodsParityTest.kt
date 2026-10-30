@@ -1,9 +1,14 @@
 package org.dyn4j.geometry
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 
-class FoundationExtraMethodsParityTest {
+val FoundationExtraMethodsParityTest by testSuite {
+    test("rotationKeepsFieldBasedMathAndGetterDispatch") { FoundationExtraMethodsParityTestFixture().run { rotationKeepsFieldBasedMathAndGetterDispatch() } }
+    test("transformKeepsFieldBasedFactoryAndGetterDispatch") { FoundationExtraMethodsParityTestFixture().run { transformKeepsFieldBasedFactoryAndGetterDispatch() } }
+}
+
+private class FoundationExtraMethodsParityTestFixture  {
     private class RotationExtension : Rotation() {
         init { cost = 0.0; sint = 1.0 }
 
@@ -18,8 +23,7 @@ class FoundationExtraMethodsParityTest {
         override fun getSint() = 29.0
     }
 
-    @Test
-    fun rotationKeepsFieldBasedMathAndGetterDispatch() {
+fun rotationKeepsFieldBasedMathAndGetterDispatch() {
         val rotation: Rotation = RotationExtension()
 
         assertEquals(17.0, rotation.getCost())
@@ -36,8 +40,7 @@ class FoundationExtraMethodsParityTest {
         assertEquals(1.0, transformed.y)
     }
 
-    @Test
-    fun transformKeepsFieldBasedFactoryAndGetterDispatch() {
+fun transformKeepsFieldBasedFactoryAndGetterDispatch() {
         val transform: Transform = TransformExtension()
 
         assertEquals(23.0, transform.getCost())

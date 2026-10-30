@@ -1,6 +1,6 @@
 package org.dyn4j.collision.broadphase
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
 import kotlin.test.assertSame
@@ -9,7 +9,13 @@ import org.dyn4j.geometry.AABB
 import org.dyn4j.geometry.Ray
 import org.dyn4j.geometry.Vector2
 
-class BroadphaseQueryTest {
+val BroadphaseQueryTest by testSuite {
+    test("bruteForceQueriesReturnMutablePairsAndSnapshotListCopies") { BroadphaseQueryTestFixture().run { bruteForceQueriesReturnMutablePairsAndSnapshotListCopies() } }
+    test("sapTracksUpdatedObjectsAndExposesExpandedBounds") { BroadphaseQueryTestFixture().run { sapTracksUpdatedObjectsAndExposesExpandedBounds() } }
+    test("dynamicTreeBalancesAndReturnsOverlappingPairs") { BroadphaseQueryTestFixture().run { dynamicTreeBalancesAndReturnsOverlappingPairs() } }
+}
+
+private class BroadphaseQueryTestFixture  {
     private val producer = object : AABBProducer<AABB> {
         override fun compute(item: AABB): AABB = item.copy()
         override fun compute(item: AABB, result: AABB) { result.set(item) }
@@ -18,8 +24,7 @@ class BroadphaseQueryTest {
         override fun isAllowed(first: AABB?, second: AABB?) = first !== second
     }
 
-    @Test
-    fun bruteForceQueriesReturnMutablePairsAndSnapshotListCopies() {
+fun bruteForceQueriesReturnMutablePairsAndSnapshotListCopies() {
         val broadphase = BruteForceBroadphase(filter, producer)
         val a = AABB(0.0, 0.0, 2.0, 2.0)
         val b = AABB(1.0, 1.0, 3.0, 3.0)
@@ -39,8 +44,7 @@ class BroadphaseQueryTest {
         assertEquals(listOf(a, b, c), broadphase.raycast(Ray(Vector2(-1.0, 1.6), Vector2(1.0, 0.0)), 0.0))
     }
 
-    @Test
-    fun sapTracksUpdatedObjectsAndExposesExpandedBounds() {
+fun sapTracksUpdatedObjectsAndExposesExpandedBounds() {
         val broadphase = Sap(filter, producer, StaticValueAABBExpansionMethod(0.2))
         val a = AABB(0.0, 0.0, 1.0, 1.0)
         val b = AABB(0.5, 0.5, 1.5, 1.5)
@@ -56,8 +60,7 @@ class BroadphaseQueryTest {
         assertEquals(1, broadphase.detect(false).size)
     }
 
-    @Test
-    fun dynamicTreeBalancesAndReturnsOverlappingPairs() {
+fun dynamicTreeBalancesAndReturnsOverlappingPairs() {
         val broadphase = DynamicAABBTree(filter, producer, NullAABBExpansionMethod())
         val a = AABB(0.0, 0.0, 2.0, 2.0)
         val b = AABB(1.0, 1.0, 3.0, 3.0)

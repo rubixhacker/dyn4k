@@ -24,6 +24,7 @@
  */
 package org.dyn4j.coverage.simulation
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.BodyFixture
 import org.dyn4j.dynamics.joint.AngleJoint
@@ -31,13 +32,17 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class AngleJointSimulationTest {
-    @Test
-    fun simpleLinkage() {
+val AngleJointSimulationTest by testSuite {
+    test("simpleLinkage") { AngleJointSimulationTestFixture().run { simpleLinkage() } }
+    test("withLimitsHitUpper") { AngleJointSimulationTestFixture().run { withLimitsHitUpper() } }
+    test("withLimitsHitLower") { AngleJointSimulationTestFixture().run { withLimitsHitLower() } }
+}
+
+private class AngleJointSimulationTestFixture  {
+fun simpleLinkage() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()
@@ -77,8 +82,7 @@ class AngleJointSimulationTest {
         assertEquals(Vector2(0.0, 0.0), aj.getReactionForce(invdt))
         assertEquals(0.514, aj.getReactionTorque(invdt), 1e-3)
     }
-    @Test
-    fun withLimitsHitUpper() {
+fun withLimitsHitUpper() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()
@@ -107,8 +111,7 @@ class AngleJointSimulationTest {
         assertEquals(0.0, g.getAngularVelocity(), 1e-9)
         assertEquals(0.0, b.getAngularVelocity(), 1e-9)
     }
-    @Test
-    fun withLimitsHitLower() {
+fun withLimitsHitLower() {
         val w = World<Body>()
         w.setGravity(Vector2(0.0, 0.0))
         var g = Body()

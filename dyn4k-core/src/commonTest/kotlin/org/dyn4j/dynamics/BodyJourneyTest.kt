@@ -1,6 +1,6 @@
 package org.dyn4j.dynamics
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -14,9 +14,18 @@ import org.dyn4j.geometry.Vector2
 import org.dyn4j.exception.ArgumentNullException
 import org.dyn4j.exception.ValueOutOfRangeException
 
-class BodyJourneyTest {
-    @Test
-    fun forceAndFixtureStateIsLive() {
+val BodyJourneyTest by testSuite {
+    test("forceAndFixtureStateIsLive") { BodyJourneyTestFixture().run { forceAndFixtureStateIsLive() } }
+    test("accumulatedForceCallbackAndDampingFollowTheStep") { BodyJourneyTestFixture().run { accumulatedForceCallbackAndDampingFollowTheStep() } }
+    test("internalFieldReadsPreserveSubclassDispatch") { BodyJourneyTestFixture().run { internalFieldReadsPreserveSubclassDispatch() } }
+    test("massAndRestStateTrackFixtureChanges") { BodyJourneyTestFixture().run { massAndRestStateTrackFixtureChanges() } }
+    test("settingsAndTimestepExposeValidatedState") { BodyJourneyTestFixture().run { settingsAndTimestepExposeValidatedState() } }
+    test("restThresholdsCallBothOverriddenGetters") { BodyJourneyTestFixture().run { restThresholdsCallBothOverriddenGetters() } }
+    test("nullShapeOverloadsReportTheBaselineError") { BodyJourneyTestFixture().run { nullShapeOverloadsReportTheBaselineError() } }
+}
+
+private class BodyJourneyTestFixture  {
+fun forceAndFixtureStateIsLive() {
         val body = Body()
         val fixtures = body.getFixtures()
         val fixture = body.addFixture(Circle(1.0))
@@ -32,8 +41,7 @@ class BodyJourneyTest {
         assertTrue(body.getLinearVelocity().x > 0.0)
     }
 
-    @Test
-    fun accumulatedForceCallbackAndDampingFollowTheStep() {
+fun accumulatedForceCallbackAndDampingFollowTheStep() {
         val body = Body()
         body.addFixture(Circle(1.0))
         body.setMass(MassType.NORMAL)
@@ -56,8 +64,7 @@ class BodyJourneyTest {
         assertEquals(0.0, body.getAccumulatedForce().x)
     }
 
-    @Test
-    fun internalFieldReadsPreserveSubclassDispatch() {
+fun internalFieldReadsPreserveSubclassDispatch() {
         val fixture = object : BodyFixture(Circle(1.0)) {
             override fun getDensity() = 0.0
         }
@@ -92,8 +99,7 @@ class BodyJourneyTest {
         assertEquals(0.5, force.callbackTime)
     }
 
-    @Test
-    fun massAndRestStateTrackFixtureChanges() {
+fun massAndRestStateTrackFixtureChanges() {
         val body = Body()
         assertTrue(body.isStatic())
         val fixture = body.addFixture(Circle(1.0))
@@ -112,8 +118,7 @@ class BodyJourneyTest {
         assertTrue(body.isStatic())
     }
 
-    @Test
-    fun settingsAndTimestepExposeValidatedState() {
+fun settingsAndTimestepExposeValidatedState() {
         val settings = Settings()
         settings.setMaximumTranslation(3.0)
         assertEquals(9.0, settings.getMaximumTranslationSquared())
@@ -133,8 +138,7 @@ class BodyJourneyTest {
         assertEquals(0.25, step.getDeltaTime())
     }
 
-    @Test
-    fun restThresholdsCallBothOverriddenGetters() {
+fun restThresholdsCallBothOverriddenGetters() {
         val body = Body()
         body.addFixture(Circle(1.0))
         body.setMass(MassType.NORMAL)
@@ -155,8 +159,7 @@ class BodyJourneyTest {
         assertEquals("LA", calls.toString())
     }
 
-    @Test
-    fun nullShapeOverloadsReportTheBaselineError() {
+fun nullShapeOverloadsReportTheBaselineError() {
         val body = Body()
         assertEquals("convex cannot be null", assertFailsWith<ArgumentNullException> { body.addFixture(null as Convex?) }.message)
         assertEquals("convex cannot be null", assertFailsWith<ArgumentNullException> { body.addFixture(null, 1.0) }.message)

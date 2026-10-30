@@ -24,19 +24,23 @@
  */
 package org.dyn4j.coverage.simulation
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.joint.PinJoint
 import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-class PinJointSimulationTest {
-    @Test
-    fun fixedLinearVelocity() {
+val PinJointSimulationTest by testSuite {
+    test("fixedLinearVelocity") { PinJointSimulationTestFixture().run { fixedLinearVelocity() } }
+    test("noSpringDamper") { PinJointSimulationTestFixture().run { noSpringDamper() } }
+}
+
+private class PinJointSimulationTestFixture  {
+fun fixedLinearVelocity() {
         val w = World<Body>()
         var body = Body()
         body.addFixture(Geometry.createCircle(1.0))
@@ -52,8 +56,7 @@ class PinJointSimulationTest {
         assertTrue(body.getTransform().getRotationAngle() != 0.0)
         assertEquals(0.0, pj.getReactionTorque(invdt))
     }
-    @Test
-    fun noSpringDamper() {
+fun noSpringDamper() {
         val w = World<Body>()
         var body = Body()
         body.addFixture(Geometry.createCircle(1.0))

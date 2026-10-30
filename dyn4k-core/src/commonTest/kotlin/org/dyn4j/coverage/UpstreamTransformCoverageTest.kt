@@ -24,14 +24,29 @@
  */
 package org.dyn4j.coverage
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.Epsilon
 import org.dyn4j.geometry.*
 import kotlin.math.*
 import kotlin.test.*
 
-class UpstreamTransformCoverageTest {
-    @Test
-    fun identity() {
+val UpstreamTransformCoverageTest by testSuite {
+    test("identity") { UpstreamTransformCoverageTestFixture().run { identity() } }
+    test("translate") { UpstreamTransformCoverageTestFixture().run { translate() } }
+    test("rotate") { UpstreamTransformCoverageTestFixture().run { rotate() } }
+    test("copy") { UpstreamTransformCoverageTestFixture().run { copy() } }
+    test("getTransformed") { UpstreamTransformCoverageTestFixture().run { getTransformed() } }
+    test("transform") { UpstreamTransformCoverageTestFixture().run { transform() } }
+    test("setTransform") { UpstreamTransformCoverageTestFixture().run { setTransform() } }
+    test("setTranslation") { UpstreamTransformCoverageTestFixture().run { setTranslation() } }
+    test("setRotation") { UpstreamTransformCoverageTestFixture().run { setRotation() } }
+    test("lerp") { UpstreamTransformCoverageTestFixture().run { lerp() } }
+    test("values") { UpstreamTransformCoverageTestFixture().run { values() } }
+    test("getTranslationRotationTransform") { UpstreamTransformCoverageTestFixture().run { getTranslationRotationTransform() } }
+}
+
+private class UpstreamTransformCoverageTestFixture  {
+fun identity() {
         var t = Transform()
         t.translate(5.0, 2.0)
         t.identity()
@@ -39,8 +54,7 @@ class UpstreamTransformCoverageTest {
         assertEquals(0.0, t.getTranslationY())
     }
 
-    @Test
-    fun translate() {
+fun translate() {
         var t = Transform()
         t.translate(2.0, -1.0)
         t.translate(4.0, 4.0)
@@ -48,8 +62,7 @@ class UpstreamTransformCoverageTest {
         assertEquals(3.000, t.getTranslationY(), 1.0e-3)
     }
 
-    @Test
-    fun rotate() {
+fun rotate() {
         var t = Transform()
         t.rotate(radians(30.0))
         assertEquals(radians(30.0), t.getRotationAngle(), 1.0e-3)
@@ -76,8 +89,7 @@ class UpstreamTransformCoverageTest {
         assertEquals(-6.656, v.y, 1.0e-3)
     }
 
-    @Test
-    fun copy() {
+fun copy() {
         var t = Transform()
         t.translate(2.0, -1.0)
         t.rotate(radians(20.0), -2.0, 6.0)
@@ -88,8 +100,7 @@ class UpstreamTransformCoverageTest {
         assertEquals(t.getTranslationY(), tc.getTranslationY())
     }
 
-    @Test
-    fun getTransformed() {
+fun getTransformed() {
         var t = Transform()
         t.translate(2.0, 1.0)
         t.rotate(radians(25.0), 1.0, -1.0)
@@ -127,8 +138,7 @@ class UpstreamTransformCoverageTest {
         assertTrue(vt.equals(v))
     }
 
-    @Test
-    fun transform() {
+fun transform() {
         var t = Transform()
         t.translate(2.0, 1.0)
         t.rotate(radians(25.0), 1.0, -1.0)
@@ -155,8 +165,7 @@ class UpstreamTransformCoverageTest {
         assertTrue(v.equals(v))
     }
 
-    @Test
-    fun setTransform() {
+fun setTransform() {
         var tx = Transform()
         tx.rotate(radians(30.0))
         tx.translate(2.0, 0.5)
@@ -169,8 +178,7 @@ class UpstreamTransformCoverageTest {
         assertEquals(tx.getTranslationY(), tx2.getTranslationY())
     }
 
-    @Test
-    fun setTranslation() {
+fun setTranslation() {
         var tx = Transform()
         tx.translate(1.0, 2.0)
         tx.rotate(radians(45.0))
@@ -192,8 +200,7 @@ class UpstreamTransformCoverageTest {
         assertEquals(radians(45.000), tx.getRotationAngle(), 1.0e-3)
     }
 
-    @Test
-    fun setRotation() {
+fun setRotation() {
         var tx = Transform()
         tx.rotate(radians(45.0))
         tx.translate(1.0, 0.0)
@@ -207,8 +214,7 @@ class UpstreamTransformCoverageTest {
         assertEquals(0.0, tx.getTranslationY())
     }
 
-    @Test
-    fun lerp() {
+fun lerp() {
         var p = Vector2()
         var start = Transform()
         start.translate(1.0, 0.0)
@@ -249,8 +255,7 @@ class UpstreamTransformCoverageTest {
         assertEquals(0.0, start.getTranslationY(), 1.0e-3)
     }
 
-    @Test
-    fun values() {
+fun values() {
         var t = Transform()
         t.translate(2.0, -1.0)
         var values = t.getValues()
@@ -262,8 +267,7 @@ class UpstreamTransformCoverageTest {
         assertEquals(-1.0, values[5])
     }
 
-    @Test
-    fun getTranslationRotationTransform() {
+fun getTranslationRotationTransform() {
         var t = Transform()
         t.rotate(radians(30.0))
         t.translate(2.0, -1.0)

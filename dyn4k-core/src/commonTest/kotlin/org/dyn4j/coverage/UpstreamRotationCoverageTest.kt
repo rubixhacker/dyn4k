@@ -24,14 +24,36 @@
  */
 package org.dyn4j.coverage
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.Epsilon
 import org.dyn4j.geometry.*
 import kotlin.math.*
 import kotlin.test.*
 
-class UpstreamRotationCoverageTest {
-    @Test
-    fun create() {
+val UpstreamRotationCoverageTest by testSuite {
+    test("create") { UpstreamRotationCoverageTestFixture().run { create() } }
+    test("testIsUnit") { UpstreamRotationCoverageTestFixture().run { testIsUnit() } }
+    test("copy") { UpstreamRotationCoverageTestFixture().run { copy() } }
+    test("equals") { UpstreamRotationCoverageTestFixture().run { equals() } }
+    test("set") { UpstreamRotationCoverageTestFixture().run { set() } }
+    test("get") { UpstreamRotationCoverageTestFixture().run { get() } }
+    test("toAngle") { UpstreamRotationCoverageTestFixture().run { toAngle() } }
+    test("toVector") { UpstreamRotationCoverageTestFixture().run { toVector() } }
+    test("dot") { UpstreamRotationCoverageTestFixture().run { dot() } }
+    test("cross") { UpstreamRotationCoverageTestFixture().run { cross() } }
+    test("isIdentity") { UpstreamRotationCoverageTestFixture().run { isIdentity() } }
+    test("inverse") { UpstreamRotationCoverageTestFixture().run { inverse() } }
+    test("rotate") { UpstreamRotationCoverageTestFixture().run { rotate() } }
+    test("getRotated") { UpstreamRotationCoverageTestFixture().run { getRotated() } }
+    test("compare") { UpstreamRotationCoverageTestFixture().run { compare() } }
+    test("getRotationBetween") { UpstreamRotationCoverageTestFixture().run { getRotationBetween() } }
+    test("getNormalizedAngle") { UpstreamRotationCoverageTestFixture().run { getNormalizedAngle() } }
+    test("getShortestDistance") { UpstreamRotationCoverageTestFixture().run { getShortestDistance() } }
+    test("isAngleBetween") { UpstreamRotationCoverageTestFixture().run { isAngleBetween() } }
+}
+
+private class UpstreamRotationCoverageTestFixture  {
+fun create() {
         var r1 = Rotation()
         assertEquals(1.0, r1.getCost(), 1.0e-6)
         assertEquals(0.0, r1.getSint(), 1.0e-6)
@@ -90,16 +112,14 @@ class UpstreamRotationCoverageTest {
         assertEquals(sin(radians(315.0)), r315.getSint(), 1.0e-6)
     }
 
-    @Test
-    fun testIsUnit() {
+fun testIsUnit() {
         for (i in 0 until 1000) {
             var r = Rotation(radians(i.toDouble()))
             assertEquals(1.0, r.dot(r), 1.0e-6)
         }
     }
 
-    @Test
-    fun copy() {
+fun copy() {
         var r = RawRotation(1.0, 3.0)
         var rc = r.copy()
         assertFalse(r === rc)
@@ -107,8 +127,7 @@ class UpstreamRotationCoverageTest {
         assertEquals(r.getSint(), rc.getSint())
     }
 
-    @Test
-    fun equals() {
+fun equals() {
         var r = Rotation(2.0)
         assertTrue(r.equals(r))
         assertTrue(r.equals(r.copy()))
@@ -128,8 +147,7 @@ class UpstreamRotationCoverageTest {
         assertFalse(r.equals(2.0 + 1.0e-2, 1.0e-4))
     }
 
-    @Test
-    fun set() {
+fun set() {
         var r = Rotation(2.0)
         var r2 = Rotation(3.0)
         r.set(r2)
@@ -146,15 +164,13 @@ class UpstreamRotationCoverageTest {
         assertEquals(0.0, r.getSint(), 1.0e-6)
     }
 
-    @Test
-    fun get() {
+fun get() {
         var r = Rotation(1.5)
         assertEquals(cos(1.5), r.getCost())
         assertEquals(sin(1.5), r.getSint())
     }
 
-    @Test
-    fun toAngle() {
+fun toAngle() {
         var r = RawRotation(0.0, -1.0)
         assertEquals(-PI / 2.0, r.toRadians(), 1.0e-6)
         assertEquals(-90.0, r.toDegrees(), 1.0e-6)
@@ -163,8 +179,7 @@ class UpstreamRotationCoverageTest {
         assertEquals(45.0, r.toDegrees(), 1.0e-6)
     }
 
-    @Test
-    fun toVector() {
+fun toVector() {
         var r = Rotation(radians(30.0))
         var v1 = r.toVector()
         var v2 = r.toVector(2.5)
@@ -174,8 +189,7 @@ class UpstreamRotationCoverageTest {
         assertEquals(2.5, v2.getMagnitude(), 1.0e-6)
     }
 
-    @Test
-    fun dot() {
+fun dot() {
         var r1 = RawRotation(1.0, 0.0)
         var r2 = RawRotation(0.0, 1.0)
         var v = Vector2(0.0, -5.0)
@@ -186,8 +200,7 @@ class UpstreamRotationCoverageTest {
         assertEquals(1.0, r2.dot(r2), 1.0e-6)
     }
 
-    @Test
-    fun cross() {
+fun cross() {
         var r1 = RawRotation(1.0, 0.0)
         var r2 = RawRotation(0.0, 1.0)
         var v = Vector2(-5.0, 0.0)
@@ -198,8 +211,7 @@ class UpstreamRotationCoverageTest {
         assertEquals(0.0, r2.cross(r2), 1.0e-6)
     }
 
-    @Test
-    fun isIdentity() {
+fun isIdentity() {
         var r = Rotation()
         assertTrue(r.isIdentity())
         assertTrue(r.isIdentity(1.0e-6))
@@ -211,8 +223,7 @@ class UpstreamRotationCoverageTest {
         assertTrue(r.isIdentity(1.0e-4))
     }
 
-    @Test
-    fun inverse() {
+fun inverse() {
         var r1 = Rotation(0.0)
         r1.inverse()
         assertEquals(1.0, r1.getCost(), 1.0e-6)
@@ -230,8 +241,7 @@ class UpstreamRotationCoverageTest {
         assertEquals(r3, r2)
     }
 
-    @Test
-    fun rotate() {
+fun rotate() {
         var r1 = Rotation(radians(0.0))
         r1.rotate(radians(90.0))
         assertEquals(0.0, r1.getCost(), 1.0e-6)
@@ -278,8 +288,7 @@ class UpstreamRotationCoverageTest {
         assertEquals(0.259, r3.getSint(), 1.0e-3)
     }
 
-    @Test
-    fun getRotated() {
+fun getRotated() {
         lateinit var temp: Rotation
         var r1 = Rotation(radians(0.0))
         temp = r1.getRotated(radians(90.0))
@@ -321,8 +330,7 @@ class UpstreamRotationCoverageTest {
         assertEquals(0.259, temp.getSint(), 1.0e-3)
     }
 
-    @Test
-    fun compare() {
+fun compare() {
         var r1 = Rotation(radians(10.0))
         var r2 = Rotation(radians(100.0))
         var r3 = Rotation(radians(100.0))
@@ -346,8 +354,7 @@ class UpstreamRotationCoverageTest {
         assertEquals(-1, r4.compare(v1))
     }
 
-    @Test
-    fun getRotationBetween() {
+fun getRotationBetween() {
         var r1 = Rotation(radians(10.0))
         var r2 = Rotation(radians(100.0))
         var r3 = Rotation(radians(100.0))
@@ -366,8 +373,7 @@ class UpstreamRotationCoverageTest {
         assertEquals(radians(-15.0), r4.getRotationBetween(v1).toRadians(), 1.0e-6)
     }
 
-    @Test
-    fun getNormalizedAngle() {
+fun getNormalizedAngle() {
         var data = arrayOf(
 
             doubleArrayOf(0.0, 0.0),
@@ -394,8 +400,7 @@ class UpstreamRotationCoverageTest {
         }
     }
 
-    @Test
-    fun getShortestDistance() {
+fun getShortestDistance() {
         var testCases = arrayOf(
 
             doubleArrayOf(0.0, 0.0, 0.0),
@@ -426,8 +431,7 @@ class UpstreamRotationCoverageTest {
         }
     }
 
-    @Test
-    fun isAngleBetween() {
+fun isAngleBetween() {
         var data = arrayOf(
             doubleArrayOf(-30.0, 30.0, 10.0),
             doubleArrayOf(0.0, 30.0, 10.0),

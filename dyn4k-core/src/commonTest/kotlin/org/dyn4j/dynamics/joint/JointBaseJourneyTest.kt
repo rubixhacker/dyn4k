@@ -1,6 +1,6 @@
 package org.dyn4j.dynamics.joint
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -17,9 +17,15 @@ import org.dyn4j.exception.NullElementException
 import org.dyn4j.exception.SameObjectException
 import org.dyn4j.geometry.Vector2
 
-class JointBaseJourneyTest {
-    @Test
-    fun pairedJointExposesBodiesThroughReadOnlyIdentityPreservingView() {
+val JointBaseJourneyTest by testSuite {
+    test("pairedJointExposesBodiesThroughReadOnlyIdentityPreservingView") { JointBaseJourneyTestFixture().run { pairedJointExposesBodiesThroughReadOnlyIdentityPreservingView() } }
+    test("pairedJointCopyAndCollisionStateFollowBaseline") { JointBaseJourneyTestFixture().run { pairedJointCopyAndCollisionStateFollowBaseline() } }
+    test("singleJointKeepsItsBodyAndCopiesOnlyOnRequest") { JointBaseJourneyTestFixture().run { singleJointKeepsItsBodyAndCopiesOnlyOnRequest() } }
+    test("abstractJointAcceptsListsAndKeepsTheUnmodifiableViewLive") { JointBaseJourneyTestFixture().run { abstractJointAcceptsListsAndKeepsTheUnmodifiableViewLive() } }
+}
+
+private class JointBaseJourneyTestFixture  {
+fun pairedJointExposesBodiesThroughReadOnlyIdentityPreservingView() {
         val first = Body()
         val second = Body()
         val joint: Joint<Body> = TestPair(first, second)
@@ -39,8 +45,7 @@ class JointBaseJourneyTest {
         assertTrue(joint.isEnabled())
     }
 
-    @Test
-    fun pairedJointCopyAndCollisionStateFollowBaseline() {
+fun pairedJointCopyAndCollisionStateFollowBaseline() {
         val first = Body()
         val second = Body()
         val joint = TestPair(first, second)
@@ -65,8 +70,7 @@ class JointBaseJourneyTest {
         assertFailsWith<SameObjectException> { TestPair(first, first) }
     }
 
-    @Test
-    fun singleJointKeepsItsBodyAndCopiesOnlyOnRequest() {
+fun singleJointKeepsItsBodyAndCopiesOnlyOnRequest() {
         val body = Body()
         val joint = TestSingle(body)
         assertSame(body, joint.getBody())
@@ -82,8 +86,7 @@ class JointBaseJourneyTest {
         assertFailsWith<NullElementException> { TestPair(null, Body()) }
     }
 
-    @Test
-    fun abstractJointAcceptsListsAndKeepsTheUnmodifiableViewLive() {
+fun abstractJointAcceptsListsAndKeepsTheUnmodifiableViewLive() {
         val first = Body()
         val second = Body()
         val source = mutableListOf(first)

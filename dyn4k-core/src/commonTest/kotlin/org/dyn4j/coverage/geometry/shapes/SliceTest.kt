@@ -24,14 +24,36 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class SliceTest {
+val SliceTest by testSuite {
+    test("createZeroRadius") { SliceTestFixture().run { createZeroRadius() } }
+    test("createNegativeRadius") { SliceTestFixture().run { createNegativeRadius() } }
+    test("createZeroTheta") { SliceTestFixture().run { createZeroTheta() } }
+    test("createNegativeTheta") { SliceTestFixture().run { createNegativeTheta() } }
+    test("createSuccess") { SliceTestFixture().run { createSuccess() } }
+    test("contains") { SliceTestFixture().run { contains() } }
+    test("project") { SliceTestFixture().run { project() } }
+    test("getFarthest") { SliceTestFixture().run { getFarthest() } }
+    test("getAxes") { SliceTestFixture().run { getAxes() } }
+    test("getFoci") { SliceTestFixture().run { getFoci() } }
+    test("rotate") { SliceTestFixture().run { rotate() } }
+    test("translate") { SliceTestFixture().run { translate() } }
+    test("createAABB") { SliceTestFixture().run { createAABB() } }
+    test("sliceRadius") { SliceTestFixture().run { sliceRadius() } }
+    test("createMass") { SliceTestFixture().run { createMass() } }
+    test("getArea") { SliceTestFixture().run { getArea() } }
+    test("getRadiusAtPoint") { SliceTestFixture().run { getRadiusAtPoint() } }
+    test("getRotation") { SliceTestFixture().run { getRotation() } }
+    test("copy") { SliceTestFixture().run { copy() } }
+}
+
+private class SliceTestFixture  {
     private val IDENTITY = Transform()
-    @Test
-    fun createZeroRadius() {
+fun createZeroRadius() {
         assertFailsWith<IllegalArgumentException> {
 
 		Slice(0.0, Math.toRadians(50));
@@ -39,8 +61,7 @@ class SliceTest {
         }
     }
 
-    @Test
-    fun createNegativeRadius() {
+fun createNegativeRadius() {
         assertFailsWith<IllegalArgumentException> {
 
 		Slice(-1.0, Math.toRadians(50));
@@ -48,8 +69,7 @@ class SliceTest {
         }
     }
 
-    @Test
-    fun createZeroTheta() {
+fun createZeroTheta() {
         assertFailsWith<IllegalArgumentException> {
 
 		Slice(1.0, 0.0);
@@ -57,8 +77,7 @@ class SliceTest {
         }
     }
 
-    @Test
-    fun createNegativeTheta() {
+fun createNegativeTheta() {
         assertFailsWith<IllegalArgumentException> {
 
 		Slice(1.0, -Math.toRadians(50));
@@ -66,8 +85,7 @@ class SliceTest {
         }
     }
 
-    @Test
-    fun createSuccess() {
+fun createSuccess() {
 
 		var slice = Slice(1.0, Math.toRadians(50));
 
@@ -77,8 +95,7 @@ class SliceTest {
 
     }
 
-    @Test
-    fun contains() {
+fun contains() {
 
 		var e = Slice(1.0, Math.toRadians(50));
 		var t = Transform();
@@ -99,8 +116,7 @@ class SliceTest {
 
     }
 
-    @Test
-    fun project() {
+fun project() {
 
 		var e = Slice(1.0, Math.toRadians(50));
 		var t = Transform();
@@ -134,8 +150,7 @@ class SliceTest {
 
     }
 
-    @Test
-    fun getFarthest() {
+fun getFarthest() {
 
 		var e = Slice(1.0, Math.toRadians(50));
 		var t = Transform();
@@ -169,8 +184,7 @@ class SliceTest {
 
     }
 
-    @Test
-    fun getAxes() {
+fun getAxes() {
 
 		var e = Slice(1.0, Math.toRadians(50));
 
@@ -189,8 +203,7 @@ class SliceTest {
 
     }
 
-    @Test
-    fun getFoci() {
+fun getFoci() {
 
 		var e = Slice(1.0, Math.toRadians(50));
 		var foci = e.getFoci(IDENTITY);
@@ -202,8 +215,7 @@ class SliceTest {
 
     }
 
-    @Test
-    fun rotate() {
+fun rotate() {
 
 		var e = Slice(1.0, Math.toRadians(50));
 
@@ -224,8 +236,7 @@ class SliceTest {
 
     }
 
-    @Test
-    fun translate() {
+fun translate() {
 
 		var e = Slice(1.0, Math.toRadians(50));
 
@@ -236,8 +247,7 @@ class SliceTest {
 
     }
 
-    @Test
-    fun createAABB() {
+fun createAABB() {
 
 		var e = Slice(1.0, Math.toRadians(50));
 
@@ -265,8 +275,7 @@ class SliceTest {
 
     }
 
-    @Test
-    fun sliceRadius() {
+fun sliceRadius() {
 
 		var e = Slice(1.0, Math.toRadians(50));
 		assertEquals(1.000, e.getSliceRadius(), 1.0e-3);
@@ -275,8 +284,7 @@ class SliceTest {
 
     }
 
-    @Test
-    fun createMass() {
+fun createMass() {
 
 		var s = Slice(0.5, Math.toRadians(30));
 		var mass = s.createMass(1.0);
@@ -308,16 +316,14 @@ class SliceTest {
 
     }
 
-    @Test
-    fun getArea() {
+fun getArea() {
 
 		var s = Slice(0.5, Math.toRadians(30));
 		assertEquals(0.065, s.getArea(), 1.0e-3);
 
     }
 
-    @Test
-    fun getRadiusAtPoint() {
+fun getRadiusAtPoint() {
 
 		var s = Slice(0.5, Math.toRadians(30));
 		assertEquals(0.329, s.getRadius(s.getCenter()), 1e-3);
@@ -326,8 +332,7 @@ class SliceTest {
 
     }
 
-    @Test
-    fun getRotation() {
+fun getRotation() {
 
 		var s = Slice(0.5, Math.toRadians(30));
 		assertNotNull(s.getRotation());
@@ -343,8 +348,7 @@ class SliceTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var slice = Slice(1.0, Math.toRadians(45));
 		slice.setUserData(Any());

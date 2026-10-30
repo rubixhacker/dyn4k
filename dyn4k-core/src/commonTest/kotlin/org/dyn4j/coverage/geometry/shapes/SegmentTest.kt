@@ -24,14 +24,39 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class SegmentTest {
+val SegmentTest by testSuite {
+    test("createNullPoint1") { SegmentTestFixture().run { createNullPoint1() } }
+    test("createNullPoint2") { SegmentTestFixture().run { createNullPoint2() } }
+    test("createCoincident") { SegmentTestFixture().run { createCoincident() } }
+    test("creatSuccess") { SegmentTestFixture().run { creatSuccess() } }
+    test("getLength") { SegmentTestFixture().run { getLength() } }
+    test("getLocation") { SegmentTestFixture().run { getLocation() } }
+    test("getPointClosest") { SegmentTestFixture().run { getPointClosest() } }
+    test("getAxes") { SegmentTestFixture().run { getAxes() } }
+    test("getFoci") { SegmentTestFixture().run { getFoci() } }
+    test("contains") { SegmentTestFixture().run { contains() } }
+    test("containsRadius") { SegmentTestFixture().run { containsRadius() } }
+    test("project") { SegmentTestFixture().run { project() } }
+    test("getFarthest") { SegmentTestFixture().run { getFarthest() } }
+    test("rotate") { SegmentTestFixture().run { rotate() } }
+    test("translate") { SegmentTestFixture().run { translate() } }
+    test("createAABB") { SegmentTestFixture().run { createAABB() } }
+    test("getLineIntersection") { SegmentTestFixture().run { getLineIntersection() } }
+    test("getSegmentIntersection") { SegmentTestFixture().run { getSegmentIntersection() } }
+    test("createMass") { SegmentTestFixture().run { createMass() } }
+    test("getArea") { SegmentTestFixture().run { getArea() } }
+    test("getNormals") { SegmentTestFixture().run { getNormals() } }
+    test("copy") { SegmentTestFixture().run { copy() } }
+}
+
+private class SegmentTestFixture  {
     private val IDENTITY = Transform()
-    @Test
-    fun createNullPoint1() {
+fun createNullPoint1() {
         assertFailsWith<NullPointerException> {
 
 		Segment(null, Vector2());
@@ -39,8 +64,7 @@ class SegmentTest {
         }
     }
 
-    @Test
-    fun createNullPoint2() {
+fun createNullPoint2() {
         assertFailsWith<NullPointerException> {
 
 		Segment(Vector2(), null);
@@ -48,8 +72,7 @@ class SegmentTest {
         }
     }
 
-    @Test
-    fun createCoincident() {
+fun createCoincident() {
         assertFailsWith<IllegalArgumentException> {
 
 		Segment(Vector2(), Vector2());
@@ -57,8 +80,7 @@ class SegmentTest {
         }
     }
 
-    @Test
-    fun creatSuccess() {
+fun creatSuccess() {
 
 		var s = Segment(
 			Vector2(0.0, 1.0),
@@ -75,8 +97,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun getLength() {
+fun getLength() {
 
 		var s = Segment(
 			Vector2(0.0, 1.0),
@@ -87,8 +108,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun getLocation() {
+fun getLocation() {
 
 		var loc = Segment.getLocation(Vector2(1.0, 1.0), Vector2(), Vector2());
 		assertEquals(0.000, loc, 1.0e-3);
@@ -114,8 +134,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun getPointClosest() {
+fun getPointClosest() {
 
 		var pt = Vector2(1.0, -1.0);
 
@@ -165,8 +184,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun getAxes() {
+fun getAxes() {
 
 		var s = Segment(
 			Vector2(0.0, 1.0),
@@ -208,8 +226,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun getFoci() {
+fun getFoci() {
 
 		var s = Segment(
 			Vector2(0.0, 1.0),
@@ -222,8 +239,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun contains() {
+fun contains() {
 
 		var s = Segment(
 			Vector2(0.0, 1.0),
@@ -238,8 +254,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun containsRadius() {
+fun containsRadius() {
 
 		var s = Segment(
 				Vector2(1.0, 1.0),
@@ -255,8 +270,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun project() {
+fun project() {
 
 		var s = Segment(
 			Vector2(0.0, 1.0),
@@ -292,8 +306,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun getFarthest() {
+fun getFarthest() {
 
 		var s = Segment(
 			Vector2(0.0, 1.0),
@@ -324,8 +337,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun rotate() {
+fun rotate() {
 
 		var s = Segment(
 			Vector2(0.0, 0.0),
@@ -341,8 +353,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun translate() {
+fun translate() {
 
 		var s = Segment(
 			Vector2(0.0, 0.0),
@@ -357,8 +368,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun createAABB() {
+fun createAABB() {
 
 		var s = Segment(
 			Vector2(0.0, 0.0),
@@ -388,8 +398,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun getLineIntersection() {
+fun getLineIntersection() {
 
 		var p = Segment.getLineIntersection(
 				Vector2(-1.0, -1.0), Vector2(2.0, 0.0),
@@ -468,8 +477,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun getSegmentIntersection() {
+fun getSegmentIntersection() {
 
 		var p = Segment.getSegmentIntersection(
 				Vector2(-3.0, -1.0), Vector2(3.0, 1.0),
@@ -652,8 +660,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun createMass() {
+fun createMass() {
 
 		var s = Segment(Vector2(-1.0, 0.0), Vector2(1.0, 0.5));
 		var m = s.createMass(1.0);
@@ -673,8 +680,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun getArea() {
+fun getArea() {
 
 		var s = Segment(Vector2(-1.0, 0.0), Vector2(1.0, 0.5));
 
@@ -682,8 +688,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun getNormals() {
+fun getNormals() {
 
 		var p = Segment(
 				Vector2(0.0, 1.0),
@@ -708,8 +713,7 @@ class SegmentTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var seg = Segment(
 				Vector2(0.0, 1.0),

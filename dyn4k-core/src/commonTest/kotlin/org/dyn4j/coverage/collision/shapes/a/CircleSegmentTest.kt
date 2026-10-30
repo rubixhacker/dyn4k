@@ -25,7 +25,7 @@
 
 package org.dyn4j.coverage.collision.shapes.a
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -39,7 +39,14 @@ import org.dyn4j.collision.narrowphase.Sat
 import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.geometry.*
 
-class CircleSegmentTest {
+val CircleSegmentTest by testSuite {
+    test("detectSat") { CircleSegmentTestFixture().run { detectSat() } }
+    test("detectGjk") { CircleSegmentTestFixture().run { detectGjk() } }
+    test("gjkDistance") { CircleSegmentTestFixture().run { gjkDistance() } }
+    test("getClipManifold") { CircleSegmentTestFixture().run { getClipManifold() } }
+}
+
+private class CircleSegmentTestFixture  {
     private val sat = Sat()
     private val gjk = Gjk()
     private val cmfs = ClippingManifoldSolver()
@@ -49,8 +56,7 @@ class CircleSegmentTest {
         circ = Circle(1.0)
         seg = Segment(Vector2(-0.5, 0.0), Vector2(0.5, 0.0))
     }
-    @Test
-    fun detectSat() {
+fun detectSat() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -99,8 +105,7 @@ class CircleSegmentTest {
         assertFalse(sat.detect(seg, t2, circ, t1, p))
         assertFalse(sat.detect(seg, t2, circ, t1))
     }
-    @Test
-    fun detectGjk() {
+fun detectGjk() {
         setup()
         val p = Penetration()
         val t1 = Transform()
@@ -149,8 +154,7 @@ class CircleSegmentTest {
         assertFalse(gjk.detect(seg, t2, circ, t1, p))
         assertFalse(gjk.detect(seg, t2, circ, t1))
     }
-    @Test
-    fun gjkDistance() {
+fun gjkDistance() {
         setup()
         val s = Separation()
         val t1 = Transform()
@@ -217,8 +221,7 @@ class CircleSegmentTest {
         assertFiniteClose(-1.142, p2.x, 1.0e-3)
         assertFiniteClose(0.514, p2.y, 1.0e-3)
     }
-    @Test
-    fun getClipManifold() {
+fun getClipManifold() {
         setup()
         val m = Manifold()
         val p = Penetration()

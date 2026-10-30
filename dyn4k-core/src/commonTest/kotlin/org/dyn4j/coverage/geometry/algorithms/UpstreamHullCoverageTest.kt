@@ -25,6 +25,7 @@
 
 package org.dyn4j.coverage.geometry.algorithms
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.Epsilon
 import org.dyn4j.geometry.Polygon
 import org.dyn4j.geometry.RobustGeometry
@@ -32,6 +33,80 @@ import org.dyn4j.geometry.Vector2
 import org.dyn4j.geometry.hull.*
 import kotlin.math.abs
 import kotlin.test.*
+
+val UpstreamHullCoverageTest by testSuite {
+    test("monoRandom1") { UpstreamHullCoverageTestFixture().run { monoRandom1() } }
+    test("monoRandom2") { UpstreamHullCoverageTestFixture().run { monoRandom2() } }
+    test("mono22") { UpstreamHullCoverageTestFixture().run { mono22() } }
+    test("mono2") { UpstreamHullCoverageTestFixture().run { mono2() } }
+    test("mono3") { UpstreamHullCoverageTestFixture().run { mono3() } }
+    test("mono4") { UpstreamHullCoverageTestFixture().run { mono4() } }
+    test("mono6") { UpstreamHullCoverageTestFixture().run { mono6() } }
+    test("mono7") { UpstreamHullCoverageTestFixture().run { mono7() } }
+    test("mono5") { UpstreamHullCoverageTestFixture().run { mono5() } }
+    test("mono5Part2") { UpstreamHullCoverageTestFixture().run { mono5Part2() } }
+    test("mono5Part3") { UpstreamHullCoverageTestFixture().run { mono5Part3() } }
+    test("mono8") { UpstreamHullCoverageTestFixture().run { mono8() } }
+    test("mono9") { UpstreamHullCoverageTestFixture().run { mono9() } }
+    test("mono10") { UpstreamHullCoverageTestFixture().run { mono10() } }
+    test("mono11") { UpstreamHullCoverageTestFixture().run { mono11() } }
+    test("mono12") { UpstreamHullCoverageTestFixture().run { mono12() } }
+    test("mono13") { UpstreamHullCoverageTestFixture().run { mono13() } }
+    test("mono14") { UpstreamHullCoverageTestFixture().run { mono14() } }
+    test("gsRandom1") { UpstreamHullCoverageTestFixture().run { gsRandom1() } }
+    test("gsRandom2") { UpstreamHullCoverageTestFixture().run { gsRandom2() } }
+    test("gs22") { UpstreamHullCoverageTestFixture().run { gs22() } }
+    test("gs2") { UpstreamHullCoverageTestFixture().run { gs2() } }
+    test("gs3") { UpstreamHullCoverageTestFixture().run { gs3() } }
+    test("gs4") { UpstreamHullCoverageTestFixture().run { gs4() } }
+    test("gs6") { UpstreamHullCoverageTestFixture().run { gs6() } }
+    test("gs7") { UpstreamHullCoverageTestFixture().run { gs7() } }
+    test("gs5") { UpstreamHullCoverageTestFixture().run { gs5() } }
+    test("gs5Part2") { UpstreamHullCoverageTestFixture().run { gs5Part2() } }
+    test("gs5Part3") { UpstreamHullCoverageTestFixture().run { gs5Part3() } }
+    test("gs8") { UpstreamHullCoverageTestFixture().run { gs8() } }
+    test("gs9") { UpstreamHullCoverageTestFixture().run { gs9() } }
+    test("gs10") { UpstreamHullCoverageTestFixture().run { gs10() } }
+    test("gs11") { UpstreamHullCoverageTestFixture().run { gs11() } }
+    test("gs12") { UpstreamHullCoverageTestFixture().run { gs12() } }
+    test("gs13") { UpstreamHullCoverageTestFixture().run { gs13() } }
+    test("gs14") { UpstreamHullCoverageTestFixture().run { gs14() } }
+    test("giftWrapRandom1") { UpstreamHullCoverageTestFixture().run { giftWrapRandom1() } }
+    test("giftWrapRandom2") { UpstreamHullCoverageTestFixture().run { giftWrapRandom2() } }
+    test("giftWrap2") { UpstreamHullCoverageTestFixture().run { giftWrap2() } }
+    test("giftWrap3") { UpstreamHullCoverageTestFixture().run { giftWrap3() } }
+    test("giftWrap4") { UpstreamHullCoverageTestFixture().run { giftWrap4() } }
+    test("giftWrap6") { UpstreamHullCoverageTestFixture().run { giftWrap6() } }
+    test("giftWrap7") { UpstreamHullCoverageTestFixture().run { giftWrap7() } }
+    test("giftWrap5") { UpstreamHullCoverageTestFixture().run { giftWrap5() } }
+    test("giftWrap5Part2") { UpstreamHullCoverageTestFixture().run { giftWrap5Part2() } }
+    test("giftWrap5Part3") { UpstreamHullCoverageTestFixture().run { giftWrap5Part3() } }
+    test("giftWrap8") { UpstreamHullCoverageTestFixture().run { giftWrap8() } }
+    test("giftWrap9") { UpstreamHullCoverageTestFixture().run { giftWrap9() } }
+    test("giftWrap10") { UpstreamHullCoverageTestFixture().run { giftWrap10() } }
+    test("giftWrap11") { UpstreamHullCoverageTestFixture().run { giftWrap11() } }
+    test("giftWrap12") { UpstreamHullCoverageTestFixture().run { giftWrap12() } }
+    test("giftWrap13") { UpstreamHullCoverageTestFixture().run { giftWrap13() } }
+    test("giftWrap14") { UpstreamHullCoverageTestFixture().run { giftWrap14() } }
+    test("dacRandom1") { UpstreamHullCoverageTestFixture().run { dacRandom1() } }
+    test("dacRandom2") { UpstreamHullCoverageTestFixture().run { dacRandom2() } }
+    test("dac22") { UpstreamHullCoverageTestFixture().run { dac22() } }
+    test("dac2") { UpstreamHullCoverageTestFixture().run { dac2() } }
+    test("dac3") { UpstreamHullCoverageTestFixture().run { dac3() } }
+    test("dac4") { UpstreamHullCoverageTestFixture().run { dac4() } }
+    test("dac6") { UpstreamHullCoverageTestFixture().run { dac6() } }
+    test("dac7") { UpstreamHullCoverageTestFixture().run { dac7() } }
+    test("dac5") { UpstreamHullCoverageTestFixture().run { dac5() } }
+    test("dac5Part2") { UpstreamHullCoverageTestFixture().run { dac5Part2() } }
+    test("dac5Part3") { UpstreamHullCoverageTestFixture().run { dac5Part3() } }
+    test("dac8") { UpstreamHullCoverageTestFixture().run { dac8() } }
+    test("dac9") { UpstreamHullCoverageTestFixture().run { dac9() } }
+    test("dac10") { UpstreamHullCoverageTestFixture().run { dac10() } }
+    test("dac11") { UpstreamHullCoverageTestFixture().run { dac11() } }
+    test("dac12") { UpstreamHullCoverageTestFixture().run { dac12() } }
+    test("dac13") { UpstreamHullCoverageTestFixture().run { dac13() } }
+    test("dac14") { UpstreamHullCoverageTestFixture().run { dac14() } }
+}
 
 private class JavaCloudRandom(seed: Long) {
     private var state = (seed xor 0x5DEECE66DL) and ((1L shl 48) - 1L)
@@ -206,7 +281,7 @@ private fun robustContains(vertices: Array<Vector2>, point: Vector2): Boolean {
     return true
 }
 
-class UpstreamHullCoverageTest {
+private class UpstreamHullCoverageTestFixture  {
     private fun check(generator: HullGenerator, id: String) {
         val points = cloud(id)
         val original = points.toList()
@@ -223,75 +298,75 @@ class UpstreamHullCoverageTest {
         val polygon = Polygon(*hull)
         for (point in points) assertTrue(robustContains(polygon.getVertices(), point), "$id: $point")
     }
-    @Test fun monoRandom1() = check(MonotoneChain(), "Random1")
-    @Test fun monoRandom2() = check(MonotoneChain(), "Random2")
-    @Test fun mono22() = check(MonotoneChain(), "22")
-    @Test fun mono2() = check(MonotoneChain(), "2")
-    @Test fun mono3() = check(MonotoneChain(), "3")
-    @Test fun mono4() = check(MonotoneChain(), "4")
-    @Test fun mono6() = check(MonotoneChain(), "6")
-    @Test fun mono7() = check(MonotoneChain(), "7")
-    @Test fun mono5() = check(MonotoneChain(), "5")
-    @Test fun mono5Part2() = check(MonotoneChain(), "5Part2")
-    @Test fun mono5Part3() = check(MonotoneChain(), "5Part3")
-    @Test fun mono8() = check(MonotoneChain(), "8")
-    @Test fun mono9() = check(MonotoneChain(), "9")
-    @Test fun mono10() = check(MonotoneChain(), "10")
-    @Test fun mono11() = check(MonotoneChain(), "11")
-    @Test fun mono12() = check(MonotoneChain(), "12")
-    @Test fun mono13() = check(MonotoneChain(), "13")
-    @Test fun mono14() = check(MonotoneChain(), "14")
-    @Test fun gsRandom1() = check(GrahamScan(), "Random1")
-    @Test fun gsRandom2() = check(GrahamScan(), "Random2")
-    @Test fun gs22() = check(GrahamScan(), "22")
-    @Test fun gs2() = check(GrahamScan(), "2")
-    @Test fun gs3() = check(GrahamScan(), "3")
-    @Test fun gs4() = check(GrahamScan(), "4")
-    @Test fun gs6() = check(GrahamScan(), "6")
-    @Test fun gs7() = check(GrahamScan(), "7")
-    @Test fun gs5() = check(GrahamScan(), "5")
-    @Test fun gs5Part2() = check(GrahamScan(), "5Part2")
-    @Test fun gs5Part3() = check(GrahamScan(), "5Part3")
-    @Test fun gs8() = check(GrahamScan(), "8")
-    @Test fun gs9() = check(GrahamScan(), "9")
-    @Test fun gs10() = check(GrahamScan(), "10")
-    @Test fun gs11() = check(GrahamScan(), "11")
-    @Test fun gs12() = check(GrahamScan(), "12")
-    @Test fun gs13() = check(GrahamScan(), "13")
-    @Test fun gs14() = check(GrahamScan(), "14")
-    @Test fun giftWrapRandom1() = check(GiftWrap(), "Random1")
-    @Test fun giftWrapRandom2() = check(GiftWrap(), "Random2")
-    @Test fun giftWrap2() = check(GiftWrap(), "2")
-    @Test fun giftWrap3() = check(GiftWrap(), "3")
-    @Test fun giftWrap4() = check(GiftWrap(), "4")
-    @Test fun giftWrap6() = check(GiftWrap(), "6")
-    @Test fun giftWrap7() = check(GiftWrap(), "7")
-    @Test fun giftWrap5() = check(GiftWrap(), "5")
-    @Test fun giftWrap5Part2() = check(GiftWrap(), "5Part2")
-    @Test fun giftWrap5Part3() = check(GiftWrap(), "5Part3")
-    @Test fun giftWrap8() = check(GiftWrap(), "8")
-    @Test fun giftWrap9() = check(GiftWrap(), "9")
-    @Test fun giftWrap10() = check(GiftWrap(), "10")
-    @Test fun giftWrap11() = check(GiftWrap(), "11")
-    @Test fun giftWrap12() = check(GiftWrap(), "12")
-    @Test fun giftWrap13() = check(GiftWrap(), "13")
-    @Test fun giftWrap14() = check(GiftWrap(), "14")
-    @Test fun dacRandom1() = check(DivideAndConquer(), "Random1")
-    @Test fun dacRandom2() = check(DivideAndConquer(), "Random2")
-    @Test fun dac22() = check(DivideAndConquer(), "22")
-    @Test fun dac2() = check(DivideAndConquer(), "2")
-    @Test fun dac3() = check(DivideAndConquer(), "3")
-    @Test fun dac4() = check(DivideAndConquer(), "4")
-    @Test fun dac6() = check(DivideAndConquer(), "6")
-    @Test fun dac7() = check(DivideAndConquer(), "7")
-    @Test fun dac5() = check(DivideAndConquer(), "5")
-    @Test fun dac5Part2() = check(DivideAndConquer(), "5Part2")
-    @Test fun dac5Part3() = check(DivideAndConquer(), "5Part3")
-    @Test fun dac8() = check(DivideAndConquer(), "8")
-    @Test fun dac9() = check(DivideAndConquer(), "9")
-    @Test fun dac10() = check(DivideAndConquer(), "10")
-    @Test fun dac11() = check(DivideAndConquer(), "11")
-    @Test fun dac12() = check(DivideAndConquer(), "12")
-    @Test fun dac13() = check(DivideAndConquer(), "13")
-    @Test fun dac14() = check(DivideAndConquer(), "14")
+fun monoRandom1() = check(MonotoneChain(), "Random1")
+fun monoRandom2() = check(MonotoneChain(), "Random2")
+fun mono22() = check(MonotoneChain(), "22")
+fun mono2() = check(MonotoneChain(), "2")
+fun mono3() = check(MonotoneChain(), "3")
+fun mono4() = check(MonotoneChain(), "4")
+fun mono6() = check(MonotoneChain(), "6")
+fun mono7() = check(MonotoneChain(), "7")
+fun mono5() = check(MonotoneChain(), "5")
+fun mono5Part2() = check(MonotoneChain(), "5Part2")
+fun mono5Part3() = check(MonotoneChain(), "5Part3")
+fun mono8() = check(MonotoneChain(), "8")
+fun mono9() = check(MonotoneChain(), "9")
+fun mono10() = check(MonotoneChain(), "10")
+fun mono11() = check(MonotoneChain(), "11")
+fun mono12() = check(MonotoneChain(), "12")
+fun mono13() = check(MonotoneChain(), "13")
+fun mono14() = check(MonotoneChain(), "14")
+fun gsRandom1() = check(GrahamScan(), "Random1")
+fun gsRandom2() = check(GrahamScan(), "Random2")
+fun gs22() = check(GrahamScan(), "22")
+fun gs2() = check(GrahamScan(), "2")
+fun gs3() = check(GrahamScan(), "3")
+fun gs4() = check(GrahamScan(), "4")
+fun gs6() = check(GrahamScan(), "6")
+fun gs7() = check(GrahamScan(), "7")
+fun gs5() = check(GrahamScan(), "5")
+fun gs5Part2() = check(GrahamScan(), "5Part2")
+fun gs5Part3() = check(GrahamScan(), "5Part3")
+fun gs8() = check(GrahamScan(), "8")
+fun gs9() = check(GrahamScan(), "9")
+fun gs10() = check(GrahamScan(), "10")
+fun gs11() = check(GrahamScan(), "11")
+fun gs12() = check(GrahamScan(), "12")
+fun gs13() = check(GrahamScan(), "13")
+fun gs14() = check(GrahamScan(), "14")
+fun giftWrapRandom1() = check(GiftWrap(), "Random1")
+fun giftWrapRandom2() = check(GiftWrap(), "Random2")
+fun giftWrap2() = check(GiftWrap(), "2")
+fun giftWrap3() = check(GiftWrap(), "3")
+fun giftWrap4() = check(GiftWrap(), "4")
+fun giftWrap6() = check(GiftWrap(), "6")
+fun giftWrap7() = check(GiftWrap(), "7")
+fun giftWrap5() = check(GiftWrap(), "5")
+fun giftWrap5Part2() = check(GiftWrap(), "5Part2")
+fun giftWrap5Part3() = check(GiftWrap(), "5Part3")
+fun giftWrap8() = check(GiftWrap(), "8")
+fun giftWrap9() = check(GiftWrap(), "9")
+fun giftWrap10() = check(GiftWrap(), "10")
+fun giftWrap11() = check(GiftWrap(), "11")
+fun giftWrap12() = check(GiftWrap(), "12")
+fun giftWrap13() = check(GiftWrap(), "13")
+fun giftWrap14() = check(GiftWrap(), "14")
+fun dacRandom1() = check(DivideAndConquer(), "Random1")
+fun dacRandom2() = check(DivideAndConquer(), "Random2")
+fun dac22() = check(DivideAndConquer(), "22")
+fun dac2() = check(DivideAndConquer(), "2")
+fun dac3() = check(DivideAndConquer(), "3")
+fun dac4() = check(DivideAndConquer(), "4")
+fun dac6() = check(DivideAndConquer(), "6")
+fun dac7() = check(DivideAndConquer(), "7")
+fun dac5() = check(DivideAndConquer(), "5")
+fun dac5Part2() = check(DivideAndConquer(), "5Part2")
+fun dac5Part3() = check(DivideAndConquer(), "5Part3")
+fun dac8() = check(DivideAndConquer(), "8")
+fun dac9() = check(DivideAndConquer(), "9")
+fun dac10() = check(DivideAndConquer(), "10")
+fun dac11() = check(DivideAndConquer(), "11")
+fun dac12() = check(DivideAndConquer(), "12")
+fun dac13() = check(DivideAndConquer(), "13")
+fun dac14() = check(DivideAndConquer(), "14")
 }

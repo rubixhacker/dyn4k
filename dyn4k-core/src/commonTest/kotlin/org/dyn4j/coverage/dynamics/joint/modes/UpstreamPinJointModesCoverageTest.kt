@@ -24,10 +24,10 @@
  */
 package org.dyn4j.coverage.dynamics.joint.modes
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sqrt
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -42,6 +42,34 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
+val UpstreamPinJointModesCoverageTest by testSuite {
+    test("createSuccess") { UpstreamPinJointModesCoverageTestFixture().run { createSuccess() } }
+    test("createWithNullBody") { UpstreamPinJointModesCoverageTestFixture().run { createWithNullBody() } }
+    test("createWithNullTarget") { UpstreamPinJointModesCoverageTestFixture().run { createWithNullTarget() } }
+    test("setTarget") { UpstreamPinJointModesCoverageTestFixture().run { setTarget() } }
+    test("setNullTarget") { UpstreamPinJointModesCoverageTestFixture().run { setNullTarget() } }
+    test("isSpringEnabled") { UpstreamPinJointModesCoverageTestFixture().run { isSpringEnabled() } }
+    test("isSpringDamperEnabled") { UpstreamPinJointModesCoverageTestFixture().run { isSpringDamperEnabled() } }
+    test("setSpringDampingRatio") { UpstreamPinJointModesCoverageTestFixture().run { setSpringDampingRatio() } }
+    test("setNegativeDampingRatio") { UpstreamPinJointModesCoverageTestFixture().run { setNegativeDampingRatio() } }
+    test("setDampingRatioGreaterThan1") { UpstreamPinJointModesCoverageTestFixture().run { setDampingRatioGreaterThan1() } }
+    test("setSpringFrequency") { UpstreamPinJointModesCoverageTestFixture().run { setSpringFrequency() } }
+    test("setSpringMode") { UpstreamPinJointModesCoverageTestFixture().run { setSpringMode() } }
+    test("setSpringStiffnessNegative") { UpstreamPinJointModesCoverageTestFixture().run { setSpringStiffnessNegative() } }
+    test("setSpringStiffness") { UpstreamPinJointModesCoverageTestFixture().run { setSpringStiffness() } }
+    test("setSpringFrequencyNegative") { UpstreamPinJointModesCoverageTestFixture().run { setSpringFrequencyNegative() } }
+    test("setSpringMaximumForceNegative") { UpstreamPinJointModesCoverageTestFixture().run { setSpringMaximumForceNegative() } }
+    test("setSpringMaximumForce") { UpstreamPinJointModesCoverageTestFixture().run { setSpringMaximumForce() } }
+    test("shiftCoordinates") { UpstreamPinJointModesCoverageTestFixture().run { shiftCoordinates() } }
+    test("setTargetSleep") { UpstreamPinJointModesCoverageTestFixture().run { setTargetSleep() } }
+    test("getSetCorrectionFactor") { UpstreamPinJointModesCoverageTestFixture().run { getSetCorrectionFactor() } }
+    test("setNegativeCorrectionFactor") { UpstreamPinJointModesCoverageTestFixture().run { setNegativeCorrectionFactor() } }
+    test("setGreaterThan1CorrectionFactor") { UpstreamPinJointModesCoverageTestFixture().run { setGreaterThan1CorrectionFactor() } }
+    test("setLessThanZeroCorrectionMaximumForce") { UpstreamPinJointModesCoverageTestFixture().run { setLessThanZeroCorrectionMaximumForce() } }
+    test("getSetCorrectionMaximumForce") { UpstreamPinJointModesCoverageTestFixture().run { getSetCorrectionMaximumForce() } }
+    test("copyFailed") { UpstreamPinJointModesCoverageTestFixture().run { copyFailed() } }
+}
+
 private fun pinBody() = Body().apply {
     addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
     setMass(MassType.NORMAL)
@@ -51,8 +79,8 @@ private fun pinRadians(degrees: Double) = degrees * PI / 180.0
 
 private class PinTestBody : Body()
 
-class UpstreamPinJointModesCoverageTest {
-    @Test fun createSuccess() {
+private class UpstreamPinJointModesCoverageTestFixture  {
+fun createSuccess() {
         val b1 = pinBody()
         val b2 = pinBody()
         var p = Vector2(1.0, -1.0)
@@ -74,7 +102,7 @@ class UpstreamPinJointModesCoverageTest {
         assertNotNull(pj.toString())
     }
 
-    @Test fun createWithNullBody() {
+fun createWithNullBody() {
         val b1 = pinBody()
         val b2 = pinBody()
         assertFailsWith<NullPointerException> {
@@ -82,7 +110,7 @@ class UpstreamPinJointModesCoverageTest {
         }
     }
 
-    @Test fun createWithNullTarget() {
+fun createWithNullTarget() {
         val b1 = pinBody()
         val b2 = pinBody()
         assertFailsWith<NullPointerException> {
@@ -90,7 +118,7 @@ class UpstreamPinJointModesCoverageTest {
         }
     }
 
-    @Test fun setTarget() {
+fun setTarget() {
         val b1 = pinBody()
         val b2 = pinBody()
         var pj = PinJoint<Body>(b1, Vector2())
@@ -102,7 +130,7 @@ class UpstreamPinJointModesCoverageTest {
         assertTrue(v2.equals(pj.getTarget()))
     }
 
-    @Test fun setNullTarget() {
+fun setNullTarget() {
         val b1 = pinBody()
         val b2 = pinBody()
         assertFailsWith<NullPointerException> {
@@ -111,7 +139,7 @@ class UpstreamPinJointModesCoverageTest {
         }
     }
 
-    @Test fun isSpringEnabled() {
+fun isSpringEnabled() {
         val b1 = pinBody()
         val b2 = pinBody()
         var pj = PinJoint<Body>(b1, Vector2())
@@ -128,7 +156,7 @@ class UpstreamPinJointModesCoverageTest {
         assertFalse(pj.isSpringEnabled())
     }
 
-    @Test fun isSpringDamperEnabled() {
+fun isSpringDamperEnabled() {
         val b1 = pinBody()
         val b2 = pinBody()
         var pj = PinJoint<Body>(b1, Vector2())
@@ -157,7 +185,7 @@ class UpstreamPinJointModesCoverageTest {
         assertFalse(pj.isSpringDamperEnabled())
     }
 
-    @Test fun setSpringDampingRatio() {
+fun setSpringDampingRatio() {
         val b1 = pinBody()
         val b2 = pinBody()
         var pj = PinJoint<Body>(b1, Vector2())
@@ -183,7 +211,7 @@ class UpstreamPinJointModesCoverageTest {
         assertFalse(b1.isAtRest())
     }
 
-    @Test fun setNegativeDampingRatio() {
+fun setNegativeDampingRatio() {
         val b1 = pinBody()
         val b2 = pinBody()
         assertFailsWith<IllegalArgumentException> {
@@ -192,7 +220,7 @@ class UpstreamPinJointModesCoverageTest {
         }
     }
 
-    @Test fun setDampingRatioGreaterThan1() {
+fun setDampingRatioGreaterThan1() {
         val b1 = pinBody()
         val b2 = pinBody()
         assertFailsWith<IllegalArgumentException> {
@@ -201,7 +229,7 @@ class UpstreamPinJointModesCoverageTest {
         }
     }
 
-    @Test fun setSpringFrequency() {
+fun setSpringFrequency() {
         val b1 = pinBody()
         val b2 = pinBody()
         var pj = PinJoint<Body>(b1, Vector2())
@@ -231,7 +259,7 @@ class UpstreamPinJointModesCoverageTest {
         assertFalse(b1.isAtRest())
     }
 
-    @Test fun setSpringMode() {
+fun setSpringMode() {
         val b1 = pinBody()
         val b2 = pinBody()
         var pj = PinJoint<Body>(b1, Vector2())
@@ -242,7 +270,7 @@ class UpstreamPinJointModesCoverageTest {
         assertEquals(Joint.SPRING_MODE_FREQUENCY, pj.getSpringMode())
     }
 
-    @Test fun setSpringStiffnessNegative() {
+fun setSpringStiffnessNegative() {
         val b1 = pinBody()
         val b2 = pinBody()
         assertFailsWith<IllegalArgumentException> {
@@ -251,7 +279,7 @@ class UpstreamPinJointModesCoverageTest {
         }
     }
 
-    @Test fun setSpringStiffness() {
+fun setSpringStiffness() {
         val b1 = pinBody()
         val b2 = pinBody()
         var pj = PinJoint<Body>(b1, Vector2())
@@ -280,7 +308,7 @@ class UpstreamPinJointModesCoverageTest {
         assertFalse(b1.isAtRest())
     }
 
-    @Test fun setSpringFrequencyNegative() {
+fun setSpringFrequencyNegative() {
         val b1 = pinBody()
         val b2 = pinBody()
         assertFailsWith<IllegalArgumentException> {
@@ -289,7 +317,7 @@ class UpstreamPinJointModesCoverageTest {
         }
     }
 
-    @Test fun setSpringMaximumForceNegative() {
+fun setSpringMaximumForceNegative() {
         val b1 = pinBody()
         val b2 = pinBody()
         assertFailsWith<IllegalArgumentException> {
@@ -298,7 +326,7 @@ class UpstreamPinJointModesCoverageTest {
         }
     }
 
-    @Test fun setSpringMaximumForce() {
+fun setSpringMaximumForce() {
         val b1 = pinBody()
         val b2 = pinBody()
         var pj = PinJoint<Body>(b1, Vector2())
@@ -327,7 +355,7 @@ class UpstreamPinJointModesCoverageTest {
         assertFalse(b1.isAtRest())
     }
 
-    @Test fun shiftCoordinates() {
+fun shiftCoordinates() {
         val b1 = pinBody()
         val b2 = pinBody()
         var pj = PinJoint<Body>(b1, Vector2())
@@ -337,7 +365,7 @@ class UpstreamPinJointModesCoverageTest {
         assertEquals(1.0, pj.getTarget().y, 1.0e-3)
     }
 
-    @Test fun setTargetSleep() {
+fun setTargetSleep() {
         val b1 = pinBody()
         val b2 = pinBody()
         var pj = PinJoint<Body>(b1, Vector2())
@@ -358,7 +386,7 @@ class UpstreamPinJointModesCoverageTest {
         assertTrue(target.equals(pj.getTarget()))
     }
 
-    @Test fun getSetCorrectionFactor() {
+fun getSetCorrectionFactor() {
         val b1 = pinBody()
         val b2 = pinBody()
         var pj = PinJoint<Body>(b1, Vector2())
@@ -371,7 +399,7 @@ class UpstreamPinJointModesCoverageTest {
         assertEquals(1.0, pj.getCorrectionFactor())
     }
 
-    @Test fun setNegativeCorrectionFactor() {
+fun setNegativeCorrectionFactor() {
         val b1 = pinBody()
         val b2 = pinBody()
         assertFailsWith<IllegalArgumentException> {
@@ -380,7 +408,7 @@ class UpstreamPinJointModesCoverageTest {
         }
     }
 
-    @Test fun setGreaterThan1CorrectionFactor() {
+fun setGreaterThan1CorrectionFactor() {
         val b1 = pinBody()
         val b2 = pinBody()
         assertFailsWith<IllegalArgumentException> {
@@ -389,7 +417,7 @@ class UpstreamPinJointModesCoverageTest {
         }
     }
 
-    @Test fun setLessThanZeroCorrectionMaximumForce() {
+fun setLessThanZeroCorrectionMaximumForce() {
         val b1 = pinBody()
         val b2 = pinBody()
         assertFailsWith<IllegalArgumentException> {
@@ -398,7 +426,7 @@ class UpstreamPinJointModesCoverageTest {
         }
     }
 
-    @Test fun getSetCorrectionMaximumForce() {
+fun getSetCorrectionMaximumForce() {
         val b1 = pinBody()
         val b2 = pinBody()
         var pj = PinJoint<Body>(b1, Vector2())
@@ -411,7 +439,7 @@ class UpstreamPinJointModesCoverageTest {
         assertEquals(100.0, pj.getMaximumCorrectionForce())
     }
 
-    @Test fun copyFailed() {
+fun copyFailed() {
         val b1 = pinBody()
         val b2 = pinBody()
         assertFailsWith<ClassCastException> {

@@ -24,7 +24,7 @@
  */
 package org.dyn4j.coverage.collision.detection
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -38,7 +38,34 @@ import org.dyn4j.collision.narrowphase.Raycast
 import org.dyn4j.collision.narrowphase.Separation
 import org.dyn4j.geometry.Vector2
 
-class DetectionResultCoverageTest {
+val DetectionResultCoverageTest by testSuite {
+    test("penetrationCreate") { DetectionResultCoverageTestFixture().run { penetrationCreate() } }
+    test("penetrationGetSet") { DetectionResultCoverageTestFixture().run { penetrationGetSet() } }
+    test("penetrationClear") { DetectionResultCoverageTestFixture().run { penetrationClear() } }
+    test("penetrationCopy") { DetectionResultCoverageTestFixture().run { penetrationCopy() } }
+    test("penetrationShift") { DetectionResultCoverageTestFixture().run { penetrationShift() } }
+    test("separationCreate") { DetectionResultCoverageTestFixture().run { separationCreate() } }
+    test("separationGetSet") { DetectionResultCoverageTestFixture().run { separationGetSet() } }
+    test("separationClear") { DetectionResultCoverageTestFixture().run { separationClear() } }
+    test("separationCopy") { DetectionResultCoverageTestFixture().run { separationCopy() } }
+    test("separationShift") { DetectionResultCoverageTestFixture().run { separationShift() } }
+    test("raycastCreate") { DetectionResultCoverageTestFixture().run { raycastCreate() } }
+    test("raycastGetSet") { DetectionResultCoverageTestFixture().run { raycastGetSet() } }
+    test("raycastClear") { DetectionResultCoverageTestFixture().run { raycastClear() } }
+    test("raycastCopy") { DetectionResultCoverageTestFixture().run { raycastCopy() } }
+    test("raycastShift") { DetectionResultCoverageTestFixture().run { raycastShift() } }
+    test("containmentCreate") { DetectionResultCoverageTestFixture().run { containmentCreate() } }
+    test("containmentGetSet") { DetectionResultCoverageTestFixture().run { containmentGetSet() } }
+    test("containmentClear") { DetectionResultCoverageTestFixture().run { containmentClear() } }
+    test("containmentCopy") { DetectionResultCoverageTestFixture().run { containmentCopy() } }
+    test("containmentSet") { DetectionResultCoverageTestFixture().run { containmentSet() } }
+    test("timeOfImpactCreate") { DetectionResultCoverageTestFixture().run { timeOfImpactCreate() } }
+    test("timeOfImpactGetSet") { DetectionResultCoverageTestFixture().run { timeOfImpactGetSet() } }
+    test("timeOfImpactCopy") { DetectionResultCoverageTestFixture().run { timeOfImpactCopy() } }
+    test("timeOfImpactTostring") { DetectionResultCoverageTestFixture().run { timeOfImpactTostring() } }
+}
+
+private class DetectionResultCoverageTestFixture  {
     private class SeedPenetration(normal: Vector2, depth: Double) : Penetration(normal, depth)
     private class SeedSeparation(normal: Vector2, distance: Double, p1: Vector2, p2: Vector2) :
         Separation(normal, distance, p1, p2)
@@ -47,7 +74,7 @@ class DetectionResultCoverageTest {
     private class SeedContainment(a: Boolean, b: Boolean) : Containment(a, b)
     private class SeedTimeOfImpact(time: Double, separation: Separation) : TimeOfImpact(time, separation)
 
-    @Test fun penetrationCreate() {
+fun penetrationCreate() {
         val empty = Penetration()
         assertEquals(0.0, empty.getDepth())
         assertEquals(Vector2(), empty.getNormal())
@@ -59,7 +86,7 @@ class DetectionResultCoverageTest {
         assertNotNull(result.toString())
     }
 
-    @Test fun penetrationGetSet() {
+fun penetrationGetSet() {
         val result = Penetration()
         val input = Vector2(1.0, 1.0)
         val exposed = result.getNormal()
@@ -72,7 +99,7 @@ class DetectionResultCoverageTest {
         assertEquals(Vector2(1.0, 1.0), exposed)
     }
 
-    @Test fun penetrationClear() {
+fun penetrationClear() {
         val result = SeedPenetration(Vector2(1.0, 1.0), 2.0)
         val exposed = result.getNormal()
         result.clear()
@@ -81,7 +108,7 @@ class DetectionResultCoverageTest {
         assertEquals(0.0, result.getDepth())
     }
 
-    @Test fun penetrationCopy() {
+fun penetrationCopy() {
         val source = SeedPenetration(Vector2(1.0, 1.0), 2.0)
         val target = Penetration()
         target.set(source)
@@ -93,14 +120,14 @@ class DetectionResultCoverageTest {
         }
     }
 
-    @Test fun penetrationShift() {
+fun penetrationShift() {
         val result = SeedPenetration(Vector2(1.0, 1.0), 2.0)
         result.shift(Vector2(3.0, -2.0))
         assertEquals(Vector2(1.0, 1.0), result.getNormal())
         assertEquals(2.0, result.getDepth())
     }
 
-    @Test fun separationCreate() {
+fun separationCreate() {
         val empty = Separation()
         assertEquals(0.0, empty.getDistance())
         assertEquals(Vector2(), empty.getNormal())
@@ -120,7 +147,7 @@ class DetectionResultCoverageTest {
         assertNotNull(result.toString())
     }
 
-    @Test fun separationGetSet() {
+fun separationGetSet() {
         val result = Separation()
         val normal = result.getNormal()
         val point1 = result.getPoint1()
@@ -144,7 +171,7 @@ class DetectionResultCoverageTest {
         assertEquals(5.0, result.getDistance())
     }
 
-    @Test fun separationClear() {
+fun separationClear() {
         val result = SeedSeparation(Vector2(1.0, 1.0), 5.0, Vector2(2.0, 2.0), Vector2(3.0, 3.0))
         result.clear()
         assertEquals(Vector2(), result.getNormal())
@@ -153,7 +180,7 @@ class DetectionResultCoverageTest {
         assertEquals(0.0, result.getDistance())
     }
 
-    @Test fun separationCopy() {
+fun separationCopy() {
         val source = SeedSeparation(Vector2(1.0, 1.0), 5.0, Vector2(2.0, 2.0), Vector2(3.0, 3.0))
         val target = Separation()
         target.set(source)
@@ -168,7 +195,7 @@ class DetectionResultCoverageTest {
         }
     }
 
-    @Test fun separationShift() {
+fun separationShift() {
         val result = SeedSeparation(Vector2(1.0, 1.0), 5.0, Vector2(2.0, 2.0), Vector2(3.0, 3.0))
         result.shift(Vector2(3.0, -2.0))
         assertEquals(Vector2(1.0, 1.0), result.getNormal())
@@ -177,7 +204,7 @@ class DetectionResultCoverageTest {
         assertEquals(5.0, result.getDistance())
     }
 
-    @Test fun raycastCreate() {
+fun raycastCreate() {
         val empty = Raycast()
         assertEquals(Vector2(), empty.getPoint())
         assertEquals(Vector2(), empty.getNormal())
@@ -192,7 +219,7 @@ class DetectionResultCoverageTest {
         assertNotSame(normal, result.getNormal())
     }
 
-    @Test fun raycastGetSet() {
+fun raycastGetSet() {
         val result = Raycast()
         val point = result.getPoint()
         val normal = result.getNormal()
@@ -210,7 +237,7 @@ class DetectionResultCoverageTest {
         assertEquals(5.0, result.getDistance())
     }
 
-    @Test fun raycastClear() {
+fun raycastClear() {
         val result = SeedRaycast(Vector2(1.0, 2.0), Vector2(3.0, 4.0), 5.0)
         result.clear()
         assertEquals(Vector2(), result.getPoint())
@@ -218,7 +245,7 @@ class DetectionResultCoverageTest {
         assertEquals(0.0, result.getDistance())
     }
 
-    @Test fun raycastCopy() {
+fun raycastCopy() {
         val source = SeedRaycast(Vector2(1.0, 2.0), Vector2(3.0, 4.0), 5.0)
         val target = Raycast()
         target.set(source)
@@ -231,7 +258,7 @@ class DetectionResultCoverageTest {
         }
     }
 
-    @Test fun raycastShift() {
+fun raycastShift() {
         val result = SeedRaycast(Vector2(1.0, 2.0), Vector2(3.0, 4.0), 5.0)
         result.shift(Vector2(3.0, -2.0))
         assertEquals(Vector2(4.0, 0.0), result.getPoint())
@@ -239,7 +266,7 @@ class DetectionResultCoverageTest {
         assertEquals(5.0, result.getDistance())
     }
 
-    @Test fun containmentCreate() {
+fun containmentCreate() {
         val empty = Containment()
         assertFalse(empty.isAContainedInB())
         assertFalse(empty.isBContainedInA())
@@ -249,7 +276,7 @@ class DetectionResultCoverageTest {
         assertNotNull(result.toString())
     }
 
-    @Test fun containmentGetSet() {
+fun containmentGetSet() {
         val result = Containment()
         result.setAContainedInB(true)
         assertTrue(result.isAContainedInB())
@@ -263,34 +290,34 @@ class DetectionResultCoverageTest {
         assertFalse(result.isBContainedInA())
     }
 
-    @Test fun containmentClear() {
+fun containmentClear() {
         val result = SeedContainment(true, true)
         result.clear()
         assertFalse(result.isAContainedInB())
         assertFalse(result.isBContainedInA())
     }
 
-    @Test fun containmentCopy() {
+fun containmentCopy() {
         val result = SeedContainment(true, true).copy()
         assertTrue(result.isAContainedInB())
         assertTrue(result.isBContainedInA())
     }
 
-    @Test fun containmentSet() {
+fun containmentSet() {
         val result = Containment()
         result.set(SeedContainment(true, true))
         assertTrue(result.isAContainedInB())
         assertTrue(result.isBContainedInA())
     }
 
-    @Test fun timeOfImpactCreate() {
+fun timeOfImpactCreate() {
         val input = Separation()
         val result = SeedTimeOfImpact(0.0, input)
         assertEquals(0.0, result.getTime())
         assertNotSame(input, result.getSeparation())
     }
 
-    @Test fun timeOfImpactGetSet() {
+fun timeOfImpactGetSet() {
         val input = Separation()
         val result = TimeOfImpact()
         val exposed = result.getSeparation()
@@ -301,7 +328,7 @@ class DetectionResultCoverageTest {
         assertSame(exposed, result.getSeparation())
     }
 
-    @Test fun timeOfImpactCopy() {
+fun timeOfImpactCopy() {
         val result = TimeOfImpact()
         result.setTime(1.0)
         result.setSeparation(Separation().also { it.setDistance(2.0) })
@@ -311,7 +338,7 @@ class DetectionResultCoverageTest {
         assertNotSame(result.getSeparation(), copy.getSeparation())
     }
 
-    @Test fun timeOfImpactTostring() {
+fun timeOfImpactTostring() {
         val result = TimeOfImpact()
         result.setTime(1.0)
         assertNotNull(result.toString())

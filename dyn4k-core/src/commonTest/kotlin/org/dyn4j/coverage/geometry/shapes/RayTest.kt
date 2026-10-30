@@ -24,13 +24,26 @@
  */
 package org.dyn4j.geometry
 
+import de.infix.testBalloon.framework.core.testSuite
 import org.dyn4j.geometry.*
 import org.dyn4j.Epsilon
 import kotlin.test.*
 
-class RayTest {
-    @Test
-    fun createNullStart() {
+val RayTest by testSuite {
+    test("createNullStart") { RayTestFixture().run { createNullStart() } }
+    test("createNullDirection") { RayTestFixture().run { createNullDirection() } }
+    test("createZeroDirection") { RayTestFixture().run { createZeroDirection() } }
+    test("create") { RayTestFixture().run { create() } }
+    test("createFromOrigin") { RayTestFixture().run { createFromOrigin() } }
+    test("setStartNull") { RayTestFixture().run { setStartNull() } }
+    test("setDirectionNull") { RayTestFixture().run { setDirectionNull() } }
+    test("setDirectionZero") { RayTestFixture().run { setDirectionZero() } }
+    test("setDirection") { RayTestFixture().run { setDirection() } }
+    test("copy") { RayTestFixture().run { copy() } }
+}
+
+private class RayTestFixture  {
+fun createNullStart() {
         assertFailsWith<NullPointerException> {
 
 		Ray(null, Math.toRadians(10));
@@ -38,8 +51,7 @@ class RayTest {
         }
     }
 
-    @Test
-    fun createNullDirection() {
+fun createNullDirection() {
         assertFailsWith<NullPointerException> {
 
 		Ray(Vector2(), null);
@@ -47,8 +59,7 @@ class RayTest {
         }
     }
 
-    @Test
-    fun createZeroDirection() {
+fun createZeroDirection() {
         assertFailsWith<IllegalArgumentException> {
 
 		Ray(Vector2(), Vector2());
@@ -56,8 +67,7 @@ class RayTest {
         }
     }
 
-    @Test
-    fun create() {
+fun create() {
 
 		var s = Vector2(1.0, 2.0);
 		var r = Ray(s, Math.toRadians(10));
@@ -72,8 +82,7 @@ class RayTest {
 
     }
 
-    @Test
-    fun createFromOrigin() {
+fun createFromOrigin() {
 
 		var r = Ray(Math.toRadians(10));
 
@@ -86,8 +95,7 @@ class RayTest {
 
     }
 
-    @Test
-    fun setStartNull() {
+fun setStartNull() {
         assertFailsWith<NullPointerException> {
 
 		var r = Ray(Math.toRadians(30));
@@ -96,8 +104,7 @@ class RayTest {
         }
     }
 
-    @Test
-    fun setDirectionNull() {
+fun setDirectionNull() {
         assertFailsWith<NullPointerException> {
 
 		var r = Ray(Math.toRadians(30));
@@ -106,8 +113,7 @@ class RayTest {
         }
     }
 
-    @Test
-    fun setDirectionZero() {
+fun setDirectionZero() {
         assertFailsWith<IllegalArgumentException> {
 
 		var r = Ray(Math.toRadians(30));
@@ -116,8 +122,7 @@ class RayTest {
         }
     }
 
-    @Test
-    fun setDirection() {
+fun setDirection() {
 
 		var s = Vector2(1.0, 2.0);
 		var r = Ray(s, Math.toRadians(10));
@@ -149,8 +154,7 @@ class RayTest {
 
     }
 
-    @Test
-    fun copy() {
+fun copy() {
 
 		var ray = Ray(Vector2(1.0, 1.0), Math.toRadians(30));
 		var copy = ray.copy();

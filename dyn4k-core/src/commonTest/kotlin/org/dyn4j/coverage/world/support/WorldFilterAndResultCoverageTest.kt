@@ -24,8 +24,8 @@
  */
 package org.dyn4j.coverage.world.support
 
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.math.sqrt
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -57,7 +57,29 @@ import org.dyn4j.world.result.ConvexDetectResult
 import org.dyn4j.world.result.DetectResult
 import org.dyn4j.world.result.RaycastResult
 
-class WorldFilterAndResultCoverageTest {
+val WorldFilterAndResultCoverageTest by testSuite {
+    test("broadphaseFilterAdapterAlwaysAllowed") { WorldFilterAndResultCoverageTestFixture().run { broadphaseFilterAdapterAlwaysAllowed() } }
+    test("collisionBodyBroadphaseFilterEnabled") { WorldFilterAndResultCoverageTestFixture().run { collisionBodyBroadphaseFilterEnabled() } }
+    test("collisionBodyBroadphaseFilterFilters") { WorldFilterAndResultCoverageTestFixture().run { collisionBodyBroadphaseFilterFilters() } }
+    test("physicsBodyBroadphaseFilterEnabled") { WorldFilterAndResultCoverageTestFixture().run { physicsBodyBroadphaseFilterEnabled() } }
+    test("physicsBodyBroadphaseFilterFilters") { WorldFilterAndResultCoverageTestFixture().run { physicsBodyBroadphaseFilterFilters() } }
+    test("physicsBodyBroadphaseFilterDynamicSensor") { WorldFilterAndResultCoverageTestFixture().run { physicsBodyBroadphaseFilterDynamicSensor() } }
+    test("physicsBodyBroadphaseFilterJointCollisionAllowed") { WorldFilterAndResultCoverageTestFixture().run { physicsBodyBroadphaseFilterJointCollisionAllowed() } }
+    test("detectFilterCreate") { WorldFilterAndResultCoverageTestFixture().run { detectFilterCreate() } }
+    test("detectFilterSensor") { WorldFilterAndResultCoverageTestFixture().run { detectFilterSensor() } }
+    test("detectFilterDisabled") { WorldFilterAndResultCoverageTestFixture().run { detectFilterDisabled() } }
+    test("detectFilterFilter") { WorldFilterAndResultCoverageTestFixture().run { detectFilterFilter() } }
+    test("valueMixerMixFriction") { WorldFilterAndResultCoverageTestFixture().run { valueMixerMixFriction() } }
+    test("valueMixerMixRestitution") { WorldFilterAndResultCoverageTestFixture().run { valueMixerMixRestitution() } }
+    test("valueMixerMixRestitutionVelocity") { WorldFilterAndResultCoverageTestFixture().run { valueMixerMixRestitutionVelocity() } }
+    test("worldCreateCollisionData") { WorldFilterAndResultCoverageTestFixture().run { worldCreateCollisionData() } }
+    test("detectResultCreateSuccess") { WorldFilterAndResultCoverageTestFixture().run { detectResultCreateSuccess() } }
+    test("detectResultSet") { WorldFilterAndResultCoverageTestFixture().run { detectResultSet() } }
+    test("detectResultCopy") { WorldFilterAndResultCoverageTestFixture().run { detectResultCopy() } }
+    test("detectResultCompareTo") { WorldFilterAndResultCoverageTestFixture().run { detectResultCompareTo() } }
+}
+
+private class WorldFilterAndResultCoverageTestFixture  {
     private class WorldProbe : World<Body>() {
         fun collisionData(pair: BasicCollisionPair<CollisionItem<Body, BodyFixture>>) = createCollisionData(pair)
     }
@@ -70,14 +92,14 @@ class WorldFilterAndResultCoverageTest {
 
     private fun fixture(body: Body): BodyFixture = body.getFixture(0)
 
-    @Test fun broadphaseFilterAdapterAlwaysAllowed() {
+fun broadphaseFilterAdapterAlwaysAllowed() {
         val (a, b) = bodies()
         val filter = BroadphaseCollisionDataFilterAdapter<Body, BodyFixture>()
         assertTrue(filter.isAllowed(a, fixture(a), b, fixture(b)))
         assertTrue(filter.isAllowed(null, null, null, null))
     }
 
-    @Test fun collisionBodyBroadphaseFilterEnabled() {
+fun collisionBodyBroadphaseFilterEnabled() {
         val (a, b) = bodies()
         val filter = CollisionBodyBroadphaseCollisionDataFilter<Body, BodyFixture>()
         assertTrue(filter.isAllowed(a, fixture(a), b, fixture(b)))
@@ -106,12 +128,12 @@ class WorldFilterAndResultCoverageTest {
         assertTrue(allowed(a, b))
     }
 
-    @Test fun collisionBodyBroadphaseFilterFilters() {
+fun collisionBodyBroadphaseFilterFilters() {
         val filter = CollisionBodyBroadphaseCollisionDataFilter<Body, BodyFixture>()
         verifyCategories { a, b -> filter.isAllowed(a, fixture(a), b, fixture(b)) }
     }
 
-    @Test fun physicsBodyBroadphaseFilterEnabled() {
+fun physicsBodyBroadphaseFilterEnabled() {
         val world = World<Body>()
         val filter = PhysicsBodyBroadphaseCollisionDataFilter(world)
         val (a, b) = bodies()
@@ -126,7 +148,7 @@ class WorldFilterAndResultCoverageTest {
         assertTrue(filter.isAllowed(a, fixture(a), b, fixture(b)))
     }
 
-    @Test fun physicsBodyBroadphaseFilterFilters() {
+fun physicsBodyBroadphaseFilterFilters() {
         val world = World<Body>()
         val filter = PhysicsBodyBroadphaseCollisionDataFilter(world)
         verifyCategories { a, b ->
@@ -137,7 +159,7 @@ class WorldFilterAndResultCoverageTest {
         }
     }
 
-    @Test fun physicsBodyBroadphaseFilterDynamicSensor() {
+fun physicsBodyBroadphaseFilterDynamicSensor() {
         val world = World<Body>()
         val filter = PhysicsBodyBroadphaseCollisionDataFilter(world)
         val (a, b) = bodies()
@@ -154,7 +176,7 @@ class WorldFilterAndResultCoverageTest {
         assertTrue(filter.isAllowed(a, fixture(a), b, fixture(b)))
     }
 
-    @Test fun physicsBodyBroadphaseFilterJointCollisionAllowed() {
+fun physicsBodyBroadphaseFilterJointCollisionAllowed() {
         val world = World<Body>()
         val filter = PhysicsBodyBroadphaseCollisionDataFilter(world)
         val (a, b) = bodies()
@@ -168,7 +190,7 @@ class WorldFilterAndResultCoverageTest {
         assertFalse(filter.isAllowed(a, fixture(a), b, fixture(b)))
     }
 
-    @Test fun detectFilterCreate() {
+fun detectFilterCreate() {
         val none = DetectFilter<Body, BodyFixture>(false, false, null)
         assertFalse(none.isIgnoreSensorsEnabled())
         assertFalse(none.IsIgnoreDisabledEnabled())
@@ -187,7 +209,7 @@ class WorldFilterAndResultCoverageTest {
         assertSame(Filter.DEFAULT_FILTER, filtered.getFilter())
     }
 
-    @Test fun detectFilterSensor() {
+fun detectFilterSensor() {
         val (body, _) = bodies()
         val filter = DetectFilter<Body, BodyFixture>(true, false, null)
         assertTrue(filter.isAllowed(body, fixture(body)))
@@ -199,7 +221,7 @@ class WorldFilterAndResultCoverageTest {
         assertTrue(DetectFilter<Body, BodyFixture>(false, false, null).isAllowed(body, fixture(body)))
     }
 
-    @Test fun detectFilterDisabled() {
+fun detectFilterDisabled() {
         val (body, _) = bodies()
         val filter = DetectFilter<Body, BodyFixture>(false, true, null)
         assertTrue(filter.isAllowed(body, fixture(body)))
@@ -211,7 +233,7 @@ class WorldFilterAndResultCoverageTest {
         assertTrue(DetectFilter<Body, BodyFixture>(false, false, null).isAllowed(body, fixture(body)))
     }
 
-    @Test fun detectFilterFilter() {
+fun detectFilterFilter() {
         val (body, _) = bodies()
         val fixture = fixture(body)
         val first = CategoryFilter(1L, 7L)
@@ -224,7 +246,7 @@ class WorldFilterAndResultCoverageTest {
         assertFalse(DetectFilter<Body, BodyFixture>(false, false, denied).isAllowed(body, fixture))
     }
 
-    @Test fun valueMixerMixFriction() {
+fun valueMixerMixFriction() {
         assertEquals(sqrt(0.35), ValueMixer.DEFAULT_MIXER.mixFriction(0.5, 0.7), 1e-15)
     }
 
@@ -232,15 +254,15 @@ class WorldFilterAndResultCoverageTest {
         assertEquals(0.7, mixer.mixRestitution(0.5, 0.7))
     }
 
-    @Test fun valueMixerMixRestitution() {
+fun valueMixerMixRestitution() {
         assertRestitutionChoice(ValueMixer.DEFAULT_MIXER)
     }
 
-    @Test fun valueMixerMixRestitutionVelocity() {
+fun valueMixerMixRestitutionVelocity() {
         assertEquals(0.5, ValueMixer.DEFAULT_MIXER.mixRestitutionVelocity(0.5, 0.7))
     }
 
-    @Test fun worldCreateCollisionData() {
+fun worldCreateCollisionData() {
         val (a, b) = bodies()
         val pair = BasicCollisionPair<CollisionItem<Body, BodyFixture>>(
             BasicCollisionItem(a, fixture(a)), BasicCollisionItem(b, fixture(b)))
@@ -259,7 +281,7 @@ class WorldFilterAndResultCoverageTest {
         assertFalse(data.isContactConstraintCollision())
     }
 
-    @Test fun detectResultCreateSuccess() {
+fun detectResultCreateSuccess() {
         val basic = DetectResult<Body, BodyFixture>()
         val cast = ConvexCastResult<Body, BodyFixture>()
         val convex = ConvexDetectResult<Body, BodyFixture>()
@@ -272,7 +294,7 @@ class WorldFilterAndResultCoverageTest {
         assertNotNull(ray.getRaycast())
     }
 
-    @Test fun detectResultSet() {
+fun detectResultSet() {
         val (body, _) = bodies()
         val fixture = fixture(body)
         val basic = DetectResult<Body, BodyFixture>()
@@ -292,7 +314,7 @@ class WorldFilterAndResultCoverageTest {
         assertEquals(4.0, ray.getRaycast().getDistance())
     }
 
-    @Test fun detectResultCopy() {
+fun detectResultCopy() {
         val (body, _) = bodies()
         val fixture = fixture(body)
         val basic = DetectResult<Body, BodyFixture>().also { it.setBody(body); it.setFixture(fixture) }
@@ -336,7 +358,7 @@ class WorldFilterAndResultCoverageTest {
         assertNotSame(ray.getRaycast(), raySet.getRaycast())
     }
 
-    @Test fun detectResultCompareTo() {
+fun detectResultCompareTo() {
         val cast = ConvexCastResult<Body, BodyFixture>()
         cast.getTimeOfImpact().setTime(0.5)
         val later = cast.copy().also { it.getTimeOfImpact().setTime(6.0) }

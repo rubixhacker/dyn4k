@@ -1,6 +1,6 @@
 package org.dyn4j.collision.narrowphase
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -9,9 +9,15 @@ import org.dyn4j.geometry.Rectangle
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
 
-class ExpandingSimplexQueueTest {
-    @Test
-    fun equalDistanceEdgesFollowPinnedQueueRemovalOrder() {
+val ExpandingSimplexQueueTest by testSuite {
+    test("equalDistanceEdgesFollowPinnedQueueRemovalOrder") { ExpandingSimplexQueueTestFixture().run { equalDistanceEdgesFollowPinnedQueueRemovalOrder() } }
+    test("unorderedDistancesCompareEqualToFiniteDistances") { ExpandingSimplexQueueTestFixture().run { unorderedDistancesCompareEqualToFiniteDistances() } }
+    test("signedZeroProjectionRemainsAnEqualDistanceTie") { ExpandingSimplexQueueTestFixture().run { signedZeroProjectionRemainsAnEqualDistanceTie() } }
+    test("rectanglePairKeepsPinnedGjkNormalThroughContainmentAndOverlap") { ExpandingSimplexQueueTestFixture().run { rectanglePairKeepsPinnedGjkNormalThroughContainmentAndOverlap() } }
+}
+
+private class ExpandingSimplexQueueTestFixture  {
+fun equalDistanceEdgesFollowPinnedQueueRemovalOrder() {
         val bottomLeft = Vector2(-1.0, -1.0)
         val bottomRight = Vector2(1.0, -1.0)
         val topRight = Vector2(1.0, 1.0)
@@ -24,8 +30,7 @@ class ExpandingSimplexQueueTest {
         assertSame(topLeft, simplex.getClosestEdge().point1)
     }
 
-    @Test
-    fun unorderedDistancesCompareEqualToFiniteDistances() {
+fun unorderedDistancesCompareEqualToFiniteDistances() {
         val finite = ExpandingSimplexEdge(Vector2(1.0, 0.0), Vector2(1.0, 1.0), 1)
         val unordered = ExpandingSimplexEdge(Vector2(Double.NaN, 0.0), Vector2(1.0, 0.0), 1)
 
@@ -33,8 +38,7 @@ class ExpandingSimplexQueueTest {
         assertEquals(0, finite.compareTo(unordered))
     }
 
-    @Test
-    fun signedZeroProjectionRemainsAnEqualDistanceTie() {
+fun signedZeroProjectionRemainsAnEqualDistanceTie() {
         val negativeZero = ExpandingSimplexEdge(Vector2(-0.0, -0.0), Vector2(1.0, -0.0), 1)
         val positiveZero = ExpandingSimplexEdge(Vector2(0.0, 0.0), Vector2(1.0, 0.0), 1)
 
@@ -42,8 +46,7 @@ class ExpandingSimplexQueueTest {
         assertEquals(0, positiveZero.compareTo(negativeZero))
     }
 
-    @Test
-    fun rectanglePairKeepsPinnedGjkNormalThroughContainmentAndOverlap() {
+fun rectanglePairKeepsPinnedGjkNormalThroughContainmentAndOverlap() {
         val large = Rectangle(1.0, 1.0)
         val small = Rectangle(0.5, 0.5)
         val first = Transform()

@@ -24,8 +24,7 @@
  */
 package org.dyn4j.coverage.dynamics.joint.core
 
-import kotlin.test.BeforeTest
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -42,14 +41,47 @@ import org.dyn4j.geometry.Geometry
 import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 
-class RevoluteJointCoreCoverageTest {
+val RevoluteJointCoreCoverageTest by testSuite {
+    test("createWithNullBody1") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { createWithNullBody1() } }
+    test("createWithNullBody2") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { createWithNullBody2() } }
+    test("createSuccess") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { createSuccess() } }
+    test("createWithNullAnchor") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { createWithNullAnchor() } }
+    test("createWithSameBody") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { createWithSameBody() } }
+    test("setMaximumMotorTorque") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setMaximumMotorTorque() } }
+    test("setMaximumMotorTorqueNegative") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setMaximumMotorTorqueNegative() } }
+    test("setMaximumMotorTorqueSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setMaximumMotorTorqueSleep() } }
+    test("setMaximumMotorTorqueEnabledSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setMaximumMotorTorqueEnabledSleep() } }
+    test("setMotorEnabled") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setMotorEnabled() } }
+    test("setMotorEnabledSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setMotorEnabledSleep() } }
+    test("setMotorSpeed") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setMotorSpeed() } }
+    test("setMotorSpeedSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setMotorSpeedSleep() } }
+    test("setUpperLimitSuccess") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setUpperLimitSuccess() } }
+    test("setLowerLimit") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setLowerLimit() } }
+    test("setUpperAndLowerLimits") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setUpperAndLowerLimits() } }
+    test("setUpperAndLowerLimitsToSameValue") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setUpperAndLowerLimitsToSameValue() } }
+    test("setLimitsReferenceAngle") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsReferenceAngle() } }
+    test("setLimitsReferenceAngleSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsReferenceAngleSleep() } }
+    test("setLimitEnabledSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setLimitEnabledSleep() } }
+    test("setLimitsSameSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsSameSleep() } }
+    test("setLimitsDifferentSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsDifferentSleep() } }
+    test("setLowerLimitSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setLowerLimitSleep() } }
+    test("setUpperLimitSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setUpperLimitSleep() } }
+    test("setLimitsEnabledSameSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsEnabledSameSleep() } }
+    test("setLimitsEnabledDifferentSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsEnabledDifferentSleep() } }
+    test("setLimitsEnabledSleep") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { setLimitsEnabledSleep() } }
+    test("shift") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { shift() } }
+    test("copy") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { copy() } }
+    test("copyFailed") { RevoluteJointCoreCoverageTestFixture().apply { setup() }.run { copyFailed() } }
+}
+
+private class RevoluteJointCoreCoverageTestFixture  {
     private lateinit var b1: Body
     private lateinit var b2: Body
 
-    @Test fun createWithNullBody1() { assertFailsWith<NullPointerException> { RevoluteJoint<Body>(null, Body(), Vector2()) } }
-    @Test fun createWithNullBody2() { assertFailsWith<NullPointerException> { RevoluteJoint<Body>(Body(), null, Vector2()) } }
+fun createWithNullBody1() { assertFailsWith<NullPointerException> { RevoluteJoint<Body>(null, Body(), Vector2()) } }
+fun createWithNullBody2() { assertFailsWith<NullPointerException> { RevoluteJoint<Body>(Body(), null, Vector2()) } }
 
-    @BeforeTest fun setup() {
+    fun setup() {
         b1 = Body()
         b1.addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
         b1.setMass(MassType.NORMAL)
@@ -57,7 +89,7 @@ class RevoluteJointCoreCoverageTest {
         b2.addFixture(Geometry.createCircle(1.0), 1.0, 0.2, 0.0)
         b2.setMass(MassType.NORMAL)
     }
-    @Test fun createSuccess() {
+fun createSuccess() {
         var p = Vector2(1.0, 2.0)
         var rj = RevoluteJoint<Body>(b1, b2, p)
         assertEquals(p, rj.getAnchor1())
@@ -82,15 +114,15 @@ class RevoluteJointCoreCoverageTest {
         assertNotNull(rj.toString())
     }
 
-    @Test fun createWithNullAnchor() {
+fun createWithNullAnchor() {
         assertFailsWith<NullPointerException> { RevoluteJoint<Body>(b1, b2, null) }
     }
 
-    @Test fun createWithSameBody() {
+fun createWithSameBody() {
         assertFailsWith<IllegalArgumentException> { RevoluteJoint<Body>(b1, b1, Vector2()) }
     }
 
-    @Test fun setMaximumMotorTorque() {
+fun setMaximumMotorTorque() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         rj.setMaximumMotorTorque(0.0)
         assertEquals(0.0, rj.getMaximumMotorTorque())
@@ -100,12 +132,12 @@ class RevoluteJointCoreCoverageTest {
         assertEquals(2548.0, rj.getMaximumMotorTorque())
     }
 
-    @Test fun setMaximumMotorTorqueNegative() {
+fun setMaximumMotorTorqueNegative() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFailsWith<IllegalArgumentException> { rj.setMaximumMotorTorque(-2.0) }
     }
 
-    @Test fun setMaximumMotorTorqueSleep() {
+fun setMaximumMotorTorqueSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isMotorEnabled())
         assertEquals(1000.0, rj.getMaximumMotorTorque())
@@ -131,7 +163,7 @@ class RevoluteJointCoreCoverageTest {
         assertTrue(b2.isAtRest())
     }
 
-    @Test fun setMaximumMotorTorqueEnabledSleep() {
+fun setMaximumMotorTorqueEnabledSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isMotorEnabled())
         assertEquals(1000.0, rj.getMaximumMotorTorque())
@@ -159,7 +191,7 @@ class RevoluteJointCoreCoverageTest {
         assertTrue(b2.isAtRest())
     }
 
-    @Test fun setMotorEnabled() {
+fun setMotorEnabled() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isMotorEnabled())
         rj.setMotorEnabled(true)
@@ -168,7 +200,7 @@ class RevoluteJointCoreCoverageTest {
         assertFalse(rj.isMotorEnabled())
     }
 
-    @Test fun setMotorEnabledSleep() {
+fun setMotorEnabledSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isMotorEnabled())
         assertFalse(b1.isAtRest())
@@ -195,7 +227,7 @@ class RevoluteJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setMotorSpeed() {
+fun setMotorSpeed() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertEquals(0.0, rj.getMotorSpeed())
         rj.setMotorSpeed(2.0)
@@ -206,7 +238,7 @@ class RevoluteJointCoreCoverageTest {
         assertEquals(0.0, rj.getMotorSpeed())
     }
 
-    @Test fun setMotorSpeedSleep() {
+fun setMotorSpeedSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isMotorEnabled())
         assertEquals(0.0, rj.getMotorSpeed())
@@ -232,40 +264,40 @@ class RevoluteJointCoreCoverageTest {
         assertTrue(b2.isAtRest())
     }
 
-    @Test fun setUpperLimitSuccess() {
+fun setUpperLimitSuccess() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         rj.setUpperLimit((10.0 * kotlin.math.PI / 180.0))
         assertEquals((10.0 * kotlin.math.PI / 180.0), rj.getUpperLimit(), 1e-6)
     }
 
-    @Test fun setLowerLimit() {
+fun setLowerLimit() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         rj.setLowerLimit((-10.0 * kotlin.math.PI / 180.0))
         assertEquals((-10.0 * kotlin.math.PI / 180.0), rj.getLowerLimit(), 1e-6)
     }
 
-    @Test fun setUpperAndLowerLimits() {
+fun setUpperAndLowerLimits() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         rj.setLimits((-30.0 * kotlin.math.PI / 180.0), (20.0 * kotlin.math.PI / 180.0))
         assertEquals((-30.0 * kotlin.math.PI / 180.0), rj.getLowerLimit(), 1e-6)
         assertEquals((20.0 * kotlin.math.PI / 180.0), rj.getUpperLimit(), 1e-6)
     }
 
-    @Test fun setUpperAndLowerLimitsToSameValue() {
+fun setUpperAndLowerLimitsToSameValue() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         rj.setLimits((30.0 * kotlin.math.PI / 180.0))
         assertEquals((30.0 * kotlin.math.PI / 180.0), rj.getLowerLimit(), 1e-6)
         assertEquals((30.0 * kotlin.math.PI / 180.0), rj.getUpperLimit(), 1e-6)
     }
 
-    @Test fun setLimitsReferenceAngle() {
+fun setLimitsReferenceAngle() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertEquals(0.0, rj.getLimitsReferenceAngle())
         rj.setLimitsReferenceAngle((30.0 * kotlin.math.PI / 180.0))
         assertEquals((30.0 * kotlin.math.PI / 180.0), rj.getLimitsReferenceAngle())
     }
 
-    @Test fun setLimitsReferenceAngleSleep() {
+fun setLimitsReferenceAngleSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isLimitsEnabled())
         rj.setLimitsEnabled(true)
@@ -284,7 +316,7 @@ class RevoluteJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setLimitEnabledSleep() {
+fun setLimitEnabledSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isLimitsEnabled())
         rj.setLimitsEnabled(false)
@@ -313,7 +345,7 @@ class RevoluteJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun setLimitsSameSleep() {
+fun setLimitsSameSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isLimitsEnabled())
         var defaultLowerLimit = rj.getLowerLimit()
@@ -367,7 +399,7 @@ class RevoluteJointCoreCoverageTest {
         assertEquals(-kotlin.math.PI, rj.getUpperLimit())
     }
 
-    @Test fun setLimitsDifferentSleep() {
+fun setLimitsDifferentSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isLimitsEnabled())
         var defaultLowerLimit = rj.getLowerLimit()
@@ -421,7 +453,7 @@ class RevoluteJointCoreCoverageTest {
         assertEquals(2*kotlin.math.PI, rj.getUpperLimit())
     }
 
-    @Test fun setLowerLimitSleep() {
+fun setLowerLimitSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isLimitsEnabled())
         var defaultLowerLimit = rj.getLowerLimit()
@@ -453,7 +485,7 @@ class RevoluteJointCoreCoverageTest {
         assertEquals(defaultUpperLimit, rj.getUpperLimit())
     }
 
-    @Test fun setUpperLimitSleep() {
+fun setUpperLimitSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isLimitsEnabled())
         var defaultLowerLimit = rj.getLowerLimit()
@@ -485,7 +517,7 @@ class RevoluteJointCoreCoverageTest {
         assertEquals(2*kotlin.math.PI, rj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledSameSleep() {
+fun setLimitsEnabledSameSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isLimitsEnabled())
         var defaultLowerLimit = rj.getLowerLimit()
@@ -519,7 +551,7 @@ class RevoluteJointCoreCoverageTest {
         assertEquals(kotlin.math.PI, rj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledDifferentSleep() {
+fun setLimitsEnabledDifferentSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isLimitsEnabled())
         var defaultLowerLimit = rj.getLowerLimit()
@@ -573,7 +605,7 @@ class RevoluteJointCoreCoverageTest {
         assertEquals(kotlin.math.PI, rj.getUpperLimit())
     }
 
-    @Test fun setLimitsEnabledSleep() {
+fun setLimitsEnabledSleep() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2())
         assertFalse(rj.isLimitsEnabled())
         rj.setLimitsEnabled(true)
@@ -603,7 +635,7 @@ class RevoluteJointCoreCoverageTest {
         assertFalse(b2.isAtRest())
     }
 
-    @Test fun shift() {
+fun shift() {
         var rj = RevoluteJoint<Body>(b1, b2, Vector2(-3.0, 0.5))
         assertEquals(-3.0, rj.getAnchor1().x)
         assertEquals(0.5, rj.getAnchor1().y)
@@ -616,7 +648,7 @@ class RevoluteJointCoreCoverageTest {
         assertEquals(0.5, rj.getAnchor2().y)
     }
 
-    @Test fun copy() {
+fun copy() {
         val joint = RevoluteJoint<Body>(b1, b2, Vector2(-3.0, 0.5))
         joint.setCollisionAllowed(true)
         joint.setLimits(2.0, 5.0)
@@ -673,7 +705,7 @@ class RevoluteJointCoreCoverageTest {
         assertSame(b2, secondShared.getBody2())
         assertSame(secondShared.getBody1(), secondShared.getBodies()[0])
     }
-    @Test fun copyFailed() {
+fun copyFailed() {
         class SubBody : Body()
         val joint = RevoluteJoint<Body>(SubBody(), SubBody(), Vector2())
         assertFailsWith<CopyException> { joint.copy() }
