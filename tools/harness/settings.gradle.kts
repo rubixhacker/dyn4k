@@ -13,4 +13,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "dyn4k-harness"
 
-include(":core", ":host", ":compatibility", ":performance", ":numerical", ":qualification")
+include(":core", ":host", ":compatibility", ":performance", ":numerical", ":qualification", ":android")
