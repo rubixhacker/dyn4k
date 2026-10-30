@@ -243,6 +243,9 @@ go.
 | `tools/qualification/collection.py` | `CollectionRules`/`CollectionRuntime`/`CollectionCli` + `:qualification:collectQualification` | the two central-job steps in `qualification.yml` |
 | `tools/qualification/publication.py` | `PublicationBundle`/`PublicationCli` + `:qualification:packagePublication` | both packaging steps in `qualification.yml` |
 | `tools/qualification/test_publication.py` (31 cases) | `PublicationBundling` 9, `PublicationTransport` 3, `PublicationGaps` 4, `PublicationFixture` 2, `PublicationWorkflow` 1 plus the pre-existing audit suites | step dropped from `qualification-source-checks.yml`; the contract mutation in `test_qualification_workflow.py` retargeted |
+| `tools/qualification/test_safari_windows_file.py` (7 cases) | `SafariWindowsFileSuite` (7) | the Windows layer is ported behind an injected kernel; production fails closed |
+| `tools/qualification/test_safari_windows_process.py` (14 cases) | `SafariWindowsProcessSuite` (14) | same, behind the injected kernel/launch seams |
+| `tools/qualification/test_safari_generated_shape.py` (1 case) | the CRLF self-checks in `SafariLeftoversSuite` | — |
 | `tools/qualification/test_collection.py` (15 cases) | `CollectionContract` (14 tests) | step dropped from `qualification-source-checks.yml`; the three list assertions in `test_qualification_workflow.py` updated |
 | `tools/qualification/test_cross_run_collection.py` (35 cases) | `CrossRunCollectionContract` (29 tests) | same |
 | `tools/harness/performance/parity/generate_leaf_vectors.py` | `LeafVectors.kt` (recorded constants) | deleted because it imported `warmup_probe` and `calibrate`; it could no longer run. The vectors it produced are committed and the generator is in git history |
