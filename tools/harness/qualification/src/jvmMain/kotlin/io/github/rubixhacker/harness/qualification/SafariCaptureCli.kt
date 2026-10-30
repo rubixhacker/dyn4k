@@ -17,9 +17,9 @@ import kotlinx.serialization.json.buildJsonObject
  * --candidate-sha <sha> --output <dir> --input-context <raw> --capture-context
  * ```
  *
- * The capture and audit forms are ported. The context scan is not: `capture_karma_context` (the
- * `CONTEXT_*` enumeration) is still the Python reference, so `--capture-context` fails closed with
- * an explicit message instead of producing an inventory that no ported code verified.
+ * The context scan is ported as [SafariContext.captureKarmaContext]: it writes the inventory next to
+ * the copied configurations and sidecars, prints the same four-field summary, and exits non-zero
+ * unless the inventory says `CONTEXT_COMPLETE`.
  */
 object SafariCaptureCli {
     @JvmStatic
@@ -71,11 +71,24 @@ object SafariCaptureCli {
             if (audit || configuration != null || inputContext == null) {
                 return usage("context scan requires input context and cannot audit or run Gradle")
             }
-            System.err.println(
-                "safari capture context is not ported: capture_karma_context (the CONTEXT_* " +
-                    "enumeration) is still the Python reference, so no inventory was verified",
+            val inventory = try {
+                SafariContext.captureKarmaContext(root, candidateSha, output, inputContext)
+            } catch (error: Exception) {
+                System.err.println(error.message ?: error.toString())
+                return 1
+            }
+            val status = Py.str(inventory["status"])
+            println(
+                PyJson.renderDefault(
+                    buildJsonObject {
+                        put("candidate_sha", inventory["candidate_sha"] ?: JsonNull)
+                        put("status", status?.let { JsonPrimitive(it) } ?: JsonNull)
+                        put("qualified", JsonPrimitive(false))
+                        put("output", JsonPrimitive(output.toString()))
+                    },
+                ),
             )
-            return 2
+            return if (status == SafariContextRules.COMPLETE) 0 else 1
         }
         if (inputContext != null) {
             return usage("input context requires --capture-context")

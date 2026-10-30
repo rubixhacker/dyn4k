@@ -2,7 +2,7 @@
 package io.github.rubixhacker.harness.qualification
 
 internal object SafariYarnLockVectors {
-    const val REVISION = "a5109302cd9bbc3f45673df7d768f9d751983371"
+    const val REVISION = "187e465a1e562c7a79562edc5a5e068eb26ddfa9"
     const val TRACKED_LOCK = "kotlin-js-store/yarn.lock"
     const val GENERATED_LOCK = "build/js/yarn.lock"
     val SOURCE_INPUTS = listOf("build.gradle.kts", "settings.gradle.kts", "gradle/wrapper/gradle-wrapper.properties")
@@ -56,5 +56,49 @@ internal object SafariYarnLockVectors {
         Predicate("unrelated failure", "", "FAILURE: Build failed with an exception.\n* What went wrong:\nExecution failed for task ':compileKotlin'.\n> Lock file was changed. Run the `kotlinUpgradeYarnLock` task to actualize lock file\n* Try:\nBUILD FAILED in 1m 2s\n", false),
         Predicate("quoted phrase later", "", "FAILURE: Build failed with an exception.\n* What went wrong:\nExecution failed for task ':kotlinStoreYarnLock' (registered by plugin class 'org.jetbrains.kotlin.gradle.targets.js.yarn.YarnPlugin').\n> Lock file was changed. Run the `kotlinUpgradeYarnLock` task to actualize lock file\n* Try:\nBUILD FAILED in 1m 2s\n* Exception is:\n> Lock file was changed. Run the `kotlinUpgradeYarnLock` task to actualize lock file\n", true),
         Predicate("two failures headers", "", "FAILURE: Build failed with an exception.\n* What went wrong:\nExecution failed for task ':kotlinStoreYarnLock' (registered by plugin class 'org.jetbrains.kotlin.gradle.targets.js.yarn.YarnPlugin').\n> Lock file was changed. Run the `kotlinUpgradeYarnLock` task to actualize lock file\n* Try:\nBUILD FAILED in 1m 2s\nFAILURE: Build failed with an exception.\n", false),
+    )
+
+    val CONTEXT_LIMITS = listOf(
+        "files" to 16, "file_bytes" to 262144, "total_bytes" to 1048576, "upload_bytes" to 2097152, "inventory_bytes" to 262144, "raw_entries" to 128, "entries" to 2048, "depth" to 16, "seconds" to 15, "launches" to 8
+    )
+
+    /** One recorded `inputs` entry of a scanner run, as the reference wrote it. */
+    class ContextEntry(
+        val path: String,
+        val status: String,
+        val reason: String,
+        val originalSize: Long,
+        val retainedSize: Long,
+        val sha256: String?,
+    )
+
+    /** The scanner invariants of one clean fixture run. */
+    class ContextInventory(
+        val status: String,
+        val configuration: String,
+        val copiedFiles: Long,
+        val matchedFiles: Long,
+        val entriesSeen: Long,
+        val sidecars: List<ContextEntry>,
+    )
+
+    val CONTEXT_INVENTORY = ContextInventory(
+        status = "CONTEXT_COMPLETE",
+        configuration = "development",
+        copiedFiles = 2,
+        matchedFiles = 2,
+        entriesSeen = 3,
+        sidecars = listOf(
+            ContextEntry("host-outcome.txt", "copied", "copied", 30, 30, "aae4ed1012c786fdc962c2bc9d35c98d6d8c91cf6b78bdffdca758debf6f5a64"),
+            ContextEntry("launch-123.txt", "copied", "copied", 8, 8, "b81e6c42ed6644a3ebedd8a61d036545b4d03b5492d355e30ccf18a6dbdc9c59"),
+            ContextEntry("launch-outcome-123.txt", "copied", "copied", 13, 13, "1d89753dbd449031fb0f2eb2357f4633a644bd395e8d82530144ed97b1c889b1"),
+            ContextEntry("open-123.stderr", "copied", "copied", 14, 14, "1058784ec6a34fae4edc711264875c3f3e6422af2e9e8f37e8cf18e2f9cf7d33"),
+            ContextEntry("open-123.stdout", "copied", "copied", 0, 0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+            ContextEntry("process-123.txt", "copied", "copied", 45, 45, "6efdaed332347ce7129520e76e1843c212020f8d42b8c222175b48eaac2cf7c7"),
+            ContextEntry("process-after.txt", "copied", "copied", 8, 8, "b8e045f6f46cab43b8f4c73e1d52a36e7fd5cd9f97f860dcab966cdd4ca25e2d"),
+            ContextEntry("redirect-123.html", "copied", "copied", 9, 9, "9ec3accb648c6979ccc8a290fd4159f9c90f42de9fb2dd77e00a95a1fae02e19"),
+            ContextEntry("sample-state-123.txt", "copied", "copied", 35, 35, "510b1dc620ef169a72d280e43fa8b6c222462afc21c5bf119c7b3ee9e63fe44a"),
+            ContextEntry("session-after.txt", "copied", "copied", 5, 5, "f331546b2cd54016f45e418995000ecd8a6dbece30b5085337f3cfc897124768"),
+        ),
     )
 }

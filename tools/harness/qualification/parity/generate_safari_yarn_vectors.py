@@ -162,10 +162,109 @@ def main():
         add("        Predicate(" + kotlin(label) + ", " + kotlin("") + ", " + kotlin(value)
             + ", " + ("true" if outcome else "false") + "),")
     add("    )")
+    add()
+    add("    val CONTEXT_LIMITS = listOf(")
+    add("        " + ", ".join(kotlin(key) + " to " + str(value)
+                              for key, value in context_limits()))
+    add("    )")
+    add()
+    add("    /** One recorded `inputs` entry of a scanner run, as the reference wrote it. */")
+    add("    class ContextEntry(")
+    add("        val path: String,")
+    add("        val status: String,")
+    add("        val reason: String,")
+    add("        val originalSize: Long,")
+    add("        val retainedSize: Long,")
+    add("        val sha256: String?,")
+    add("    )")
+    add()
+    add("    /** The scanner invariants of one clean fixture run. */")
+    add("    class ContextInventory(")
+    add("        val status: String,")
+    add("        val configuration: String,")
+    add("        val copiedFiles: Long,")
+    add("        val matchedFiles: Long,")
+    add("        val entriesSeen: Long,")
+    add("        val sidecars: List<ContextEntry>,")
+    add("    )")
+    add()
+    record = context_inventory()
+    add("    val CONTEXT_INVENTORY = ContextInventory(")
+    add("        status = " + kotlin(record["status"]) + ",")
+    add("        configuration = " + kotlin(record["configuration"]) + ",")
+    add("        copiedFiles = " + str(record["copied_files"]) + ",")
+    add("        matchedFiles = " + str(record["matched_files"]) + ",")
+    add("        entriesSeen = " + str(record["entries_seen"]) + ",")
+    add("        sidecars = listOf(")
+    for entry in record["sidecars"]:
+        add("            ContextEntry(" + ", ".join((
+            kotlin(entry["path"]), kotlin(entry["status"]), kotlin(entry["reason"]),
+            str(entry["original_size"]), str(entry["retained_size"]),
+            "null" if entry["sha256"] is None else kotlin(entry["sha256"]))) + "),")
+    add("        ),")
+    add("    )")
     add("}")
-    # lock_failure_signature takes a path: rewrite the cases with a real temporary file
     TARGET.write_text("\n".join(lines) + "\n")
     print(f"wrote {TARGET} at {revision()}")
+
+
+def context_limits():
+    """`inventory["limits"]`, in the order `capture_karma_context` writes it."""
+    return (
+        ("files", s.CONTEXT_MAX_FILES),
+        ("file_bytes", s.CONTEXT_MAX_FILE_BYTES),
+        ("total_bytes", s.CONTEXT_MAX_TOTAL_BYTES),
+        ("upload_bytes", s.CONTEXT_MAX_UPLOAD_BYTES),
+        ("inventory_bytes", s.CONTEXT_MAX_INVENTORY_BYTES),
+        ("raw_entries", s.CONTEXT_MAX_RAW_ENTRIES),
+        ("entries", s.CONTEXT_MAX_ENTRIES),
+        ("depth", s.CONTEXT_MAX_DEPTH),
+        ("seconds", s.CONTEXT_MAX_SECONDS),
+        ("launches", s.CONTEXT_MAX_LAUNCHES),
+    )
+
+
+def context_inventory():
+    """Run `capture_karma_context` over the reference's own fixture and keep its invariants.
+
+    The scanned configuration bytes embed the absolute package path, so the configuration
+    entries' sizes and digests differ between checkouts. The sidecars are fixed text, so their
+    records, the counters, and the status are the same everywhere; those are what the vector
+    records, keyed by path so the directory order does not matter.
+    """
+    import test_safari_yarn_lock as reference_case
+
+    case = reference_case.SafariYarnLockTests("test_context_scanner_copies_regular_unique_config_with_inventory")
+    case.setUp()
+    try:
+        context, package = case.context_fixture()
+        case.write_valid_karma_configs()
+        (package / "node_modules").symlink_to(case.root, target_is_directory=True)
+        inventory = case.capture_context(context)
+    finally:
+        case.doCleanups()
+    sidecars = sorted(
+        (item for item in inventory["inputs"] if "/" not in item["path"]),
+        key=lambda item: item["path"],
+    )
+    return {
+        "status": inventory["status"],
+        "configuration": inventory["configuration"],
+        "copied_files": inventory["copied_files"],
+        "matched_files": inventory["matched_files"],
+        "entries_seen": inventory["entries_seen"],
+        "sidecars": [
+            {
+                "path": item["path"],
+                "status": item["status"],
+                "reason": item["reason"],
+                "original_size": item["original_size"],
+                "retained_size": item["retained_size"],
+                "sha256": item.get("sha256"),
+            }
+            for item in sidecars
+        ],
+    }
 
 
 if __name__ == "__main__":

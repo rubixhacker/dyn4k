@@ -26,7 +26,7 @@ cd tools/harness && ../../gradlew checkAll
 | --- | --- | --- | --- |
 | `:core` | `qualify.py` contract: matrix, digests, canonical JSON, publication metadata, provider check | ported | 27 |
 | `:host` | `qualify.digest(path)`, `qualify.require_clean_checkout` | ported | 7 |
-| `:qualification` | `guard_hosted_runners.py` (**Python deleted**), `qualify.py` archives/audits/evaluation/CLI actions, `stage.py`, `publication.py`, `artifact.py`, `collection.py` (38 of 44 functions; the six Windows handle helpers are not portable), `full_hosted.py` (all but `run`), `hosted.py`, `safari_reporter.py`, `safari_yarn_lock.py` (39 of 124 methods), `independent_gates` (most verifiers), `independent_linux_observer` (verification half), `full_corpus.py`, `full_suite_manifest.py`, `duplicate_provider.py` | partial | 598 |
+| `:qualification` | `guard_hosted_runners.py` (**Python deleted**), `qualify.py` archives/audits/evaluation/CLI actions, `stage.py`, `publication.py`, `artifact.py`, `collection.py` (38 of 44 functions; the six Windows handle helpers are not portable), `full_hosted.py` (all but `run`), `hosted.py`, `safari_reporter.py`, `safari_yarn_lock.py` (76 of 124 methods), `independent_gates` (most verifiers), `independent_linux_observer` (verification half), `full_corpus.py`, `full_suite_manifest.py`, `duplicate_provider.py` | partial | 637 |
 | `:compatibility` | `world_ci`, `governing_*`, `candidate_coverage`, `method_coverage`, `java_corpus`, `execution_probe`, `full_ci`, `exception_ci`, `ledger`, `module_probe`; `BaselineOracle` now delegates to `:baseline` instead of duplicating the three `javap` readers | partial | 51 |
 | `:performance` | `manifest`, `analyze`, `measure`, `candidate_*`, `sustained_archive`, `reference_study`, `host_capacity_control`, `stress_monitor`, `warmup_probe` (**Python deleted**), `calibrate` (**Python deleted**), `ccd_route_trace` | partial | 181 |
 | `:numerical` | `portable/cases.py`; `portable/receipt.py`; `portable/exact_consistency.py`; `portable/orthogonality.py`; `portable/physical.py` (`nominal_free`, `audit_physical`, sleep/wake, phases); `numeric_class_witness.read_witness`; `compare.py` (`compare`, `audit_reference`, `load_receipt`, `load_fixture`, the whole `compare_value` engine, `check_counts`, `check_snapshot`); `candidate/nominal_zero.py`; `weld_pulley_quality.py` (engine, phases, `atan`/`pi` enclosures, `Decimal`-at-80 rendering); `portable/rotation_oracle.py` (encoding, digest and manifest helpers only) | partial | 91 |
@@ -104,33 +104,48 @@ equivalent and must be reproduced before the suite can retire:
 `test_full_hosted.py` import for target tuples the recorded archives do not cover, so it cannot be
 deleted before either those two suites retire or the builder is extracted into its own module.
 
-### `safari_yarn_lock.py` — 39 of the 124 reference methods ported
+### `safari_yarn_lock.py` — 76 of the 124 reference methods ported
 
-The pure contract, the POSIX host half, the capture receipt, the package graph, the public audit, and
-the CLI are ported (`SafariYarnLockRules.kt`, `SafariYarnLockHost.kt`, `SafariCapture.kt`,
-`SafariCaptureCli.kt`; 46 tests across `SafariYarnLockContract`, `SafariCaptureStatus`,
-`SafariHostedCapture`, `SafariPackageGraphSuite` and `SafariArchivedWorkflow`): every constant, the
-hosted task markers, the capture timeout and overflow predicates, the `full_hosted_command` forms,
-the lock-failure signature, the bounded source read/copy, the candidate gate, the process runner's
+The pure contract, the POSIX host half, the capture receipt, the package graph, the public audit, the
+Karma context scanner, and the CLI are ported (`SafariYarnLockRules.kt`, `SafariYarnLockHost.kt`,
+`SafariCapture.kt`, `SafariContextRules.kt`, `SafariContext.kt`, `SafariCaptureCli.kt`; 85 tests
+across `SafariYarnLockContract`, `SafariCaptureStatus`, `SafariHostedCapture`,
+`SafariPackageGraphSuite`, `SafariArchivedWorkflow`, `SafariContextScanner`, `SafariContextBinding`,
+`SafariContextCandidate`, `SafariContextSampler`, `SafariLaunchWrapper`): every constant, the hosted
+task markers, the capture timeout and overflow predicates, the `full_hosted_command` forms, the
+lock-failure signature, the bounded source read/copy, the candidate gate, the process runner's
 600-second deadline with truncation accounting, `capture`, `hosted_expected_files`,
-`capture_package_graph`, `audit_capture`, and `main` (as the `safariYarnLock` Gradle task).
+`capture_package_graph`, `audit_capture`, `capture_karma_context` with its inventory and both raw
+contexts, and `main` (as the `safariYarnLock` Gradle task, including its two context modes).
 
-The reference patches `run_lock_task`, `safari_reporter.stage`, `capture_package_graph` and
-`MAX_PROCESS_SECONDS` to reach the failure branches. The JVM has no monkey-patching, so
-`SafariCapture.capture` exposes the same seams as parameters (`lockTask`, `stageHook`,
-`afterPackageGraph`, `deadlineSeconds`); production passes none of them. There is one end-to-end case
-that runs the real `runLockTask` against a committed `gradlew` wrapper.
+The reference patches `run_lock_task`, `safari_reporter.stage`, `capture_package_graph`,
+`MAX_PROCESS_SECONDS`, `os.scandir`, and the ten `CONTEXT_MAX_*` globals to reach the failure branches.
+The JVM has no monkey-patching, so the same seams are parameters: `SafariCapture.capture` takes
+`lockTask`, `stageHook`, `afterPackageGraph` and `deadlineSeconds`, and
+`SafariContext.captureKarmaContext` takes `SafariContextBounds` (the ten limits, production defaults)
+and `scanHook` (the enumeration call). Production passes none of them. One end-to-end case runs the
+real `runLockTask` against a committed `gradlew` wrapper, and one runs `capture_karma_context` over a
+fixture whose sidecar records, counters and status are the ones the Python implementation produces
+(`SafariYarnLockVectors.CONTEXT_INVENTORY`, generated by running the reference on the reference's own
+fixture).
 
-85 methods remain (64 of the 102 in `test_safari_yarn_lock.py`, all 7 in
-`test_safari_windows_file.py`, all 14 in `test_safari_windows_process.py`), in five groups:
+48 of the 124 methods remain, in six groups:
 
-- `capture_karma_context` and its wrapper (40): the 34 `test_context_*`/`test_public_context_*`
-  scanner, bound, sampling and corruption cases, and the 8 `test_wrapper_*`/`test_git_bash_*` Git
-  Bash sampler cases. `main`'s two context modes fail closed with an explicit message.
 - Windows-only machinery (27): the 7 file and 14 process cases, `_run_lock_task_windows` job
   objects, suspended creation, `CreateFileW` share modes, `LockedDirectory`, the blocked
   stage rename, the detached job child, the staging-handle residue, the postlaunch setup failures,
   the log-open failure ordering, and the init-script/context CRLF text-write cases.
+- Git Bash sampler selection (2): `test_wrapper_uses_git_bash_when_bare_bash_does_not_run_script`
+  and `test_git_bash_from_mingw_git_uses_same_installation` exercise `git_bash_from_git` and
+  `bash_executable`, which pick `bash.exe` from a `mingw64`/`mingw32`/`ucrt64` Git for Windows
+  installation. The port runs `safari-launch.sh` through the host shell and detects no Git Bash, so
+  there is no code for them to exercise.
+- Context fixture text-write self-check (1):
+  `test_context_fixture_retains_exact_reporter_under_windows_text_writes` asserts that the
+  *reference fixture builder* writes the Karma configuration with `write_bytes`, so a Windows
+  text-mode `write_text` patch cannot translate the committed reporter. The Kotlin fixture writes
+  bytes through `Files.write`, and the JVM has no text-mode translation to patch, so the assertion
+  has no counterpart; the property it protects is structural in the port.
 - POSIX process-runner error permutations (5): the two selector setup/registration failures, the
   process-group probe, the incomplete pipe, and the detached-child pipe. The thread-based drain has
   no selector to fail and probes no process group.
@@ -144,9 +159,13 @@ that runs the real `runLockTask` against a committed `gradlew` wrapper.
   case), and `test_public_capture_rejects_generated_config_symlinked_package_ancestor`.
 
 The earlier "27 of 124" was a case-level aggregate that counted shared predicates rather than test
-methods; 39 is the method-level count, not a regression.
+methods; 76 is the method-level count, not a regression. An earlier note here also said the context
+group held 34 scanner cases; it holds 32, which with the 8 wrapper cases is the 40 the group started
+this pass with. 37 of those 40 are reproduced (`SafariContextScanner`, `SafariContextBinding`,
+`SafariContextCandidate`, `SafariContextSampler`, `SafariLaunchWrapper`), and the three that are not
+are named in the Git Bash and context-fixture groups above.
 
-Of the 85 that remain, the Windows and selector groups are **not** dead code, and an earlier note here
+Of the 48 that remain, the Windows and selector groups are **not** dead code, and an earlier note here
 claiming a ceiling of about 91 was wrong:
 
 - `test_safari_windows_file.py` (7) runs on POSIX today; it exercises the file layer through symlinks
@@ -166,7 +185,10 @@ pretending to lock; the port replaces the three Python paths in `HOSTED_SOURCE_I
 tools that implement the same behaviour, so an archived `source_input_sha256` map from the Python
 diagnostic will not match the Kotlin one; the drain's `stream_incomplete` means a reader thread
 outlived the drain deadline, not that a selector unregistered; and `capture_package_graph` sorts the
-workspace inventory by path parts (as `pathlib` does), not by path text.
+workspace inventory by path parts (as `pathlib` does), not by path text. The context scanner
+materialises one directory's entries before descending into it, so it holds no descriptor across the
+recursion; the reference keeps the `scandir` iterator open while it recurses. Both record the same
+entries in readdir order, and neither promises an order.
 
 ### Parity gap: descriptor anchoring
 
