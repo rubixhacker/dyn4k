@@ -54,7 +54,7 @@ val MatrixContract by testSuite {
     }
 }
 
-val PublicationContract by testSuite {
+val PublicationPathContract by testSuite {
     test("publication names match the recorded names") {
         val observed = Golden.objects("publication_names").map {
             Qualification.targetPublicationName(it.str("module"), it.str("target"))
