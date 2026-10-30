@@ -82,7 +82,27 @@ deleted alone. Measured on 2026-10-30:
 | `collection.py` | 1,503 | **deleted** 2026-10-30, with `test_collection.py` and `test_cross_run_collection.py` |
 | `test_publication.py` | 1,516 | imported as a fixture builder by `test_artifact.py:41` and `test_full_hosted.py:22/1388/1558/2227`; `qualification-source-checks.yml:143`; `test_qualification_workflow.py:499/882` string-match that workflow line |
 | `artifact.py` | 621 | `full_hosted.py:25` (`run`), `qualify.py:1614` and `:1701`, `independent_gates.py:3300`, `test_artifact.py:13`, `qualification.yml:374`, `:636`, `:1074` |
-| `publication.py` | 87 | **workflow steps switched** 2026-10-30 to `:qualification:packagePublication`; still imported by `test_publication.py:16` |
+| `publication.py` | 87 | **workflow steps switched** to `:qualification:packagePublication`; blocked by `test_publication.py:16` and 5 uncovered cases (see below) |
+
+### `record` and the publication coverage, corrected
+
+`qualify.py record` is ported (`QualificationCli.record`) and `independent_gates._bounded_bundle` is
+ported (`IndependentGates.boundedBundle`). The earlier claim that `qualify.evaluate` returns a full lane
+object was **wrong** and is retracted: `evaluate` builds only `{"id", "status", "reason"}`, so the
+existing `LaneVerdict` was already faithful and nothing had to change in `LaneEvaluation`.
+
+`test_publication.py` has 31 cases. The Kotlin side now covers 24 fully and 2 partially; five have no
+equivalent and must be reproduced before the suite can retire:
+
+1. `workflow_harness_requests_full_history_without_bytecode` — asserts `fetch-depth` and `-B` in the workflow text.
+2. `documentation_fixture_survives_zip_entry_clock_changes` — the zip-clock fixture manipulation itself.
+3. `downloaded_bundle_rejects_coherent_pom_source_docs_and_apple_changes` — the sources-JAR, javadoc-JAR and Apple `-metadata.jar` halves; the recorded staging fixture carries only `jvm` and `js`.
+4. `downloaded_bundle_rejects_coherent_profile_and_embedded_notice` — an active-by-default POM profile and a wrong `META-INF/LICENSE.md` inside a packaged jar.
+5. The stale-hidden-directory omission assertion inside `downloaded_publication_bundle_rejects_partial_or_changed_files`.
+
+`test_publication.py` also supplies the `stage(root, targets)` fixture builder that `test_artifact.py` and
+`test_full_hosted.py` import for target tuples the recorded archives do not cover, so it cannot be
+deleted before either those two suites retire or the builder is extracted into its own module.
 
 ### Parity gap: descriptor anchoring
 
