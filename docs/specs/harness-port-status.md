@@ -79,7 +79,7 @@ deleted alone. Measured on 2026-10-30:
 
 | File | Lines | Still blocking |
 | --- | ---: | --- |
-| `collection.py` | 1,503 | its own `test_collection.py` (633); `test_cross_run_collection.py` (**1,277**); `qualification.yml:963` and `:973`; `qualification-source-checks.yml:143`; three assertions in `test_qualification_workflow.py` |
+| `collection.py` | 1,503 | **deleted** 2026-10-30, with `test_collection.py` and `test_cross_run_collection.py` |
 | `test_publication.py` | 1,516 | imported as a fixture builder by `test_artifact.py:41` and `test_full_hosted.py:22/1388/1558/2227`; `qualification-source-checks.yml:143`; `test_qualification_workflow.py:499/882` string-match that workflow line |
 | `artifact.py` | 621 | `full_hosted.py:25` (`run`), `qualify.py:1614` and `:1701`, `independent_gates.py:3300`, `test_artifact.py:13`, `qualification.yml:374`, `:636`, `:1074` |
 | `publication.py` | 87 | `test_publication.py:16`, `qualification.yml:361` and `:539` |
@@ -124,6 +124,9 @@ go.
 | `tools/qualification/test_guard_hosted_runners.py` | `GuardHostedRunnersSuite.kt` (12 cases) | the separate test step was removed; `test_qualification_workflow.py` asserts the Kotlin command |
 | `tools/performance/warmup_probe.py` | `WarmupProbe` + `:performance:warmupProbe` | no workflow step invoked it |
 | `tools/performance/calibrate.py` | `Calibrate` + `:performance:calibrate` | no workflow step invoked it; `docs/research/performance-manifest.md` points at the Gradle task |
+| `tools/qualification/collection.py` | `CollectionRules`/`CollectionRuntime`/`CollectionCli` + `:qualification:collectQualification` | the two central-job steps in `qualification.yml` |
+| `tools/qualification/test_collection.py` (15 cases) | `CollectionContract` (14 tests) | step dropped from `qualification-source-checks.yml`; the three list assertions in `test_qualification_workflow.py` updated |
+| `tools/qualification/test_cross_run_collection.py` (35 cases) | `CrossRunCollectionContract` (29 tests) | same |
 | `tools/harness/performance/parity/generate_leaf_vectors.py` | `LeafVectors.kt` (recorded constants) | deleted because it imported `warmup_probe` and `calibrate`; it could no longer run. The vectors it produced are committed and the generator is in git history |
 
 ## Known parity hazards

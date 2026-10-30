@@ -509,7 +509,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                  "-u DYN4K_RETAINED_BROWSER_ARCHIVES "
                  "PYTHONDONTWRITEBYTECODE=1 "
                  "PYTHONPATH=tools/qualification python3 -B -m unittest -v "
-                 "test_collection test_compiler_modes test_full_corpus "
+                 "test_compiler_modes test_full_corpus "
                  "test_node_runtime_binding test_independent_adapter "
                  "test_full_native_host_consumer"),
                 ("name: Check migration guide links and claims",
@@ -918,9 +918,9 @@ class QualificationWorkflowContractTest(unittest.TestCase):
         mutations = (
             ("suite command replaced by no-op", "python3 -B -m unittest -v",
              "true # python3 -B -m unittest -v"),
-            ("one module omitted", "test_collection test_compiler_modes test_full_corpus "
+            ("one module omitted", "test_compiler_modes test_full_corpus "
              "test_node_runtime_binding test_independent_adapter "
-             "test_full_native_host_consumer", "test_collection "
+             "test_full_native_host_consumer", "test_compiler_modes "
              "test_compiler_modes test_full_corpus test_node_runtime_binding "
              "test_independent_adapter"),
             ("Native consumer step disabled", "      - name: Test portable qualification source modules\n",
