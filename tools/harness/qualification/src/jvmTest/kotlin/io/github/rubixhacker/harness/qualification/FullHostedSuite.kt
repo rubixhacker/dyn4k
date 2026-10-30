@@ -146,14 +146,12 @@ val FullHostedContract by testSuite {
         withArchive(candidate = "a".repeat(40)) { output ->
             val archive = output.parent.resolve("transport.tar")
             FullHosted.packageArchive(output, archive)
-            val error = assertFailsWith<AnalyzerNotPorted> {
+            // The transport envelope verifies, then the receipt verifier rejects the receipt
+            // because it is not a completed target.
+            val error = assertFailsWith<IllegalArgumentException> {
                 FullHosted.verifyTransportArchive(archive, "a".repeat(40))
             }
-            assertEquals(
-                "Python numerical analyzer is not ported: full_hosted.verify_raw_files " +
-                    "(use the :numerical port instead)",
-                error.message,
-            )
+            assertEquals("full hosted receipt is not a completed target", error.message)
         }
     }
 
@@ -217,13 +215,18 @@ val FullHostedContract by testSuite {
         assertEquals(6, FullHosted.SAFARI_DIAGNOSTIC_CASES.size)
     }
 
-    test("the receipt verifier is an explicit seam") {
-        val error = assertFailsWith<AnalyzerNotPorted> {
-            FullHosted.verifyRawFiles(
-                Files.createTempDirectory("hosted-raw"), buildJsonObject { },
+    test("the receipt verifier rejects a receipt that is not a completed target") {
+        val root = Files.createTempDirectory("hosted-raw")
+        try {
+            assertEquals(
+                "full hosted receipt is not a completed target",
+                assertFailsWith<IllegalArgumentException> {
+                    FullHosted.verifyRawFiles(root, buildJsonObject { })
+                }.message,
             )
+        } finally {
+            Files.deleteIfExists(root)
         }
-        assertTrue("verify_raw_files" in (error.message ?: ""))
     }
 }
 

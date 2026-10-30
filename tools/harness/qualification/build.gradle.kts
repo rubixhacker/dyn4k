@@ -74,3 +74,10 @@ tasks.register<JavaExec>("hostedProbe") {
         "Probes one hosted target and writes its evidence; pass run --candidate-sha, --target, --output.",
     )
 }
+
+tasks.register<JavaExec>("fullHosted") {
+    entryPoint(
+        "io.github.rubixhacker.harness.qualification.FullHostedCli",
+        "Packages or verifies a hosted full-common-corpus archive; pass --package, --verify-tar, or --verify with its options.",
+    )
+}

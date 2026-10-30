@@ -14,11 +14,12 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 
 /**
- * `full_hosted.py`, first slice: the pinned toolchain, archive paths, the receipt inventory, and
- * the PAX transport archive.
+ * `tools/qualification/full_hosted.py`: the pinned toolchain, the archive contract, the receipt
+ * inventory, the Safari diagnostic grammar, and the entry point of every ported check.
  *
- * `verify_transport_archive` stops at `verify_raw_files`, the receipt verifier that is still
- * Python; everything before it (extraction, PAX timestamps, sizes, receipt identity) is ported.
+ * The file-system, process, and XML work lives in [FullHostedRuntime]; the pure rules live in
+ * [FullHostedRules]. Only `full_hosted.run` (the hosted execution driver) remains Python, so the
+ * command line fails closed for that mode.
  */
 object FullHosted {
     const val PINNED_GRADLE = "9.5.0"
@@ -28,6 +29,34 @@ object FullHosted {
     const val MANIFEST = "tools/qualification/full-common-corpus.json"
     const val MAPPING = "tools/qualification/full-common-original-map.tsv"
     const val PAIRS = "tools/qualification/full-common-reviewed-pairs.tsv"
+
+    /** `NATIVE`: the hosted native targets, keyed exactly as `hosted.NATIVE_TARGETS` is. */
+    val NATIVE: Set<String> = Hosted.NATIVE_TARGETS.keys
+
+    /** `CONFIGS`: the two configurations every hosted target is run in. */
+    val CONFIGS: Map<String, List<String>> = linkedMapOf<String, List<String>>().apply {
+        for (target in NATIVE) put(target, listOf("debug-g", "optimized-opt"))
+        put("jsSafari", listOf("development", "production"))
+    }
+
+    /** `SOURCE_TASK`: the Gradle task that produces one target's source test reports. */
+    val SOURCE_TASK: Map<String, String> = linkedMapOf<String, String>().apply {
+        for (target in NATIVE) put(target, "${target}Test")
+        put("jsSafari", "jsBrowserTest")
+    }
+
+    /** `INPUTS`: every candidate source file the receipt archives under `inputs/`. */
+    val INPUTS: List<String> = listOf(
+        MANIFEST, MAPPING, PAIRS, "tools/qualification/foundation-probes.json",
+        "tools/qualification/full_corpus.py", "tools/qualification/full_hosted.py",
+        "tools/qualification/safari_reporter.py",
+        "tools/qualification/safari_windows_file.py",
+        "tools/qualification/safari-karma-reporter.js",
+        "tools/qualification/hosted.py", "tools/qualification/qualify.py",
+        "tools/qualification/artifact.py", "build.gradle.kts",
+        "consumers/qualification/portable/build.gradle.kts",
+        "consumers/qualification/portable/settings.gradle.kts",
+    )
 
     val REVIEWED_COMMON_COUNTS = linkedMapOf("dyn4k-core" to 2465, "dyn4k" to 58)
 
@@ -304,7 +333,7 @@ object FullHosted {
             ) {
                 throw IllegalArgumentException("transport archive candidate or target differs")
             }
-            return verifyRawFiles(temporary, receipt, candidateRepository)
+            return verifyRawFiles(temporary, receipt, candidateRepository = candidateRepository)
         } finally {
             Files.walk(temporary).use { walk ->
                 walk.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) }
@@ -312,19 +341,324 @@ object FullHosted {
         }
     }
 
-    /** `verify_raw_files`: the receipt verifier, not yet ported. */
+    /** `verify_raw_files`: the receipt verifier of a completed hosted full-corpus run. */
     fun verifyRawFiles(
         output: Path,
         receipt: JsonObject,
+        manifest: JsonObject? = null,
+        consumerManifest: JsonObject? = null,
         candidateRepository: Path? = null,
-    ): JsonObject {
-        if (!Files.isDirectory(output)) {
-            throw IllegalArgumentException("full hosted receipt directory is absent")
-        }
-        // The receipt verifier (`verify_raw_files`, ~300 lines) is still Python. Stopping here
-        // keeps a partial verification from being reported as a pass.
-        throw AnalyzerNotPorted("full_hosted.verify_raw_files")
-    }
+    ): JsonObject = FullHostedRuntime.verifyRawFiles(
+        output,
+        receipt,
+        manifest,
+        consumerManifest,
+        candidateRepository,
+    )
+
+    /** `candidate_checkout`: the checkout this process runs in. */
+    fun candidateCheckout(): Path = FullHostedRuntime.candidateCheckout()
+
+    /** `load_corpus`: the committed manifest, map, and reviewed pairs of one candidate. */
+    fun loadCorpus(repository: Path, candidateSha: String): JsonObject =
+        FullHostedRuntime.loadCorpus(repository, candidateSha)
+
+    /** `read_reports`: one module's XML reports against the reviewed case inventory. */
+    fun readReports(
+        paths: List<Path>,
+        expected: Set<Pair<String, String>>,
+        target: String,
+        startedNs: Long,
+        finishedNs: Long,
+        safariVersion: String? = null,
+    ): HostedReportCheck =
+        FullHostedRuntime.readReports(paths, expected, target, startedNs, finishedNs, safariVersion)
+
+    /** `run_command`: run one command and record its receipt. */
+    fun runCommand(
+        command: List<String>,
+        cwd: Path,
+        destination: Path,
+        invocationId: String? = null,
+    ): JsonObject = FullHostedRuntime.runCommand(command, cwd, destination, invocationId)
+
+    /** `verify_process`: the archived process receipt and both of its logs. */
+    fun verifyProcess(
+        output: Path,
+        folder: Path,
+        process: JsonObject?,
+        invocation: String?,
+        requiredTask: String? = null,
+    ) = FullHostedRuntime.verifyProcess(output, folder, process, invocation, requiredTask)
+
+    /** `verify_staging`: the staged GAV, POM, metadata, and binary contracts. */
+    fun verifyStaging(output: Path, receipt: JsonObject) =
+        FullHostedRuntime.verifyStaging(output, receipt)
+
+    /** `verify_staged_content`: the archived staged publication against its content audit. */
+    fun verifyStagedContent(output: Path, receipt: JsonObject, repository: Path) =
+        FullHostedRuntime.verifyStagedContent(output, receipt, repository)
+
+    /** `require_test_tasks`: the Gradle console lines that prove the tasks ran. */
+    fun requireTestTasks(
+        process: JsonObject,
+        folder: Path,
+        target: String,
+        configuration: String,
+        modules: List<String>,
+    ) = FullHostedRuntime.requireTestTasks(process, folder, target, configuration, modules)
+
+    /** `canonical_safari_json`: the archived input must be the committed JSON object. */
+    fun canonicalSafariJson(
+        repository: Path,
+        candidateSha: String,
+        output: Path,
+        relative: String,
+    ): JsonObject = FullHostedRuntime.canonicalSafariJson(repository, candidateSha, output, relative)
+
+    /** `check_safari_diagnostic_suite`: the reviewed Safari diagnostic rows of one suite. */
+    fun checkSafariDiagnosticSuite(suite: org.w3c.dom.Element) =
+        FullHostedRuntime.checkSafariDiagnosticSuite(suite)
+
+    /** `safari_file_observation`: one path observed without following a link. */
+    fun safariFileObservation(path: Path, anchor: Path, maxHashBytes: Long? = null): JsonObject =
+        FullHostedRuntime.safariFileObservation(path, anchor, maxHashBytes)
+
+    /** `test_products`: the one test executable of a configuration. */
+    fun testProducts(
+        project: Path,
+        target: String,
+        configuration: String,
+        process: JsonObject,
+        safariInput: String? = null,
+        name: String? = null,
+    ): MutableMap<String, kotlinx.serialization.json.JsonElement> =
+        FullHostedRuntime.testProducts(project, target, configuration, process, safariInput, name)
+
+    /** `safari_product_inventory`: bounded observations of both Safari product layouts. */
+    fun safariProductInventory(project: Path, configuration: String, name: String): JsonObject =
+        FullHostedRuntime.safariProductInventory(project, configuration, name)
+
+    /** `product_inventory`: the bounded inventory one failed product selection retains. */
+    fun productInventory(
+        project: Path,
+        target: String,
+        configuration: String? = null,
+        name: String? = null,
+    ): JsonObject = FullHostedRuntime.productInventory(project, target, configuration, name)
+
+    /** `collect_test_products`: select each project's product or retain the inventory and fail. */
+    fun collectTestProducts(
+        projects: Map<String, Path>,
+        target: String,
+        configuration: String,
+        process: JsonObject,
+        diagnostic: Path,
+        archiveRoot: Path,
+        safariInputs: Map<String, String>? = null,
+    ): MutableMap<String, MutableMap<String, kotlinx.serialization.json.JsonElement>> =
+        FullHostedRuntime.collectTestProducts(
+            projects,
+            target,
+            configuration,
+            process,
+            diagnostic,
+            archiveRoot,
+            safariInputs,
+        )
+
+    /** `archive_test_product`: archive the selected executable and Karma input. */
+    fun archiveTestProduct(
+        product: MutableMap<String, kotlinx.serialization.json.JsonElement>,
+        output: Path,
+        configuration: String,
+        name: String,
+        target: String,
+    ) = FullHostedRuntime.archiveTestProduct(product, output, configuration, name, target)
+
+    /** `capture_safari_config`: archive one generated Karma configuration. */
+    fun captureSafariConfig(
+        repository: Path,
+        candidateSha: String,
+        project: String,
+        configuration: String,
+        process: JsonObject,
+        output: Path,
+        archiveName: String,
+    ): JsonObject = FullHostedRuntime.captureSafariConfig(
+        repository,
+        candidateSha,
+        project,
+        configuration,
+        process,
+        output,
+        archiveName,
+    )
+
+    /** `safari_config_input`: the Karma input path of one generated configuration. */
+    fun safariConfigInput(data: ByteArray): String = FullHostedRules.safariConfigInput(data)
+
+    /** `verify_safari_reporter_archive`: the staged reporter and generated configurations. */
+    fun verifySafariReporterArchive(
+        output: Path,
+        receipt: JsonObject,
+        lane: JsonObject,
+        candidateRepository: Path,
+        repositoryRoot: Path,
+    ) = FullHostedRuntime.verifySafariReporterArchive(
+        output,
+        receipt,
+        lane,
+        candidateRepository,
+        repositoryRoot,
+    )
+
+    /** `parse_graph`: the resolved consumer graph bound to the staged bytes and the cache. */
+    fun parseGraph(
+        folder: Path,
+        process: JsonObject,
+        target: String,
+        hashes: JsonObject,
+        staging: String,
+        expectedHome: String,
+        stagedRoot: Path? = null,
+    ): JsonObject = FullHostedRuntime.parseGraph(
+        folder,
+        process,
+        target,
+        hashes,
+        staging,
+        expectedHome,
+        stagedRoot,
+    )
+
+    /** `retain_failed_safari_source_xml`: keep the unverified reports of a failed Safari lane. */
+    fun retainFailedSafariSourceXml(
+        repository: Path,
+        destination: Path,
+        process: JsonObject,
+        validationError: Throwable,
+    ): JsonObject =
+        FullHostedRuntime.retainFailedSafariSourceXml(repository, destination, process, validationError)
+
+    /** `copy_reports`: verify and archive every module's source XML reports. */
+    fun copyReports(
+        repository: Path,
+        target: String,
+        destination: Path,
+        process: JsonObject,
+        expected: JsonObject,
+        safariVersion: String? = null,
+        diagnostic: MutableMap<String, kotlinx.serialization.json.JsonElement>? = null,
+    ): List<JsonObject> = FullHostedRuntime.copyReports(
+        repository,
+        target,
+        destination,
+        process,
+        expected,
+        safariVersion,
+        diagnostic,
+    )
+
+    /** `capture_consumer`: the staged consumer probe reports and their archive members. */
+    fun captureConsumer(
+        repository: Path,
+        target: String,
+        destination: Path,
+        process: JsonObject,
+    ): HostedReportCheck =
+        FullHostedRuntime.captureConsumer(repository, target, destination, process)
+
+    /** `read_consumer_reports`: the staged consumer reports against the probe manifest. */
+    fun readConsumerReports(
+        paths: List<Path>,
+        expected: Set<Pair<String, String>>,
+        process: JsonObject,
+    ): HostedReportCheck = FullHostedRuntime.readConsumerReports(paths, expected, process)
+
+    /** `capture_dokka_output`: archive the generated Dokka tree and record its provenance. */
+    fun captureDokkaOutput(
+        repository: Path,
+        output: Path,
+        receipt: MutableMap<String, kotlinx.serialization.json.JsonElement>,
+    ) = FullHostedRuntime.captureDokkaOutput(repository, output, receipt)
+
+    /** `safari_product_paths`: the compiler product and Karma input of one Safari project. */
+    fun safariProductPaths(project: String, configuration: String, name: String): SafariProductPaths =
+        FullHostedRules.safariProductPaths(project, configuration, name)
+
+    /** `init_script`: the generated Gradle init script of one configuration. */
+    fun initScript(target: String, configuration: String, simulatorUdid: String? = null): String =
+        FullHostedRules.initScript(target, configuration, simulatorUdid)
+
+    /** `graph_script`: the generated Gradle init script that prints the consumer graph. */
+    fun graphScript(target: String): String = FullHostedRules.graphScript(target)
+
+    /** `verify_safari_mode_arguments`: the browser and production mode properties of a command. */
+    fun verifySafariModeArguments(
+        command: List<String?>,
+        processName: String,
+        config: String? = null,
+    ) = FullHostedRules.verifySafariModeArguments(command, processName, config)
+
+    /** `verify_report_group`: the lane's case identities and report digests. */
+    fun verifyReportGroup(
+        group: JsonObject?,
+        checked: HostedReportCheck,
+        prefix: List<String>,
+    ) = FullHostedRules.verifyReportGroup(group, checked, prefix)
+
+    /** `safari_v2_require`: one diagnostic field must be complete. */
+    fun safariV2Require(condition: Boolean, field: String) =
+        FullHostedRules.safariV2Require(condition, field)
+
+    /** `safari_v2_vector`: two numbers separated by a comma. */
+    fun safariV2Vector(value: String, field: String) =
+        FullHostedRules.safariV2Vector(value, field)
+
+    /** `safari_v2_numbers`: an exact count of comma separated numbers. */
+    fun safariV2Numbers(value: String, field: String, count: Int) =
+        FullHostedRules.safariV2Numbers(value, field, count)
+
+    /** `safari_v2_vectors`: `null`, empty, or semicolon separated vectors. */
+    fun safariV2Vectors(
+        value: String,
+        field: String,
+        allowNull: Boolean = true,
+        allowEmpty: Boolean = true,
+    ): Int? = FullHostedRules.safariV2Vectors(value, field, allowNull, allowEmpty)
+
+    /** `safari_v2_feature`: a point, an edge, or the explicit `unknown:index` form. */
+    fun safariV2Feature(value: String, field: String) =
+        FullHostedRules.safariV2Feature(value, field)
+
+    /** `safari_v2_shape`: the ordered shape fields and the polygon vertex count. */
+    fun safariV2Shape(value: String, field: String): Pair<String, Int?> =
+        FullHostedRules.safariV2Shape(value, field)
+
+    /** `safari_v2_polygon_edges`: one twelve field record per polygon edge, or `na`. */
+    fun safariV2PolygonEdges(value: String, field: String, kind: String, vertices: Int?) =
+        FullHostedRules.safariV2PolygonEdges(value, field, kind, vertices)
+
+    /** `safari_v2_sat_candidates`: every candidate record; returns whether one separated. */
+    fun safariV2SatCandidates(value: String, field: String): Boolean =
+        FullHostedRules.safariV2SatCandidates(value, field)
+
+    /** `safari_v2_epa_records`: one thirteen field record per EPA iteration. */
+    fun safariV2EpaRecords(value: String, field: String, iteration: SafariInteger) =
+        FullHostedRules.safariV2EpaRecords(value, field, iteration)
+
+    /** `safari_v2_number`: `value@bits` with the double's own encoding. */
+    fun safariV2Number(value: String, field: String) =
+        FullHostedRules.safariV2Number(value, field)
+
+    /** `safari_v2_integer`: a canonical integer literal with an optional floor. */
+    fun safariV2Integer(value: String, field: String, minimum: Long? = null): SafariInteger =
+        FullHostedRules.safariV2Integer(value, field, minimum)
+
+    /** `safari_v2_check_values`: the cross-field invariants of one diagnostic row. */
+    fun safariV2CheckValues(values: Map<String, String>, step: Int, points: Int) =
+        FullHostedRules.safariV2CheckValues(values, step, points)
 
     /** `sha256`. */
     fun sha256(path: Path): String = CorpusFiles.digest(path)
