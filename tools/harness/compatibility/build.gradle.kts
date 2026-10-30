@@ -9,6 +9,10 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":core"))
+            // `world_ci.validate_runs` reads recorded process logs with `json.loads`, so the JSON
+            // reader is part of the contract this module ports. `:core` declares the same library
+            // as an `implementation` dependency, which does not reach consumers of `:core`.
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
         }
 
         commonTest.dependencies {
