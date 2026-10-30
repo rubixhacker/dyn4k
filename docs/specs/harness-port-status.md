@@ -95,6 +95,27 @@ all — on Windows the port applies the POSIX path logic instead of failing clos
 the reference. This must be resolved, or explicitly accepted and recorded, before `collection.py` is
 deleted.
 
+**Decision (2026-10-30).** The gap is accepted as a known limitation, and it cannot be closed on the JVM
+as the reference closes it. `java.nio.file` has no `openat`, no descriptor-relative `open`, and no
+`O_NOFOLLOW` flag; the only faithful port would be a native call through the Java 21 foreign-function
+API, which is preview-only in this toolchain. The port therefore keeps the strongest check the platform
+allows: every component is opened with `NOFOLLOW_LINKS`, and the `fileKey` of the opened file and of
+each ancestor is re-read and compared. The residual window is a swap that restores an identical
+identity between the check and the operation.
+
+The threat model bounds the exposure: the collection job runs in a runner-owned workspace and the
+untrusted input is a downloaded artifact (data), not a local writer. The exposure is real but narrow.
+
+**This decision alone does not free `collection.py`.** Retiring its suites would delete tests the Kotlin
+port does not replace: `test_collection.py` has 15 tests of which the port reproduces 11 (2 need the
+unported `test_qualification_workflow.py` contract engine, 2 are workflow-mutation variants not
+reproduced), and `test_cross_run_collection.py` has 35 tests of which the port reproduces none. Those 35
+exercise cross-run ingestion, external-reference snapshots and the anchoring swaps. Deleting the file
+now would drop that coverage, so the cross-run cases have to be reproduced in `:qualification` first —
+adapted to the path-level guarantee the port actually provides, which is a weaker but still meaningful
+assertion — and only then may `collection.py`, `test_collection.py` and `test_cross_run_collection.py`
+go.
+
 ## Python code removed
 
 | File | Replacement | CI step |
