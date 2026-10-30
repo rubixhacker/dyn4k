@@ -12,6 +12,10 @@ kotlin {
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
         }
 
+        jvmMain.dependencies {
+            implementation(project(":host"))
+        }
+
         commonTest.dependencies {
             implementation("de.infix.testBalloon:testBalloon-framework-core:1.2.0")
             implementation(kotlin("test"))

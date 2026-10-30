@@ -42,6 +42,10 @@ object StageReceipt {
         return tasks
     }
 
+    /** `stage.stage_command` for a resolved repository directory. */
+    fun stageCommand(repository: Path, tasks: List<String>): List<String> =
+        stageCommand(RepositoryPath(repository.toString(), windows = false), tasks)
+
     /** `stage.stage_command`. */
     fun stageCommand(repository: RepositoryPath, tasks: List<String>): List<String> {
         val wrapper = repository.text + if (repository.windows) "\\gradlew.bat" else "/gradlew"

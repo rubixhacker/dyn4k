@@ -1,6 +1,6 @@
 package io.github.rubixhacker.harness.qualification
 
-import io.github.rubixhacker.harness.contract.Sha256
+import io.github.rubixhacker.harness.host.FileDigest
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -27,8 +27,8 @@ internal object Fs {
 
     fun readText(path: Path): String = String(readBytes(path), StandardCharsets.UTF_8)
 
-    /** `qualify.digest`: SHA-256 of the file bytes. */
-    fun digest(path: Path): String = fileSystem.read(path.toOkioPath()) { Sha256.of(this) }
+    /** `qualify.digest`: SHA-256 of the file bytes, shared with the host module. */
+    fun digest(path: Path): String = FileDigest.sha256(path)
 
     fun writeText(path: Path, text: String) {
         path.parent?.let { Files.createDirectories(it) }
