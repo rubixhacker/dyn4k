@@ -522,14 +522,16 @@ class CollectionTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/qualification-source-checks.yml").read_text()
         comment_only = (workflow.split("    steps:\n", 1)[0]
                         + "    steps:\n      - run: echo no checks\n"
-                        + "        # guard_hosted_runners.py test_qualification_workflow "
-                        + "test_guard_hosted_runners python3 -B -m unittest\n")
+                        + "        # guardHostedRunners test_qualification_workflow "
+                        + "test_collection python3 -B -m unittest\n")
         for altered in (comment_only,
                         workflow.replace("  workflow-source-contracts:\n", "  unrelated-job:\n"),
                         workflow.replace(
-                            "        run: python3 -B tools/qualification/guard_hosted_runners.py",
+                            "        run: ./gradlew -p tools/harness "
+                            ":qualification:guardHostedRunners --console=plain -q",
                             "        run: echo no checks\n"
-                            "        # python3 -B tools/qualification/guard_hosted_runners.py")):
+                            "        # ./gradlew -p tools/harness "
+                            ":qualification:guardHostedRunners --console=plain -q")):
             with self.subTest(workflow=altered), mock.patch.object(
                     Path, "read_text", return_value=altered):
                 with self.assertRaises(AssertionError):
