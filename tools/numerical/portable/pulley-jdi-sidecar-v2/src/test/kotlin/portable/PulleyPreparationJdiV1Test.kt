@@ -1,5 +1,6 @@
 package portable
 
+import de.infix.testBalloon.framework.core.testSuite
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -13,7 +14,10 @@ import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.Vector2
 import org.dyn4j.dynamics.joint.PulleyJoint
 import org.dyn4j.world.World
-import kotlin.test.Test
+
+val PulleyPreparationJdiV1TestSuite by testSuite {
+    test("capturePreparation0") { PulleyPreparationJdiV1Test().run { capturePreparation0() } }
+}
 
 class PulleyPreparationJdiV1Test {
     private fun body(world: World<Body>, shape: Convex, x: Double, y: Double, fixed: Boolean,
@@ -31,8 +35,7 @@ class PulleyPreparationJdiV1Test {
         return body
     }
 
-    @Test
-    fun capturePreparation0() {
+fun capturePreparation0() {
         val destination = System.getenv("DYN4K_PULLEY_JDI_V1_OUTPUT")
             ?: error("one-case output directory is absent")
         val nonce = System.getenv("DYN4K_PULLEY_JDI_V1_NONCE")

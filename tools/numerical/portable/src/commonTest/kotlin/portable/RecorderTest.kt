@@ -1,5 +1,9 @@
 package portable
 
+import de.infix.testBalloon.framework.core.TestConfig
+import de.infix.testBalloon.framework.core.testScope
+import de.infix.testBalloon.framework.core.testSuite
+import kotlin.time.Duration.Companion.minutes
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.ContinuousDetectionMode
 import org.dyn4j.dynamics.TimeStep
@@ -9,15 +13,30 @@ import org.dyn4j.geometry.RotationOperationTap
 import org.dyn4j.world.listener.StepListener
 import org.dyn4j.world.PhysicsWorld
 import org.dyn4j.world.World
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
 
+val RecorderTestSuite by testSuite(
+    testConfig = TestConfig.testScope(isEnabled = true, timeout = 60.minutes),
+) {
+    test("throwingOutputForBeforeRotationWaitsUntilWorldStepCompletes") { RecorderTest().run { throwingOutputForBeforeRotationWaitsUntilWorldStepCompletes() } }
+    test("beforeRotationMarkerKeepsItsOrderAfterTheCompletedStep") { RecorderTest().run { beforeRotationMarkerKeepsItsOrderAfterTheCompletedStep() } }
+    test("throwingBeforeRotationMarkerStillCompletesTheWorldStep") { RecorderTest().run { throwingBeforeRotationMarkerStillCompletesTheWorldStep() } }
+    test("throwingOutputDuringStepWaitsUntilEngineCompletes") { RecorderTest().run { throwingOutputDuringStepWaitsUntilEngineCompletes() } }
+    test("recorderConsumesScopedRotationAfterCompletedStep") { RecorderTest().run { recorderConsumesScopedRotationAfterCompletedStep() } }
+    test("failingOutputAfterStepLeavesCompletedEngineState") { RecorderTest().run { failingOutputAfterStepLeavesCompletedEngineState() } }
+    test("scopedWorldStepRecordsOnlyItsOwnWorld") { RecorderTest().run { scopedWorldStepRecordsOnlyItsOwnWorld() } }
+    test("throwingWorldRegistrationRestoresTapsAndListeners") { RecorderTest().run { throwingWorldRegistrationRestoresTapsAndListeners() } }
+    test("throwingInitialOutputRestoresTapsAndListeners") { RecorderTest().run { throwingInitialOutputRestoresTapsAndListeners() } }
+    test("acceptedToiObservationKeepsSubclassCallsAndState") { RecorderTest().run { acceptedToiObservationKeepsSubclassCallsAndState() } }
+    test("frozenConfigurationUsesCommonWorldGetters") { RecorderTest().run { frozenConfigurationUsesCommonWorldGetters() } }
+    test("recordsPublicWorldStateAndSignedZeroAtEveryStep") { RecorderTest().run { recordsPublicWorldStateAndSignedZeroAtEveryStep() } }
+}
+
 class RecorderTest {
-    @Test
-    fun throwingOutputForBeforeRotationWaitsUntilWorldStepCompletes() {
+fun throwingOutputForBeforeRotationWaitsUntilWorldStepCompletes() {
         fun scene(): Pair<World<Body>, Body> {
             val world = World<Body>()
             world.setGravity(0.0, 0.0)
@@ -60,8 +79,7 @@ class RecorderTest {
         assertEquals(1, world.getStepListeners().size)
     }
 
-    @Test
-    fun beforeRotationMarkerKeepsItsOrderAfterTheCompletedStep() {
+fun beforeRotationMarkerKeepsItsOrderAfterTheCompletedStep() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val body = Body()
@@ -102,8 +120,7 @@ class RecorderTest {
         assertEquals(1, completed)
     }
 
-    @Test
-    fun throwingBeforeRotationMarkerStillCompletesTheWorldStep() {
+fun throwingBeforeRotationMarkerStillCompletesTheWorldStep() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val body = Body()
@@ -136,8 +153,7 @@ class RecorderTest {
         assertEquals(1, world.getStepListeners().size)
     }
 
-    @Test
-    fun throwingOutputDuringStepWaitsUntilEngineCompletes() {
+fun throwingOutputDuringStepWaitsUntilEngineCompletes() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val body = Body()
@@ -166,8 +182,7 @@ class RecorderTest {
         assertEquals(1, completed)
         assertEquals(null, RotationOperationTap.currentCapture())
     }
-    @Test
-    fun recorderConsumesScopedRotationAfterCompletedStep() {
+fun recorderConsumesScopedRotationAfterCompletedStep() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val body = Body()
@@ -183,8 +198,7 @@ class RecorderTest {
         }
     }
 
-    @Test
-    fun failingOutputAfterStepLeavesCompletedEngineState() {
+fun failingOutputAfterStepLeavesCompletedEngineState() {
         fun scene(): Pair<World<Body>, Body> {
             val world = World<Body>()
             world.setGravity(0.0, 0.0)
@@ -212,8 +226,7 @@ class RecorderTest {
         assertEquals(null, RotationOperationTap.currentCapture())
         assertTrue(observedWorld.getStepListeners().isEmpty())
     }
-    @Test
-    fun scopedWorldStepRecordsOnlyItsOwnWorld() {
+fun scopedWorldStepRecordsOnlyItsOwnWorld() {
         val owned = World<Body>()
         val foreign = World<Body>()
         RotationOperationTap.capture("world-probe") { scope ->
@@ -229,8 +242,7 @@ class RecorderTest {
             }
         }
     }
-    @Test
-    fun throwingWorldRegistrationRestoresTapsAndListeners() {
+fun throwingWorldRegistrationRestoresTapsAndListeners() {
         val world = object : World<Body>() {
             override fun addStepListener(listener: StepListener<Body>?): Boolean {
                 super.addStepListener(listener)
@@ -255,8 +267,7 @@ class RecorderTest {
         assertEquals(null, RotationOperationTap.currentCapture())
     }
 
-    @Test
-    fun throwingInitialOutputRestoresTapsAndListeners() {
+fun throwingInitialOutputRestoresTapsAndListeners() {
         val world = World<Body>()
         val body = Body()
         body.addFixture(Geometry.createCircle(0.5))
@@ -276,8 +287,7 @@ class RecorderTest {
         assertEquals(null, RotationOperationTap.currentCapture())
     }
 
-    @Test
-    fun acceptedToiObservationKeepsSubclassCallsAndState() {
+fun acceptedToiObservationKeepsSubclassCallsAndState() {
         class CountingBody : Body() {
             var checks = 0
             override fun isDynamic(): Boolean {
@@ -327,8 +337,7 @@ class RecorderTest {
         assertEquals(default.state, observed.state)
     }
 
-    @Test
-    fun frozenConfigurationUsesCommonWorldGetters() {
+fun frozenConfigurationUsesCommonWorldGetters() {
         val world = World<Body>()
         val body = Body()
         body.addFixture(Geometry.createCircle(0.5))
@@ -344,8 +353,7 @@ class RecorderTest {
         assertTrue(lines.first().contains("\"getAngularToleranceSquared\""))
     }
 
-    @Test
-    fun recordsPublicWorldStateAndSignedZeroAtEveryStep() {
+fun recordsPublicWorldStateAndSignedZeroAtEveryStep() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val body = Body()

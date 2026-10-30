@@ -1,15 +1,43 @@
 package portable
 
+import de.infix.testBalloon.framework.core.TestConfig
+import de.infix.testBalloon.framework.core.testScope
+import de.infix.testBalloon.framework.core.testSuite
+import kotlin.time.Duration.Companion.minutes
 import org.dyn4j.geometry.RotationOperationTap
 import org.dyn4j.geometry.Transform
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
+val ProspectiveArithmeticTestSuite by testSuite(
+    testConfig = TestConfig.testScope(isEnabled = true, timeout = 60.minutes),
+) {
+    test("nestedCapturesKeepTheirOwnOperationsAndRestoreOuterScope") { ProspectiveArithmeticTest().run { nestedCapturesKeepTheirOwnOperationsAndRestoreOuterScope() } }
+    test("scopedObservationCompletesRotationBeforeConsumerFailure") { ProspectiveArithmeticTest().run { scopedObservationCompletesRotationBeforeConsumerFailure() } }
+    test("observedProbe") { ProspectiveArithmeticTest().run { observedProbe() } }
+    test("captureGeometry") { ProspectiveArithmeticTest().run { captureGeometry() } }
+    test("captureFreeMotion") { ProspectiveArithmeticTest().run { captureFreeMotion() } }
+    test("captureDefaultContacts") { ProspectiveArithmeticTest().run { captureDefaultContacts() } }
+    test("captureConfigured30Repeat1") { ProspectiveArithmeticTest().run { captureConfigured30Repeat1() } }
+    test("captureConfigured30Repeat2") { ProspectiveArithmeticTest().run { captureConfigured30Repeat2() } }
+    test("captureConfigured60Repeat1") { ProspectiveArithmeticTest().run { captureConfigured60Repeat1() } }
+    test("captureConfigured60Repeat2") { ProspectiveArithmeticTest().run { captureConfigured60Repeat2() } }
+    test("captureConfigured120Repeat1") { ProspectiveArithmeticTest().run { captureConfigured120Repeat1() } }
+    test("captureConfigured120Repeat2") { ProspectiveArithmeticTest().run { captureConfigured120Repeat2() } }
+    test("captureJoints") { ProspectiveArithmeticTest().run { captureJoints() } }
+    test("captureWheelActive") { ProspectiveArithmeticTest().run { captureWheelActive() } }
+    test("wheelCaseWithoutOperationCapture") { ProspectiveArithmeticTest().run { wheelCaseWithoutOperationCapture() } }
+    test("captureJointBooleanModes") { ProspectiveArithmeticTest().run { captureJointBooleanModes() } }
+    test("captureJointNumericModes") { ProspectiveArithmeticTest().run { captureJointNumericModes() } }
+    test("captureAngleFailure") { ProspectiveArithmeticTest().run { captureAngleFailure() } }
+    test("captureCcd") { ProspectiveArithmeticTest().run { captureCcd() } }
+    test("captureLongMotion") { ProspectiveArithmeticTest().run { captureLongMotion() } }
+    test("executedRotateAndDirectReset") { ProspectiveArithmeticTest().run { executedRotateAndDirectReset() } }
+}
+
 class ProspectiveArithmeticTest {
-    @Test
-    fun nestedCapturesKeepTheirOwnOperationsAndRestoreOuterScope() {
+fun nestedCapturesKeepTheirOwnOperationsAndRestoreOuterScope() {
         val outer = Transform()
         val inner = Transform()
         RotationOperationTap.capture("outer") { outerScope ->
@@ -27,8 +55,7 @@ class ProspectiveArithmeticTest {
         }
         assertEquals(null, RotationOperationTap.currentCapture())
     }
-    @Test
-    fun scopedObservationCompletesRotationBeforeConsumerFailure() {
+fun scopedObservationCompletesRotationBeforeConsumerFailure() {
         val transform = Transform()
         val expected = Transform().also { it.rotate(0.25) }
         val observed = RotationOperationTap.capture("failure-probe") { scope ->
@@ -43,7 +70,7 @@ class ProspectiveArithmeticTest {
         }
         assertEquals(expected.getValues().toList(), transform.getValues().toList())
     }
-    @Test fun observedProbe() = observe("observedProbe") {
+fun observedProbe() = observe("observedProbe") {
         val value = Transform()
         value.rotate(0.25)
         val end = Transform()
@@ -64,50 +91,49 @@ class ProspectiveArithmeticTest {
         }
     }
 
-    @Test fun captureGeometry() = observe("geometryCollisionBoundaryAndScale") {
+fun captureGeometry() = observe("geometryCollisionBoundaryAndScale") {
         PortableMatrixTest().geometryCollisionBoundaryAndScale()
     }
-    @Test fun captureFreeMotion() = observe("freeMotionForcesDampingAndRestitution") {
+fun captureFreeMotion() = observe("freeMotionForcesDampingAndRestitution") {
         PortableMatrixTest().freeMotionForcesDampingAndRestitution()
     }
-    @Test fun captureDefaultContacts() = observe("defaultContactsFrictionSleepAndWake") {
+fun captureDefaultContacts() = observe("defaultContactsFrictionSleepAndWake") {
         PortableMatrixTest().defaultContactsFrictionSleepAndWake()
     }
-    @Test fun captureConfigured30Repeat1() = observe("configured30Repeat1") { PortableMatrixTest().configured30Repeat1() }
-    @Test fun captureConfigured30Repeat2() = observe("configured30Repeat2") { PortableMatrixTest().configured30Repeat2() }
-    @Test fun captureConfigured60Repeat1() = observe("configured60Repeat1") { PortableMatrixTest().configured60Repeat1() }
-    @Test fun captureConfigured60Repeat2() = observe("configured60Repeat2") { PortableMatrixTest().configured60Repeat2() }
-    @Test fun captureConfigured120Repeat1() = observe("configured120Repeat1") { PortableMatrixTest().configured120Repeat1() }
-    @Test fun captureConfigured120Repeat2() = observe("configured120Repeat2") { PortableMatrixTest().configured120Repeat2() }
-    @Test fun captureJoints() = observe("everyJointWithInitialAndApplicableActiveModes") {
+fun captureConfigured30Repeat1() = observe("configured30Repeat1") { PortableMatrixTest().configured30Repeat1() }
+fun captureConfigured30Repeat2() = observe("configured30Repeat2") { PortableMatrixTest().configured30Repeat2() }
+fun captureConfigured60Repeat1() = observe("configured60Repeat1") { PortableMatrixTest().configured60Repeat1() }
+fun captureConfigured60Repeat2() = observe("configured60Repeat2") { PortableMatrixTest().configured60Repeat2() }
+fun captureConfigured120Repeat1() = observe("configured120Repeat1") { PortableMatrixTest().configured120Repeat1() }
+fun captureConfigured120Repeat2() = observe("configured120Repeat2") { PortableMatrixTest().configured120Repeat2() }
+fun captureJoints() = observe("everyJointWithInitialAndApplicableActiveModes") {
         PortableMatrixTest().everyJointWithInitialAndApplicableActiveModes()
     }
-    @Test fun captureWheelActive() = observe("everyJointWithInitialAndApplicableActiveModes") {
+fun captureWheelActive() = observe("everyJointWithInitialAndApplicableActiveModes") {
         PortableMatrixTest().captureJointCase("Wheel", "active")
     }
-    @Test fun wheelCaseWithoutOperationCapture() {
+fun wheelCaseWithoutOperationCapture() {
         assertEquals(null, RotationOperationTap.currentCapture())
         PortableMatrixTest().captureJointCase("Wheel", "active")
         assertEquals(null, RotationOperationTap.currentCapture())
     }
-    @Test fun captureJointBooleanModes() = observe("independentJointBooleanModes") {
+fun captureJointBooleanModes() = observe("independentJointBooleanModes") {
         PortableMatrixTest().independentJointBooleanModes()
     }
-    @Test fun captureJointNumericModes() = observe("independentJointNumericAndLimitModes") {
+fun captureJointNumericModes() = observe("independentJointNumericAndLimitModes") {
         PortableMatrixTest().independentJointNumericAndLimitModes()
     }
-    @Test fun captureAngleFailure() = observe("baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure") {
+fun captureAngleFailure() = observe("baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure") {
         PortableMatrixTest().baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure()
     }
-    @Test fun captureCcd() = observe("continuousCollisionCasesAtFrozenRates") {
+fun captureCcd() = observe("continuousCollisionCasesAtFrozenRates") {
         PortableMatrixTest().continuousCollisionCasesAtFrozenRates()
     }
-    @Test fun captureLongMotion() = observe("longRunningFreeMotionInvariantScene") {
+fun captureLongMotion() = observe("longRunningFreeMotionInvariantScene") {
         PortableMatrixTest().longRunningFreeMotionInvariantScene()
     }
 
-    @Test
-    fun executedRotateAndDirectReset() {
+fun executedRotateAndDirectReset() {
         RotationOperationTap.capture("direct-reset-probe") { scope ->
             val value = Transform()
             value.rotate(0.25)

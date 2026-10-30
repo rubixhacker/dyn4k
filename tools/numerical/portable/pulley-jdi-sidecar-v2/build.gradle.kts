@@ -2,6 +2,7 @@ import java.io.File
 
 plugins {
     kotlin("jvm") version "2.4.20"
+    id("de.infix.testBalloon") version "1.2.0"
 }
 
 repositories {
@@ -15,7 +16,8 @@ layout.buildDirectory.set(layout.dir(providers.gradleProperty("pulleyBuildDirect
 
 dependencies {
     implementation(files(providerJar))
-    testImplementation(kotlin("test-junit"))
+    testImplementation(kotlin("test"))
+    testImplementation("de.infix.testBalloon:testBalloon-framework-core:1.2.0")
 }
 
 kotlin {

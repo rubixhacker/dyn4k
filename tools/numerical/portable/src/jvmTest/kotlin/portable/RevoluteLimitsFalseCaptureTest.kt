@@ -1,5 +1,9 @@
 package portable
 
+import de.infix.testBalloon.framework.core.TestConfig
+import de.infix.testBalloon.framework.core.testScope
+import de.infix.testBalloon.framework.core.testSuite
+import kotlin.time.Duration.Companion.minutes
 import java.security.MessageDigest
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.joint.RevoluteJoint
@@ -9,9 +13,14 @@ import org.dyn4j.geometry.MassType
 import org.dyn4j.geometry.RotationOperationTap
 import org.dyn4j.world.World
 import kotlin.math.PI
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+
+val RevoluteLimitsFalseCaptureTestSuite by testSuite(
+    testConfig = TestConfig.testScope(isEnabled = true, timeout = 60.minutes),
+) {
+    test("captureRevoluteLimitsFalse") { RevoluteLimitsFalseCaptureTest().run { captureRevoluteLimitsFalse() } }
+}
 
 class RevoluteLimitsFalseCaptureTest {
     private fun body(world: World<Body>, shape: Convex, x: Double, y: Double, fixed: Boolean,
@@ -29,8 +38,7 @@ class RevoluteLimitsFalseCaptureTest {
         return body
     }
 
-    @Test
-    fun captureRevoluteLimitsFalse() {
+fun captureRevoluteLimitsFalse() {
         val rows = mutableListOf<String>()
         val recorder = NumericalRecorder { row ->
             rows.add(row)

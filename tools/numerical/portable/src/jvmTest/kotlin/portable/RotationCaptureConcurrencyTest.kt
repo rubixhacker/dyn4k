@@ -1,19 +1,28 @@
 package portable
 
+import de.infix.testBalloon.framework.core.TestConfig
+import de.infix.testBalloon.framework.core.testScope
+import de.infix.testBalloon.framework.core.testSuite
+import kotlin.time.Duration.Companion.minutes
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import org.dyn4j.geometry.RotationOperationTap
 import org.dyn4j.geometry.Transform
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+val RotationCaptureConcurrencyTestSuite by testSuite(
+    testConfig = TestConfig.testScope(isEnabled = true, timeout = 60.minutes),
+) {
+    test("engineExposesNoMutableDiagnosticListener") { RotationCaptureConcurrencyTest().run { engineExposesNoMutableDiagnosticListener() } }
+    test("concurrentCapturesKeepOperationsOnTheirOwnThreads") { RotationCaptureConcurrencyTest().run { concurrentCapturesKeepOperationsOnTheirOwnThreads() } }
+}
+
 class RotationCaptureConcurrencyTest {
-    @Test
-    fun engineExposesNoMutableDiagnosticListener() {
+fun engineExposesNoMutableDiagnosticListener() {
         val rotationMethods = RotationOperationTap::class.java.methods.map { it.name }
         assertTrue(rotationMethods.none { it == "setListener" || it == "getListener" })
         val resetType = runCatching {
@@ -24,8 +33,7 @@ class RotationCaptureConcurrencyTest {
         })
     }
 
-    @Test
-    fun concurrentCapturesKeepOperationsOnTheirOwnThreads() {
+fun concurrentCapturesKeepOperationsOnTheirOwnThreads() {
         val barrier = CyclicBarrier(2)
         val first = AtomicReference<Long?>()
         val second = AtomicReference<Long?>()

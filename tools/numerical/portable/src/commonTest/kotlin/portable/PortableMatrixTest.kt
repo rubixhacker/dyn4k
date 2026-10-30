@@ -1,5 +1,9 @@
 package portable
 
+import de.infix.testBalloon.framework.core.TestConfig
+import de.infix.testBalloon.framework.core.testScope
+import de.infix.testBalloon.framework.core.testSuite
+import kotlin.time.Duration.Companion.minutes
 import org.dyn4j.dynamics.Body
 import org.dyn4j.dynamics.ContinuousDetectionMode
 import org.dyn4j.dynamics.joint.AngleJoint
@@ -32,8 +36,28 @@ import org.dyn4j.world.World
 import org.dyn4j.world.PhysicsBodySweptAABBProducer
 import org.dyn4j.dynamics.BodyFixture
 import kotlin.math.PI
-import kotlin.test.Test
 import kotlin.test.assertEquals
+
+val PortableMatrixTestSuite by testSuite(
+    testConfig = TestConfig.testScope(isEnabled = true, timeout = 60.minutes),
+) {
+    test("geometryCollisionBoundaryAndScale") { PortableMatrixTest().run { geometryCollisionBoundaryAndScale() } }
+    test("freeMotionForcesDampingAndRestitution") { PortableMatrixTest().run { freeMotionForcesDampingAndRestitution() } }
+    test("defaultContactsFrictionSleepAndWake") { PortableMatrixTest().run { defaultContactsFrictionSleepAndWake() } }
+    test("configured30Repeat1") { PortableMatrixTest().run { configured30Repeat1() } }
+    test("configured30Repeat2") { PortableMatrixTest().run { configured30Repeat2() } }
+    test("configured60Repeat1") { PortableMatrixTest().run { configured60Repeat1() } }
+    test("configured60Repeat2") { PortableMatrixTest().run { configured60Repeat2() } }
+    test("configured120Repeat1") { PortableMatrixTest().run { configured120Repeat1() } }
+    test("configured120Repeat2") { PortableMatrixTest().run { configured120Repeat2() } }
+    test("everyJointWithInitialAndApplicableActiveModes") { PortableMatrixTest().run { everyJointWithInitialAndApplicableActiveModes() } }
+    test("independentJointBooleanModes") { PortableMatrixTest().run { independentJointBooleanModes() } }
+    test("numericAndLimitJointCaseIdsMatchPinnedBaseline") { PortableMatrixTest().run { numericAndLimitJointCaseIdsMatchPinnedBaseline() } }
+    test("independentJointNumericAndLimitModes") { PortableMatrixTest().run { independentJointNumericAndLimitModes() } }
+    test("baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure") { PortableMatrixTest().run { baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure() } }
+    test("continuousCollisionCasesAtFrozenRates") { PortableMatrixTest().run { continuousCollisionCasesAtFrozenRates() } }
+    test("longRunningFreeMotionInvariantScene") { PortableMatrixTest().run { longRunningFreeMotionInvariantScene() } }
+}
 
 class PortableMatrixTest {
     private val recorder = NumericalRecorder { println("NUMERICAL_JSON $it") }
@@ -53,8 +77,7 @@ class PortableMatrixTest {
         return body
     }
 
-    @Test
-    fun geometryCollisionBoundaryAndScale() {
+fun geometryCollisionBoundaryAndScale() {
         for ((scaleIndex, scale) in listOf(0.01, 1.0, 100.0).withIndex()) for ((originIndex, origin) in listOf(
             0.0 to 0.0, 1000.0 to 1000.0, -1000.0 to 1000.0,
             1000000.0 to -1000000.0, -1000000.0 to 1000000.0).withIndex())
@@ -90,8 +113,7 @@ class PortableMatrixTest {
         }
     }
 
-    @Test
-    fun freeMotionForcesDampingAndRestitution() {
+fun freeMotionForcesDampingAndRestitution() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val moving = body(world, Geometry.createCircle(0.5), 0.0, 0.0, false)
@@ -132,8 +154,7 @@ class PortableMatrixTest {
         return world to body(world, Geometry.createRectangle(1.0, 1.0), 0.0, 0.51, false, 0.5)
     }
 
-    @Test
-    fun defaultContactsFrictionSleepAndWake() {
+fun defaultContactsFrictionSleepAndWake() {
         for (hz in listOf(30, 60, 120)) {
             val (world, target) = sleepWorld(false)
             recorder.capture(CaseSpec("contacts-default-$hz", "contacts-friction-sleep-wake",
@@ -164,12 +185,12 @@ class PortableMatrixTest {
         }
     }
 
-    @Test fun configured30Repeat1() = configuredContacts(30, 4, 1)
-    @Test fun configured30Repeat2() = configuredContacts(30, 4, 2)
-    @Test fun configured60Repeat1() = configuredContacts(60, 2, 1)
-    @Test fun configured60Repeat2() = configuredContacts(60, 2, 2)
-    @Test fun configured120Repeat1() = configuredContacts(120, 1, 1)
-    @Test fun configured120Repeat2() = configuredContacts(120, 1, 2)
+fun configured30Repeat1() = configuredContacts(30, 4, 1)
+fun configured30Repeat2() = configuredContacts(30, 4, 2)
+fun configured60Repeat1() = configuredContacts(60, 2, 1)
+fun configured60Repeat2() = configuredContacts(60, 2, 2)
+fun configured120Repeat1() = configuredContacts(120, 1, 1)
+fun configured120Repeat2() = configuredContacts(120, 1, 2)
 
     private fun joint(type: String, mode: String, a: Body, b: Body): Joint<Body> {
         val active = mode == "active"
@@ -236,8 +257,7 @@ class PortableMatrixTest {
         }
     }
 
-    @Test
-    fun everyJointWithInitialAndApplicableActiveModes() {
+fun everyJointWithInitialAndApplicableActiveModes() {
         for (type in listOf("Angle", "Distance", "Friction", "Motor", "Pin", "Prismatic",
             "Pulley", "Revolute", "Weld", "Wheel")) {
             for (mode in listOf("initial", "active")) {
@@ -377,8 +397,7 @@ class PortableMatrixTest {
         }
     }
 
-    @Test
-    fun independentJointBooleanModes() {
+fun independentJointBooleanModes() {
         for ((type, fields) in booleanJointFields) for (field in fields)
             for (variant in listOf("false", "true", "toggle")) {
                 val world = World<Body>()
@@ -446,8 +465,7 @@ class PortableMatrixTest {
         else -> error("unsupported numeric joint case value: $value")
     }
 
-    @Test
-    fun numericAndLimitJointCaseIdsMatchPinnedBaseline() {
+fun numericAndLimitJointCaseIdsMatchPinnedBaseline() {
         val numericIds = numericJointFields.flatMap { (type, fields) ->
             fields.flatMap { (field, values) ->
                 values.map { value -> numericJointCaseId(type, field, value) }
@@ -625,8 +643,7 @@ class PortableMatrixTest {
         }
     }
 
-    @Test
-    fun independentJointNumericAndLimitModes() {
+fun independentJointNumericAndLimitModes() {
         fun seed(type: String): Pair<World<Body>, Joint<Body>> {
             val world = World<Body>()
             world.setGravity(0.0, 0.0)
@@ -673,8 +690,7 @@ class PortableMatrixTest {
         assertEquals(pinnedNumericAndLimitCaseIds, capturedCaseIds)
     }
 
-    @Test
-    fun baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure() {
+fun baselineAngleNegativeRatioRemainsAnIsolatedPhysicalFailure() {
         val world = World<Body>()
         world.setGravity(0.0, 0.0)
         val first = body(world, Geometry.createCircle(0.5), 0.0, 0.0, false)
@@ -689,8 +705,7 @@ class PortableMatrixTest {
             mapOf("jointType" to "Angle", "ratio" to -1.0, "limitsEnabled" to false)), world)
     }
 
-    @Test
-    fun continuousCollisionCasesAtFrozenRates() {
+fun continuousCollisionCasesAtFrozenRates() {
         for (hz in listOf(30, 60, 120)) for (shape in listOf("circle", "pentagon"))
             for (mode in listOf(ContinuousDetectionMode.ALL, ContinuousDetectionMode.NONE)) {
                 val world = World<Body>()
@@ -709,8 +724,7 @@ class PortableMatrixTest {
             }
     }
 
-    @Test
-    fun longRunningFreeMotionInvariantScene() {
+fun longRunningFreeMotionInvariantScene() {
         val world = World<Body>()
         world.setBroadphaseDetector(CollisionItemBroadphaseDetectorAdapter(
             DynamicAABBTree<CollisionItem<Body, BodyFixture>>(

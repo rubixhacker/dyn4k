@@ -1,16 +1,24 @@
 package portable
 
+import de.infix.testBalloon.framework.core.TestConfig
+import de.infix.testBalloon.framework.core.testScope
+import de.infix.testBalloon.framework.core.testSuite
+import kotlin.time.Duration.Companion.minutes
 import java.io.OutputStream
 import java.io.PrintStream
 import java.nio.channels.Channels
 import java.nio.channels.FileChannel
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
-import kotlin.test.Test
+
+val FocusedBooleanArithmeticSourceTestSuite by testSuite(
+    testConfig = TestConfig.testScope(isEnabled = true, timeout = 60.minutes),
+) {
+    test("captureRevoluteLimitsFalse") { FocusedBooleanArithmeticSourceTest().run { captureRevoluteLimitsFalse() } }
+}
 
 class FocusedBooleanArithmeticSourceTest {
-    @Test
-    fun captureRevoluteLimitsFalse() {
+fun captureRevoluteLimitsFalse() {
         val mirror = Path.of(requireNotNull(System.getProperty("portable.booleanMirror")))
         val original = System.out
         FileChannel.open(mirror, StandardOpenOption.CREATE_NEW,

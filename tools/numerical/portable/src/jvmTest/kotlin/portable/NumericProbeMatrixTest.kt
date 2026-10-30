@@ -1,5 +1,9 @@
 package portable
 
+import de.infix.testBalloon.framework.core.TestConfig
+import de.infix.testBalloon.framework.core.testScope
+import de.infix.testBalloon.framework.core.testSuite
+import kotlin.time.Duration.Companion.minutes
 import java.io.OutputStream
 import java.io.PrintStream
 import java.net.URLClassLoader
@@ -10,11 +14,15 @@ import java.nio.file.Paths
 import java.nio.file.StandardOpenOption
 import org.dyn4j.dynamics.Body
 import org.dyn4j.geometry.Geometry
-import kotlin.test.Test
+
+val NumericProbeMatrixTestSuite by testSuite(
+    testConfig = TestConfig.testScope(isEnabled = true, timeout = 60.minutes),
+) {
+    test("geometryCollisionBoundaryAndScale") { NumericProbeMatrixTest().run { geometryCollisionBoundaryAndScale() } }
+}
 
 class NumericProbeMatrixTest {
-    @Test
-    fun geometryCollisionBoundaryAndScale() {
+fun geometryCollisionBoundaryAndScale() {
         val path = Paths.get(requireNotNull(System.getProperty("portable.numericProbeMirror")))
         require(path.isAbsolute)
         val original = System.out

@@ -1,8 +1,17 @@
 package portable
 
+import de.infix.testBalloon.framework.core.TestConfig
+import de.infix.testBalloon.framework.core.testScope
+import de.infix.testBalloon.framework.core.testSuite
+import kotlin.time.Duration.Companion.minutes
 import org.dyn4j.geometry.RotationOperationTap
 import org.dyn4j.geometry.Transform
-import kotlin.test.Test
+
+val RotationPremiseFixtureTestSuite by testSuite(
+    testConfig = TestConfig.testScope(isEnabled = true, timeout = 60.minutes),
+) {
+    test("captureRotationPremises") { RotationPremiseFixtureTest().run { captureRotationPremises() } }
+}
 
 class RotationPremiseFixtureTest {
     private class SeededTransform : Transform() {
@@ -15,8 +24,7 @@ class RotationPremiseFixtureTest {
     private data class PremiseInput(val id: String, val costBits: Long,
         val sintBits: Long, val angleBits: Long)
 
-    @Test
-    fun captureRotationPremises() {
+fun captureRotationPremises() {
         val inputs = listOf(
             PremiseInput("rotation-premise-mode", 0xbfd0cd683f9d3feaUL.toLong(),
                 0x3feee0a3e97da062L, 0x4001c867da8b78fcL),
