@@ -192,14 +192,9 @@ object Measure {
     fun stepSummary(rows: List<Map<String, String?>>, mode: String, hz: Int): JsonObject {
         val times = rows.map { it.channel("elapsed_ns") }.sorted()
         val eventSummaries = summary(rows, hz, mode)
-        val median: JsonElementValue = if (PerformanceStatistics.medianIsInteger(times)) {
-            JsonElementValue.Integer(PerformanceStatistics.medianOfLongs(times).toLong())
-        } else {
-            JsonElementValue.Floating(PerformanceStatistics.medianOfLongs(times))
-        }
         return buildJsonObject {
             put("samples", rows.size)
-            put("median_ns", median.toJsonPrimitive())
+            put("median_ns", PythonNumber.medianOf(times).toJson())
             put("p99_ns", times[kotlin.math.ceil(times.size * 0.99).toInt() - 1])
             put("total_ns", times.sum())
             put(
@@ -209,19 +204,6 @@ object Measure {
             put("peak_rss_delta_bytes", rows.maxOf { it.channel("rss_delta_bytes") })
             put("event_only_full", eventSummaries.getValue("event_only_full"))
             put("event_only_final_minute", eventSummaries.getValue("event_only_final_minute"))
-        }
-    }
-
-    /** A JSON number that keeps Python's distinction between an `int` and a `float`. */
-    sealed interface JsonElementValue {
-        fun toJsonPrimitive(): JsonPrimitive
-
-        data class Integer(val value: Long) : JsonElementValue {
-            override fun toJsonPrimitive(): JsonPrimitive = JsonPrimitive(value)
-        }
-
-        data class Floating(val value: Double) : JsonElementValue {
-            override fun toJsonPrimitive(): JsonPrimitive = JsonPrimitive(value)
         }
     }
 }

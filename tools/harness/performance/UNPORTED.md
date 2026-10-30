@@ -5,10 +5,17 @@ The port moves the deterministic logic of `tools/performance/*.py` into
 process, a device, a clock, a network, or a real filesystem, and those adapters belong in
 `:host`. The Python files are unchanged and remain the reference.
 
-Parity evidence: `src/commonTest/.../PerformanceVectors.kt` holds outputs printed by the
-Python implementation at git revision `df640f26be0a61d8db5c6e7624114595aebf379a`.
-Regenerate with `parity/generate_vectors.py`. `tools/performance` is byte-identical at
-that revision and at the current HEAD, so the vectors still describe the reference.
+Parity evidence lives in two fixtures, each holding outputs printed by the Python
+implementation rather than transcribed from it:
+
+- `src/commonTest/.../PerformanceVectors.kt`, recorded at `tools/performance` revision
+  `df640f26be0a61d8db5c6e7624114595aebf379a`; regenerate with `parity/generate_vectors.py`.
+- `src/commonTest/.../LeafVectors.kt`, recorded at revision
+  `233edd085db9427e7feb19fd150d504b5d43be1b`; regenerate with
+  `parity/generate_leaf_vectors.py`.
+
+`tools/performance` is byte-identical at both revisions and at the current HEAD, so both
+fixtures describe the reference.
 
 ## `manifest.py`
 
@@ -180,16 +187,28 @@ without the rest.
 Nothing is ported: the build, capture, and verify paths all need Gradle, a JVM, and procfs
 process observation.
 
-## `calibrate.py`, `warmup_probe.py`
+## `warmup_probe.py`, `calibrate.py`, `ccd_route_trace.py`
 
-Nothing is ported. Both are thin CLIs over `measure.run_scenario` plus `host_identity`; the
-only portable logic they contain (`bootstrap_ratio`, `warmup_status`, `activity_status`,
-30-second window medians) is already ported.
+Ported in full, apart from `main`'s argparse wiring, which is a `:cli` concern.
 
-## `ccd_route_trace.py`
+| Module | Ported | Where |
+| --- | --- | --- |
+| `warmup_probe.py` | `windowMedians`, `buildReport`, the two argument checks, the checked-in-manifest check | `commonMain/WarmupProbe` |
+| `calibrate.py` | `noiseBound`, `pair`, `buildReport`, the two argument checks | `commonMain/Calibrate` |
+| `ccd_route_trace.py` | `rows`, `firstDifference`, `comparisons`, the identity and baseline-jar rules, `buildResult`, `identityEntry`, the staged-route exit | `commonMain/CcdRouteTrace` |
+| `measure.py` (the host half) | `sha256`, `read_text`, `jar_path`, `compile_harness`, `host_identity`, `run_capture`, `run_scenario` | `jvmMain/MeasureHost` |
 
-Nothing is ported. `first_difference` is pure but only meaningful over the fixture-identity
-CSVs that `capture` produces by running three staged routes.
+`measure.host_identity`'s two procfs parsers are ported as `HostIdentityParsing` in
+`commonMain`, so the CPU-model and memory-total rules are pinned by vectors while the reads
+stay on the host.
+
+What `MeasureHost` still cannot do, and why:
+
+| Symbol | Reason |
+| --- | --- |
+| `jar_path` without a supplied file | it downloads over the network; the supplied path is exercised and the download branch is not. |
+| `host_identity`'s `release` | `/proc/sys/kernel/osrelease` on Linux, `os.version` elsewhere, because a JVM cannot call `uname`. |
+| `run_capture`'s RSS ceiling | reads `/proc/<pid>/statm` with a page size from `getconf PAGESIZE`; the branch is ported but only the wall-time branch is exercised. |
 
 ## `bounded_adapter.py`
 
@@ -202,7 +221,8 @@ comparison. `verified_file` and `require_committed_sources` are thin wrappers ov
 
 204 `unittest` cases exist across the nineteen suites. 42 are reproduced as named
 TestBalloon tests, 25 more cover a rule the vectors do not reach, and 48 replay recorded
-Python vectors, for 115 tests total. The remainder are not reproduced:
+Python vectors. The three leaf modules add 44 more, for 159 tests total. The remainder are not
+reproduced:
 
 | Suite | Cases | Ported | Why the rest is not |
 | --- | --- | --- | --- |
@@ -225,3 +245,8 @@ Python vectors, for 115 tests total. The remainder are not reproduced:
 | `test_ccd_fixture.py` | 2 | 0 | requires staged Java and the pinned baseline JAR. |
 | `test_bounded_adapter.py` | 1 | 0 | end-to-end CLI capture and audit. |
 | `test_pilot.py` | 4 | 0 | runs `BaselinePilot` on the pinned dyn4j jar. |
+
+`warmup_probe.py`, `calibrate.py`, and `ccd_route_trace.py` have no `unittest` suite. Their
+behaviour is pinned by the new `WarmupProbeCases`, `CalibrateCases`, `CcdRouteTraceCases`, and
+`HostIdentityParsingCases` suites plus the `MeasureHostCases` suite, which compiles the real
+harness against the pinned dyn4j jar and runs one measured scenario end to end.

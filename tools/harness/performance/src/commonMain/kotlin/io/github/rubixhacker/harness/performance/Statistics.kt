@@ -3,6 +3,34 @@ package io.github.rubixhacker.harness.performance
 import kotlin.math.ceil
 import kotlin.math.floor
 
+/**
+ * A JSON number that keeps Python's distinction between an `int` and a `float`.
+ *
+ * `statistics.median` returns an `int` for an odd count and a `float` for an even count, and a
+ * receipt that records `1300` where the reference records `1300.0` is a different byte sequence.
+ */
+sealed interface PythonNumber {
+    fun toJson(): kotlinx.serialization.json.JsonPrimitive
+
+    data class Integer(val value: Long) : PythonNumber {
+        override fun toJson(): kotlinx.serialization.json.JsonPrimitive =
+            kotlinx.serialization.json.JsonPrimitive(value)
+    }
+
+    data class Floating(val value: Double) : PythonNumber {
+        override fun toJson(): kotlinx.serialization.json.JsonPrimitive =
+            kotlinx.serialization.json.JsonPrimitive(value)
+    }
+
+    companion object {
+        /** The median of [values] as Python reports it, preserving int-ness for an odd count. */
+        fun medianOf(values: List<Long>): PythonNumber {
+            val median = PerformanceStatistics.medianOfLongs(values)
+            return if (PerformanceStatistics.medianIsInteger(values)) Integer(median.toLong()) else Floating(median)
+        }
+    }
+}
+
 /** The statistics helpers the analysis modules share, with Python's numeric behaviour. */
 object PerformanceStatistics {
     /**

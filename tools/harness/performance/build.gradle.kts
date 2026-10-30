@@ -3,8 +3,23 @@ plugins {
     id("de.infix.testBalloon")
 }
 
+// The performance tools measure against one pinned dyn4j binary. The host adapter tests need
+// that exact jar on disk, so resolve it once and hand its path to the test JVM. It is not on
+// any module's compile or runtime classpath.
+val pinnedBaseline: Configuration by configurations.creating
+
+dependencies {
+    pinnedBaseline("org.dyn4j:dyn4j:6.0.0")
+}
+
 kotlin {
-    jvm()
+    jvm {
+        testRuns["test"].executionTask.configure {
+            doFirst {
+                systemProperty("performance.baselineJar", pinnedBaseline.singleFile.absolutePath)
+            }
+        }
+    }
 
     sourceSets {
         commonMain.dependencies {
