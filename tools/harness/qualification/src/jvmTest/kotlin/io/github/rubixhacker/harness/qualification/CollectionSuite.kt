@@ -30,6 +30,10 @@ import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
  * revision (`parity/generate_collection_vectors.py`) and compared byte for byte. The workflow
  * assertions read the current `.github/workflows` files: no workflow was edited here.
  */
+/** The tree object of the checked-out revision, which every receipt binds. */
+private fun headTree(repository: java.nio.file.Path): String =
+    hostedGit(repository, "rev-parse", "HEAD^{tree}").trim()
+
 val CollectionContract by testSuite {
     test("an empty collection keeps all 112 lanes not run without a signature") {
         val repository = repositoryRoot()
@@ -58,14 +62,17 @@ val CollectionContract by testSuite {
                 ),
                 (report["external_inputs_required"] as JsonArray).map { Py.str(it) },
             )
+            // The recorded documents embed the revision they were produced at. Those two
+            // fields are the only revision-bound values, so they are normalised before the
+            // byte comparison; everything else still has to match exactly.
+            val tree = hostedGit(repository, "rev-parse", "HEAD^{tree}").trim()
+            fun recorded(name: String): String = resourceText("collection/empty-$name")
+                .replace(CollectionVectors.REVISION, head)
+                .replace(CollectionVectors.SOURCE_TREE, tree)
             for (name in listOf(
                 "collection.json", "assembly-inputs.json", "candidate-manifest-inputs.json",
             )) {
-                assertEquals(
-                    resourceText("collection/empty-$name"),
-                    Files.readString(output.resolve(name)),
-                    name,
-                )
+                assertEquals(recorded(name), Files.readString(output.resolve(name)), name)
             }
             val inputs = StrictJson.load(Files.readString(output.resolve("assembly-inputs.json")))
                 as JsonObject
@@ -78,10 +85,7 @@ val CollectionContract by testSuite {
                 Files.readString(output.resolve("candidate-manifest-inputs.json")),
             ) as JsonObject
             assertEquals("INCOMPLETE", Py.str(candidate["status"]))
-            assertEquals(
-                CollectionVectors.SOURCE_TREE,
-                Py.str(report["source_tree"]),
-            )
+            assertEquals(tree, Py.str(report["source_tree"]))
             val lanes = candidate["lanes"] as JsonObject
             val jvm = lanes.values.map { it as JsonObject }
                 .filter { Py.str(it["target"]) == "jvm" }
@@ -203,7 +207,7 @@ val CollectionContract by testSuite {
                 buildJsonObject {
                     put("schema", JsonPrimitive(1))
                     put("candidate_sha", JsonPrimitive(head))
-                    put("source_tree", JsonPrimitive(CollectionVectors.SOURCE_TREE))
+                    put("source_tree", JsonPrimitive(headTree(repository)))
                     put("status", JsonPrimitive("PASSED"))
                 }.toString(),
             )
@@ -277,7 +281,7 @@ val CollectionContract by testSuite {
                     put("schema", JsonPrimitive(1))
                     put("status", JsonPrimitive("FAILED"))
                     put("candidate_sha", JsonPrimitive(head))
-                    put("source_tree", JsonPrimitive(CollectionVectors.SOURCE_TREE))
+                    put("source_tree", JsonPrimitive(headTree(repository)))
                     put(
                         "process",
                         buildJsonObject {
