@@ -26,7 +26,7 @@ Kotlin), **pending** (not started), **blocked** (needs a coordination step).
 | `qualify.digest(path)` | `tools/harness/host/.../FileDigest.kt` | ported | streaming SHA-256; 2 cases |
 | `qualify.require_clean_checkout` | `tools/harness/host/.../CleanCheckout.kt` | ported | 5 cases: clean, wrong SHA, dirty tracked file, untracked input, generated output ignored |
 | `tools/compatibility/*` analysis logic plus process/JDK/git adapters (world_ci, governing_*, candidate_coverage, method_coverage, java_corpus, execution_probe, full_ci, exception_ci, ledger, module_probe) | `tools/harness/compatibility` | ported | 47 TestBalloon tests; vectors at revisions `df640f26` and `233edd08`; signature_index, build_provenance, portable_links, coverage_receipts still pending |
-| `tools/performance/*` | `tools/harness/performance` | in progress (delegated) | |
+| `tools/performance/*` analysis logic (manifest, analyze, measure, candidate_*, sustained_archive, reference_study, host_capacity_control, stress_monitor) | `tools/harness/performance` | ported | 115 TestBalloon tests, 25 suites; vectors at revision `df640f26`; 135 of 204 Python cases need retained archives or hosts; see `tools/harness/performance/UNPORTED.md` |
 | `tools/numerical/*` | `tools/harness/numerical` | pending | |
 | `tools/qualification/*` other modules | `tools/harness/qualification` | pending | |
 | `tools/android-runtime`, `tools/android-native-runtime`, `tools/diagnostic`, `tools/migration` | — | pending | |
