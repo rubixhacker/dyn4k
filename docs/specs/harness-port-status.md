@@ -26,16 +26,37 @@ cd tools/harness && ../../gradlew checkAll
 | --- | --- | --- | --- |
 | `:core` | `qualify.py` contract: matrix, digests, canonical JSON, publication metadata, provider check | ported | 27 |
 | `:host` | `qualify.digest(path)`, `qualify.require_clean_checkout` | ported | 7 |
-| `:qualification` | `guard_hosted_runners.py` (**Python deleted**), `qualify.py` archives/audits/evaluation/CLI actions, `stage.py`, `publication.py`, `independent_gates` (part), `independent_linux_observer` (verification half), `full_corpus.py`, `full_suite_manifest.py` | partial | 289 |
+| `:qualification` | `guard_hosted_runners.py` (**Python deleted**), `qualify.py` archives/audits/evaluation/CLI actions, `stage.py`, `publication.py`, `artifact.py` (collection half), `independent_gates` (part), `independent_linux_observer` (verification half), `full_corpus.py`, `full_suite_manifest.py`, `duplicate_provider.py`, `full_hosted.py` (archive foundation) | partial | 317 |
 | `:compatibility` | `world_ci`, `governing_*`, `candidate_coverage`, `method_coverage`, `java_corpus`, `execution_probe`, `full_ci`, `exception_ci`, `ledger`, `module_probe` | partial | 47 |
-| `:performance` | `manifest`, `analyze`, `measure`, `candidate_*`, `sustained_archive`, `reference_study`, `host_capacity_control`, `stress_monitor` | partial | 115 |
-| `:numerical` | `portable/cases.py`; `portable/receipt.py`; `portable/exact_consistency.py`; `portable/orthogonality.py`; `portable/physical.py` (`nominal_free`, `audit_physical`, sleep/wake, phases); `numeric_class_witness.read_witness`; `compare.py` (`compare`, `audit_reference`, `load_receipt`, `load_fixture`, the whole `compare_value` engine, `check_counts`, `check_snapshot`); `candidate/nominal_zero.py`; `weld_pulley_quality.py` (engine, phases, `atan`/`pi` enclosures, `Decimal`-at-80 rendering); `portable/rotation_oracle.py` (encoding, digest and manifest helpers only) | partial | 87 |
+| `:performance` | `manifest`, `analyze`, `measure`, `candidate_*`, `sustained_archive`, `reference_study`, `host_capacity_control`, `stress_monitor`, `warmup_probe` (**Python deleted**), `calibrate` (**Python deleted**), `ccd_route_trace` | partial | 181 |
+| `:numerical` | `portable/cases.py`; `portable/receipt.py`; `portable/exact_consistency.py`; `portable/orthogonality.py`; `portable/physical.py` (`nominal_free`, `audit_physical`, sleep/wake, phases); `numeric_class_witness.read_witness`; `compare.py` (`compare`, `audit_reference`, `load_receipt`, `load_fixture`, the whole `compare_value` engine, `check_counts`, `check_snapshot`); `candidate/nominal_zero.py`; `weld_pulley_quality.py` (engine, phases, `atan`/`pi` enclosures, `Decimal`-at-80 rendering); `portable/rotation_oracle.py` (encoding, digest and manifest helpers only) | partial | 91 |
 | `:android` | `android_corpus`, `build_identity`, `evidence`, `full_evidence`, `optimized_evidence`, `prepare`, `run`, `run_full`, `run_optimized` (Android); `receipt`, `full`, `adverse` (Android Native) — installed routes ported but never run on a device | ported | 110 |
-| `:migration` | `journeys`, `fixed_replay`, `truck_camera`, `truck_timeline`, `validate_plain`, `validate_scene` and their four suites; the podman/X11 paths are unrun and the mains have no Gradle tasks | ported | 96 |
+| `:migration` | `journeys`, `fixed_replay`, `truck_camera`, `truck_timeline`, `validate_plain`, `validate_scene` and their four suites; the podman/X11 paths are unrun and the mains have no Gradle tasks. `TruckTimelineContract` replays the nine `test_truck_camera.py` cases against recorded Python verdicts | ported | 96 |
 | `:baseline` | not started | pending | — |
 
-Harness total at the last full run: 485 tests, 0 failures, across `:core`, `:host`,
-`:compatibility`, `:performance`, `:qualification`.
+## Python that remains
+
+The port is not finished. At 2026-10-30 the tree still held **323 Python files, 170,307 lines**:
+
+| Directory | Lines | State |
+| --- | ---: | --- |
+| `tools/qualification` | 65,974 | partial: `hosted`, `safari_reporter`, `collection`, `compiler_modes`, `artifact` (hosted half), `full_hosted` (most of it), most `independent_gates` verifiers and every consumer verifier remain |
+| `tools/numerical` | 49,317 | partial: the producers, `extra_targets`, `actual_*`, `prospective_compare`, the JDI and MPFR harnesses, and the portable consumer scripts remain |
+| `tools/performance` | 24,539 | partial: the sustained archives, the recent-archive verifiers and the native-host runners remain |
+| `tools/compatibility` | 11,857 | partial: `signature_index`, `build_provenance`, `portable_links`, `coverage_receipts`, `common_corpus_receipt`, `android_java_corpus` remain |
+| `tools/harness` | 5,139 | parity generators; kept until the port completes so vectors stay reproducible |
+| `tools/android-runtime`, `tools/android-native-runtime` | 4,397 | ported; deletion waits on the qualification consumers that read their output |
+| `tools/baseline` | 2,784 | in progress |
+| `tools/migration` | 2,519 | ported; deletion is blocked because `independent_gates.py` and `validate_plain.py`/`validate_scene.py` still import each other |
+| `tools/diagnostic` | 2,238 | not started (Windows collision controls) |
+| `scripts`, `docs/guide`, `consumers` | 1,293 | not started |
+
+52 `python3` invocations remain across `qualification.yml` (27), `qualification-source-checks.yml` (13)
+and `full-staged-native-host.yml` (12). A step may only move to Kotlin once its module is ported and
+`tools/compatibility/test_qualification_workflow.py` asserts the new command.
+
+Harness total at the last full run: 857 tests, 0 failures, across `:core`, `:host`,
+`:compatibility`, `:performance`, `:qualification`, `:numerical`, `:android`, `:migration`.
 
 ## Python code removed
 
@@ -43,6 +64,8 @@ Harness total at the last full run: 485 tests, 0 failures, across `:core`, `:hos
 | --- | --- | --- |
 | `tools/qualification/guard_hosted_runners.py` | `GuardHostedRunners.kt` | `./gradlew -p tools/harness :qualification:guardHostedRunners` in `qualification.yml` and `qualification-source-checks.yml` |
 | `tools/qualification/test_guard_hosted_runners.py` | `GuardHostedRunnersSuite.kt` (12 cases) | the separate test step was removed; `test_qualification_workflow.py` asserts the Kotlin command |
+| `tools/performance/warmup_probe.py` | `WarmupProbe` + `:performance:warmupProbe` | no workflow step invoked it |
+| `tools/performance/calibrate.py` | `Calibrate` + `:performance:calibrate` | no workflow step invoked it; `docs/research/performance-manifest.md` points at the Gradle task |
 
 ## Known parity hazards
 
