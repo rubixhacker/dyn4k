@@ -356,18 +356,18 @@ class CollectionTests(unittest.TestCase):
             '--repository-name "$GITHUB_REPOSITORY"',
             '--run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")',
             "fi",
-            'python3 tools/qualification/collection.py '
-            '--repository "$GITHUB_WORKSPACE" --candidate-sha "$GITHUB_SHA" '
-            '--artifacts-dir "$RUNNER_TEMP/producer-artifacts" '
-            '--upstream "$RUNNER_TEMP/dyn4j-source" "${source_args[@]}" '
-            '--output "$RUNNER_TEMP/central-collection" '
+            './gradlew -p tools/harness :qualification:collectQualification --console=plain -q '
+            '--args="--repository $GITHUB_WORKSPACE --candidate-sha $GITHUB_SHA '
+            '--artifacts-dir $RUNNER_TEMP/producer-artifacts '
+            '--upstream $RUNNER_TEMP/dyn4j-source ${source_args[*]} '
+            '--output $RUNNER_TEMP/central-collection" '
             '> "$RUNNER_TEMP/central-logs/collection.stdout" '
             '2> "$RUNNER_TEMP/central-logs/collection.stderr"',
             "collection_exit=$?",
-            'python3 tools/qualification/collection.py --verify '
-            '--repository "$GITHUB_WORKSPACE" --candidate-sha "$GITHUB_SHA" '
-            '--artifacts-dir "$RUNNER_TEMP/producer-artifacts" '
-            '--output "$RUNNER_TEMP/central-collection" '
+            './gradlew -p tools/harness :qualification:collectQualification --console=plain -q '
+            '--args="--verify --repository $GITHUB_WORKSPACE --candidate-sha $GITHUB_SHA '
+            '--artifacts-dir $RUNNER_TEMP/producer-artifacts '
+            '--output $RUNNER_TEMP/central-collection" '
             '> "$RUNNER_TEMP/central-logs/transport.stdout" '
             '2> "$RUNNER_TEMP/central-logs/transport.stderr"',
             "transport_exit=$?",
@@ -411,7 +411,8 @@ class CollectionTests(unittest.TestCase):
             ("download", "Download every retained producer artifact",
              "        uses: actions/download-artifact@v4\n"),
             ("verify", "Collect and independently enumerate 112 lanes",
-             "          python3 tools/qualification/collection.py --verify \\\n"),
+             "          ./gradlew -p tools/harness :qualification:collectQualification "
+             "--console=plain -q \\\n"),
             ("upload", "Upload central raw collection and failed routes",
              "        uses: actions/upload-artifact@v4\n"),
         )
@@ -425,9 +426,11 @@ class CollectionTests(unittest.TestCase):
                 command = block[start:end]
                 replacements = (
                     ("commented", block.replace(command,
-                        "          # python3 tools/qualification/collection.py --verify\n", 1)),
+                        "          # ./gradlew -p tools/harness "
+                        ":qualification:collectQualification --console=plain -q\n", 1)),
                     ("no-op", block.replace(command,
-                        "          echo skipped # python3 tools/qualification/collection.py --verify\n", 1)),
+                        "          echo skipped # ./gradlew -p tools/harness "
+                        ":qualification:collectQualification --console=plain -q\n", 1)),
                 )
             else:
                 retained_name = ("        # qualification-central-${{ github.sha }}\n"
@@ -477,9 +480,11 @@ class CollectionTests(unittest.TestCase):
             ("early-success-exit", (("        run: |\n          set +e\n",
                                      "        run: |\n          exit 0\n          set +e\n"),)),
             ("false-conditional-verifier", (
-                ("          python3 tools/qualification/collection.py --verify \\\n",
+                ("          ./gradlew -p tools/harness "
+                 ":qualification:collectQualification --console=plain -q \\\n",
                  "          if false; then\n"
-                 "          python3 tools/qualification/collection.py --verify \\\n"),
+                 "          ./gradlew -p tools/harness "
+                 ":qualification:collectQualification --console=plain -q \\\n"),
                 ("          transport_exit=$?\n",
                  "          fi\n          transport_exit=$?\n"))),
             ("ignored-final-status", (("          test \"$assembly_exit\" -eq 0 && "

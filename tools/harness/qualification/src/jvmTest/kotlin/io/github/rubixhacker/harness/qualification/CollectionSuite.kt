@@ -441,7 +441,9 @@ val CollectionContract by testSuite {
         val other = jobs.getValue("hosted-mac")
         val steps = centralCollectionSteps(workflow)
         val collectName = "Collect and independently enumerate 112 lanes"
-        val verifyLine = "          python3 tools/qualification/collection.py --verify \\\n"
+        val verifyLine =
+            "          ./gradlew -p tools/harness :qualification:collectQualification " +
+                "--console=plain -q \\\n"
 
         fun rejects(altered: String, label: String) {
             val error = assertFailsWith<AssertionError>(label) {
@@ -461,7 +463,8 @@ val CollectionContract by testSuite {
                     collectStep,
                     collectStep.replace(
                         command,
-                        "          # python3 tools/qualification/collection.py --verify\n",
+                        "          # ./gradlew -p tools/harness " +
+                            ":qualification:collectQualification --console=plain -q\n",
                     ))),
             "commented verifier",
         )
@@ -472,7 +475,8 @@ val CollectionContract by testSuite {
                     collectStep,
                     collectStep.replace(
                         command,
-                        "          echo skipped # python3 tools/qualification/collection.py --verify\n",
+                        "          echo skipped # ./gradlew -p tools/harness " +
+                            ":qualification:collectQualification --console=plain -q\n",
                     ))),
             "no-op verifier",
         )
@@ -644,18 +648,18 @@ private val EXPECTED_CENTRAL_COMMANDS = listOf(
     "--repository-name \"\$GITHUB_REPOSITORY\"",
     "--run-id \"\$GITHUB_RUN_ID\" --run-attempt \"\$GITHUB_RUN_ATTEMPT\")",
     "fi",
-    "python3 tools/qualification/collection.py " +
-        "--repository \"\$GITHUB_WORKSPACE\" --candidate-sha \"\$GITHUB_SHA\" " +
-        "--artifacts-dir \"\$RUNNER_TEMP/producer-artifacts\" " +
-        "--upstream \"\$RUNNER_TEMP/dyn4j-source\" \"\${source_args[@]}\" " +
-        "--output \"\$RUNNER_TEMP/central-collection\" " +
+    "./gradlew -p tools/harness :qualification:collectQualification --console=plain -q " +
+        "--args=\"--repository \$GITHUB_WORKSPACE --candidate-sha \$GITHUB_SHA " +
+        "--artifacts-dir \$RUNNER_TEMP/producer-artifacts " +
+        "--upstream \$RUNNER_TEMP/dyn4j-source \${source_args[*]} " +
+        "--output \$RUNNER_TEMP/central-collection\" " +
         "> \"\$RUNNER_TEMP/central-logs/collection.stdout\" " +
         "2> \"\$RUNNER_TEMP/central-logs/collection.stderr\"",
     "collection_exit=\$?",
-    "python3 tools/qualification/collection.py --verify " +
-        "--repository \"\$GITHUB_WORKSPACE\" --candidate-sha \"\$GITHUB_SHA\" " +
-        "--artifacts-dir \"\$RUNNER_TEMP/producer-artifacts\" " +
-        "--output \"\$RUNNER_TEMP/central-collection\" " +
+    "./gradlew -p tools/harness :qualification:collectQualification --console=plain -q " +
+        "--args=\"--verify --repository \$GITHUB_WORKSPACE --candidate-sha \$GITHUB_SHA " +
+        "--artifacts-dir \$RUNNER_TEMP/producer-artifacts " +
+        "--output \$RUNNER_TEMP/central-collection\" " +
         "> \"\$RUNNER_TEMP/central-logs/transport.stdout\" " +
         "2> \"\$RUNNER_TEMP/central-logs/transport.stderr\"",
     "transport_exit=\$?",
