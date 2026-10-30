@@ -133,3 +133,39 @@ JDK 8, JDK 21, the JDI harness) and a new approval, not an edit to the pins.
 Consequently the branch is red in exactly one area until that capture happens. No lane may be reported
 as passing, and the pins must not be updated to make the suite green while the retained archives are
 still the old ones.
+
+### Re-capture cannot be run from a workstation
+
+Re-capturing was attempted on this host on 2026-10-30 and is not possible by design. The authoritative
+procedure is `docs/verification/ordinary-jvm-arithmetic-diagnostic.md`, and the attempt failed exactly
+where that document says it would:
+
+```
+python3 -B tools/numerical/portable/ordinary_arithmetic_diagnostic.py     --capture --output "$HOME/d4o…"
+{"call_cap":64,"case_id":"long-free-60","method":"captureLongMotion",
+ "qualification":"UNPASSED","runtime":"NOT_RUN","schema":"ordinary-arithmetic-diagnostic/1",
+ "status":"NOT_SCHEDULED_RESOURCE"}
+```
+
+`capture()` refuses to record anything unless `--allocation` names an
+`ordinary-arithmetic-resource-allocation/1` record with `diagnostic_runtime_allocation: SCHEDULED`, a
+positive `available_memory_kib`, `other_tasks_preserved: true`, and a nonempty `cpu_set` that is a
+subset of the process affinity. That record is issued by the root scheduler that owns the lane; writing
+one by hand would forge the scheduling attestation the charter exists to protect.
+
+The capture also needs the pinned `strace-7.2` source archive and the pinned JDK 21 build. This host has
+`strace` from Homebrew, `libmpfr.so.6` and the staged `dyn4k-core-jvm` JAR, but:
+
+| Input | State on this host |
+| --- | --- |
+| `/tmp/dyn4k-tools/jdk21` (the path `capture_actual.py` hard-codes) | absent; a JBR 21.0.9 was extracted to try, which is not the approved Temurin identity |
+| JDK 8 (`--jdk8-home`, `JAVA_HOME_8_X64`) | absent |
+| `ordinary-arithmetic-resource-allocation/1` with `SCHEDULED` | absent, and not obtainable from a workstation |
+| `strace-7.2.tar.xz` pinned archive | absent |
+| `DYN4K_PROSPECTIVE_CURRENT_MANIFEST`, `DYN4K_PROSPECTIVE_HISTORICAL_MANIFEST`, `DYN4K_JDI_RETAINED_JAR`, `DYN4K_RETAINED_FULL_JVM_ARCHIVE` | unset |
+
+Therefore the re-capture has to run in the qualification workflow that owns the lane. Once it has, the
+approval dicts in `independent_gates.py` (`ORDINARY_DIAGNOSTIC_*`, `P2_*`, `*_CAPTURE_DEPENDENCIES`) and
+the generated `tools/harness/qualification/.../GateConstants.kt` are updated from the new receipts, and
+the suites are re-run. Until then this branch stays red in `test_independent_gates` and
+`test_full_hosted` only.
