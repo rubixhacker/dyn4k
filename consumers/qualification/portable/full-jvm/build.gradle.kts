@@ -124,7 +124,16 @@ tasks.register("qualificationEvidence") {
                     check(case.getElementsByTagName("failure").length == 0 &&
                         case.getElementsByTagName("error").length == 0 &&
                         case.getElementsByTagName("skipped").length == 0)
-                    val key = "${case.getAttribute("classname")}#${case.getAttribute("name")}"
+                    // TestBalloon writes classname "suite_<package>.<Suite>" and name
+                    // "<test>[<target>]". Map both shapes to the approved identity.
+                    val classname = case.getAttribute("classname").removePrefix("suite_")
+                    val rawName = case.getAttribute("name")
+                    val name = if (rawName.endsWith("]") && rawName.lastIndexOf('[') > 0) {
+                        rawName.substring(0, rawName.lastIndexOf('['))
+                    } else {
+                        rawName
+                    }
+                    val key = "$classname#$name"
                     val id = byMethod[key] ?: error("Unlisted external method: $key")
                     check(observed.add(id))
                     case.setAttribute("id", id)

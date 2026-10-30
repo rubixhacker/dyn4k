@@ -56,7 +56,8 @@ tasks.test {
         selected.forEach { line ->
             val parts = line.split('\t')
             require(parts.size == 3)
-            includeTestsMatching("${parts[1]}.${parts[2]}")
+            // TestBalloon separates a suite path element with U+2198.
+            includeTestsMatching("${parts[1]}↘${parts[2]}")
         }
     }
 }

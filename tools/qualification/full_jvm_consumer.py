@@ -274,12 +274,22 @@ def _same_report(raw, normalized, case_map):
         raise ValueError("external Gradle XML root differs")
     observed = []
 
+    def normalized_identity(node):
+        """Maps a TestBalloon result identity to the JUnit-style approved identity."""
+        classname = node.get("classname") or ""
+        if classname.startswith("suite_"):
+            classname = classname[len("suite_"):]
+        name = node.get("name") or ""
+        if name.endswith("]") and name.rfind("[") > 0:
+            name = name[:name.rfind("[")]
+        return (classname, name)
+
     def compare(a, b):
         if a.tag != b.tag or (a.text or "").strip() != (b.text or "").strip():
             raise ValueError("normalized XML differs from original Gradle XML")
         attributes = dict(b.attrib)
         if a.tag == "testcase":
-            key = (a.get("classname"), a.get("name"))
+            key = normalized_identity(a)
             identity = case_map.get(key)
             if identity is None or attributes.pop("id", None) != identity:
                 raise ValueError("raw Gradle method differs from selected source identity")

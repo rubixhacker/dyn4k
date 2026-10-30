@@ -78,3 +78,20 @@ Deliverables:
 - `:core` contract code for the matrix, publication naming and paths, variant attributes, provider check, strict JSON, finite-number check, SHA-256 file digest, and canonical manifest digest.
 - TestBalloon suites for the above, driven by golden vectors generated from `tools/qualification/qualify.py`.
 - A record of which Python symbols remain unported in `qualify.py`.
+
+## Evidence invalidation
+
+The frozen complete-suite manifest and the approved corpus pin a SHA-256 for every test source file.
+Converting a test file to TestBalloon changes that file, so the pinned hashes no longer match and the
+lane verifiers reject the checkout with `selected method source differs`. This is expected and is not a
+defect in the conversion.
+
+The order of operations is therefore:
+
+1. Convert the tests.
+2. Regenerate the corpus and the complete-suite manifest with the harness.
+3. Update the approved digest constants and record the new approval.
+4. Run every lane and publish the receipts.
+
+Step 3 is a review decision, not an implementation step. Until steps 2 to 4 complete, the frozen
+manifest describes the previous test sources and no lane may be reported as passing.

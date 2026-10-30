@@ -15,7 +15,7 @@ cd tools/harness && ../../gradlew checkAll
 | --- | --- | --- |
 | `dyn4k` commonTest and jvmTest | ported to TestBalloon | `./gradlew :dyn4k:jvmTest` — 61 tests, 0 failures; `:dyn4k:linuxX64Test` — 58 tests, 0 failures; no non-TestBalloon suite |
 | `dyn4k-core` commonTest, jvmTest, diagnostic | ported to TestBalloon | `./gradlew :dyn4k-core:jvmTest` — 2465 tests, 0 failures; no non-TestBalloon suite |
-| `consumers/*`, `tools/numerical/portable` | in progress (delegated) | agent report |
+| `consumers/*`, `tools/numerical/portable` | ported to TestBalloon | `consumers/geometry-extension` 1, `consumers/performance/portable` 3, `consumers/idiomatic-api` 2, `consumers/qualification/portable` 3, `tools/numerical/portable` 55 (jvm), `pulley-jdi-sidecar-v2` 1 — 0 failures; lane builds converted but not run |
 | `tools/harness` modules | TestBalloon only | counts below |
 
 `grep -rn "@Test" dyn4k dyn4k-core` returns no matches.
@@ -63,11 +63,18 @@ Harness total at the last full run: 485 tests, 0 failures, across `:core`, `:hos
   glibc's `acos` by one unit in the last place. The recorded vectors do not reach that tolerance edge.
 - `numerical.physical` reads the approved phase schedule from a merged fixture projection; the full
   `fixtures.json` merge stays with the `:host` adapter that supplies it.
-- `weld_pulley_quality` still diverges from the reference on five scenario groups: over-limit stored
-  rotations, the one-degree represented rotation, the stored-rotation quadrant table, the
-  identity/alias/callback mutation set, and the frozen baseline's out-of-limit state. Their tests
-  are registered behind `WELD_QUALITY_DIVERGES = false` in `WeldPulleyQualitySuite.kt`; they are
-  unverified, not passing. `DecimalText.shown` is pinned by the recorded vectors.
+- `weld_pulley_quality`: three of the five scenario groups that diverged on the previous pass now
+  pass (over-limit stored rotations, the represented one-degree rotation, and the
+  identity/alias/callback mutations); the cause was `U = 2.0.pow(-53)` evaluating to `1.0` through a
+  home-grown `Double.pow` that ignores negative exponents. Two groups remain unverified and are
+  registered behind `WELD_QUALITY_DIVERGES = false` in `WeldPulleyQualitySuite.kt`: the
+  stored-rotation quadrant table (a quadrant row returns `INVALID`; the `atan` enclosure does not
+  converge inside its 256 terms) and the frozen baseline with an out-of-limit state (returns
+  `INVALID` where the reference scores `PHYSICAL_FAILED`). Both are recorded, with the reference
+  statuses and the observed port statuses, in the `weld_pulley_divergence` block of
+  `CompareVectors.kt`; a registered test fails if that block or the flag drifts. The `atan`
+  enclosure also grows unreduced rationals without bound, which made the quadrant scenario exceed
+  the one-minute test budget.
 - `compare.compare_value` decides the `getCost`/`getSint` derivation channels through
   `check_cost_pair`/`check_sine_pair`; the recorded comparison vectors cover the scalar, direction
   and orientation branches but not a `derived_rules` fixture.
@@ -79,3 +86,12 @@ Harness total at the last full run: 485 tests, 0 failures, across `:core`, `:hos
   `Fraction.toDouble` quotient of two such renderings is within one unit in the last place.
 - Workflow text is asserted by `tools/compatibility/test_qualification_workflow.py`. A step may move to
   Kotlin only when that suite's expectation moves with it.
+- TestBalloon result identity is `suite_<package>.<Suite>` plus `<test>[<target>]`. JUnit identity was
+  `<class>` plus `<method>`. The JVM lane build and `full_jvm_consumer.py` now normalise both shapes.
+  Every other consumer module that reads JUnit XML or selects `Class.method` still needs the same
+  treatment: `full_browser_consumer`, `full_klib_consumer`, `full_wasm_node_consumer`,
+  `full_android_consumer`, `full_android_native_consumer`, `full_apple_device_consumer`,
+  `full_native_host_consumer`, `tools/android-runtime`, and `tools/qualification/browser_wasi`.
+- Test conversion changes every test source file, so the frozen complete-suite manifest and the
+  approved corpus no longer match the checkout. Regenerating them is step 2 of "Evidence invalidation"
+  in `harness-port.md`; re-approval and lane reruns are open.
