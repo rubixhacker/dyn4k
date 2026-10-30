@@ -11,6 +11,7 @@ import io.github.rubixhacker.harness.contract.CanonicalJson
 interface CorpusFiles {
     fun isSymlink(path: String): Boolean
     fun isFile(path: String): Boolean
+    fun isDirectory(path: String): Boolean
 
     /** SHA-256 of the file bytes, hexadecimal, as `candidate_coverage.digest` returns it. */
     fun digest(path: String): String
@@ -21,6 +22,12 @@ interface CorpusFiles {
      * are included so callers can reject them, matching `Path.rglob("*")` filtered by `is_file()`.
      */
     fun filesBelow(root: String): List<String>
+
+    /**
+     * Every entry below [root] — files, directories, and symlinks — as a posix path relative to
+     * [root], without following directory symlinks, as `os.walk(root, followlinks=False)` visits it.
+     */
+    fun entriesBelow(root: String): List<String>
 }
 
 /** Joins a relative name to a root the way `Path(root) / name` joins it. */

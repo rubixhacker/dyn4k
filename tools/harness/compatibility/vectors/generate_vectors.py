@@ -1,16 +1,12 @@
 """Record golden vectors for the Kotlin port of tools/compatibility.
 
-Run `python3 tools/harness/compatibility/vectors/generate_vectors.py` from anywhere. The script
-imports the Python reference implementation from `tools/compatibility` and writes the recorded
-inputs and outputs to `build/vectors/compatibility-vectors.json`; `emit_kotlin_vectors.py` turns that
-file into the Kotlin constants the suites replay.
-
-The module calls recorded here are pure or are driven through stubs that replace only their process
-launches. `world_ci`, `governing_seams`, `governing_disposition`, `candidate_coverage`, `java_corpus`,
-and `execution_probe` are the reference implementation.
+Run `python3 tools/harness/compatibility/vectors/generate_vectors.py` from anywhere, then
+`emit_kotlin_vectors.py`. The script imports the Python reference implementation and drives the
+pure validators and the process probes with real inputs at the recorded revision.
 """
 import copy
 import hashlib
+import subprocess
 import json
 import sys
 import tempfile
@@ -18,9 +14,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve()
 ROOT = HERE.parents[4]
+sys.path.insert(0, str(ROOT / "tools/baseline"))
 sys.path.insert(0, str(ROOT / "tools/compatibility"))
 sys.path.insert(0, str(ROOT / "tools/qualification"))
 
+import verify as oracle
 import world_ci
 import governing_seams
 import candidate_coverage
@@ -28,6 +26,12 @@ import method_coverage
 import java_corpus
 import execution_probe
 import governing_disposition
+import full_ci
+import module_probe
+import ledger
+import exception_ci
+import struct
+import zipfile
 
 
 def digest(data: bytes) -> str:
@@ -569,6 +573,204 @@ vectors["governing_disposition"] = {
          "result": attempt(lambda value=value:
                            governing_disposition.parameter_descriptor(value))}
         for value in descriptors],
+}
+
+# ---------------------------------------------------------------- full_ci
+parameter_rows = []
+for owner, (count, types) in full_ci.PARAMETER_SUITES.items():
+    for index, parameter_type in enumerate(types):
+        for method in range(count):
+            parameter_rows.append((owner,
+                                   f"method{method}[org.dyn4j.collision.broadphase."
+                                   f"{parameter_type}@{index + 1:x}]"))
+for index in range(2115):
+    parameter_rows.append(("Other", f"case{index}"))
+normalized_parameter = full_ci.normalized_cases(parameter_rows)
+vectors["full_ci"] = {
+    "parameter_digest": digest(json.dumps(
+        sorted([owner, name, count] for (owner, name), count in normalized_parameter.items()),
+        sort_keys=True, separators=(",", ":")).encode()),
+    "parameter_count": len(normalized_parameter),
+}
+
+# ------------------------------------------------------------ module_probe
+# A synthetic modular JAR carrying every export the probe pins. The descriptor output does not
+# include the JAR path, so the vector is location independent.
+exports = sorted(module_probe.EXPORTS)
+module_source = "module org.dyn4j {\n" + "".join(f"    exports {name};\n" for name in exports) + "}\n"
+with tempfile.TemporaryDirectory() as directory:
+    base = Path(directory)
+    packages = base / "packages"
+    for package in exports:
+        target = packages / package.replace(".", "/")
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "Placeholder.java").write_text(
+            f"package {package}; public final class Placeholder {{}}\n")
+    module = base / "module-info.java"
+    module.write_text(module_source)
+    classes = base / "classes"
+    classes.mkdir()
+    sources = [str(path) for path in sorted(packages.rglob("*.java"))]
+    subprocess.run(["javac", "--release", "9", "-d", str(classes), str(module), *sources],
+                   check=True, capture_output=True)
+    jar = base / "dyn4j.jar"
+    subprocess.run(["jar", "--create", "--file", str(jar), "-C", str(classes), "."],
+                   check=True, capture_output=True)
+    vectors["module_probe"] = {
+        "module_source": module_source,
+        "placeholder_packages": exports,
+        "descriptor": module_probe.descriptor(jar),
+    }
+
+# ------------------------------------------------- execution_probe.declarations
+JAR = ROOT / "dyn4k-core/build/libs/dyn4k-core-jvm-0.1.0-alpha.1.jar"
+NAME = "org.dyn4j.RuntimeClassNameKt"
+plain = subprocess.run(["javap", "-classpath", str(JAR), "-protected", "-s", NAME],
+                       capture_output=True, text=True)
+verbose = subprocess.run(["javap", "-classpath", str(JAR), "-protected", "-s", "-v", NAME],
+                         capture_output=True, text=True)
+if plain.returncode == 0 and verbose.returncode == 0:
+    header, members = execution_probe.declarations(plain.stdout, verbose.stdout, oracle)
+    vectors["execution_probe"]["declarations"] = {
+        "plain": plain.stdout,
+        "verbose": verbose.stdout,
+        "header": header,
+        "members": [[name, descriptor, value[0], value[1]]
+                    for (name, descriptor), value in members.items()],
+    }
+
+# ---------------------------------------------------------------- ledger
+small_expected = {
+    "baseline": {"commit": "a" * 40, "binary_sha256": "b" * 64,
+                 "sources_sha256": "c" * 64},
+    "baseline_test_counts": {"textual_annotations": 2171, "actual_executed_cases": 2385,
+                             "ignored": 0},
+    "module": {"id": "module-info.java", "source_file": "src/main/java/module-info.java",
+               "sha256": "d" * 64, "name": "org.dyn4j",
+               "exports": ["org.dyn4j"], "fixture_sha256": {"module-info.java": "e" * 64}},
+    "production": {"src/main/java/org/dyn4j/A.java": "f" * 64},
+    "tests": {"src/test/java/org/dyn4j/ATest.java": "1" * 64},
+    "declarations": {"org.dyn4j.A|type":
+                      ["src/main/java/org/dyn4j/A.java", "public class org.dyn4j.A {", None]},
+}
+vectors["ledger"] = {
+    "expected": small_expected,
+    "source": {"revision": "1" * 40},
+    "generate": ledger.generate(small_expected),
+    "unbound": ledger.unbound_candidate_report(
+        small_expected, {"revision": "1" * 40}, "2" * 40, "invalid",
+        "requested candidate revision is invalid"),
+    "baseline_inputs": [],
+}
+tests_map = {"src/test/java/A.java": "a" * 64}
+resources_map = {"src/test/resources/r.txt": "b" * 64}
+vectors["ledger"]["baseline_inputs"].append({
+    "observed": {**tests_map, **resources_map}, "result": attempt(
+        lambda: ledger.require_baseline_test_inputs({**tests_map, **resources_map},
+                                                    tests_map, resources_map))})
+vectors["ledger"]["baseline_inputs"].append({
+    "observed": dict(tests_map), "result": attempt(
+        lambda: ledger.require_baseline_test_inputs(dict(tests_map), tests_map, resources_map))})
+vectors["ledger"]["baseline_inputs"].append({
+    "observed": {**tests_map, **resources_map, "src/test/resources/extra.txt": "c" * 64},
+    "result": attempt(lambda: ledger.require_baseline_test_inputs(
+        {**tests_map, **resources_map, "src/test/resources/extra.txt": "c" * 64},
+        tests_map, resources_map))})
+vectors["ledger"]["baseline_inputs"].append({
+    "observed": {**tests_map, **resources_map, "src/test/java/A.java": "c" * 64},
+    "result": attempt(lambda: ledger.require_baseline_test_inputs(
+        {**tests_map, **resources_map, "src/test/java/A.java": "c" * 64},
+        tests_map, resources_map))})
+
+# declaration_inventory over the recorded javap texts of one compiled Java class
+with tempfile.TemporaryDirectory() as directory:
+    source_dir = Path(directory)
+    java_file = source_dir / "src/main/java/org/dyn4j/Sample.java"
+    java_file.parent.mkdir(parents=True)
+    java_file.write_text(
+        "package org.dyn4j;\n"
+        "public class Sample {\n"
+        "    public static final int VALUE = 3;\n"
+        "    public static void run() { }\n"
+        "    protected String name() { return \"s\"; }\n"
+        "}\n")
+    classes = source_dir / "classes"
+    classes.mkdir()
+    subprocess.run(["javac", "--release", "8", "-g", "-d", str(classes), str(java_file)],
+                   check=True, capture_output=True)
+    plain = subprocess.run(["javap", "-classpath", str(classes), "-protected", "-s",
+                            "org.dyn4j.Sample"], capture_output=True, text=True).stdout
+    verbose = subprocess.run(["javap", "-classpath", str(classes), "-protected", "-s", "-v",
+                              "org.dyn4j.Sample"], capture_output=True, text=True).stdout
+production = {"src/main/java/org/dyn4j/Sample.java": "0" * 64}
+inventory = ledger.declaration_inventory({"org.dyn4j.Sample": plain},
+                                         {"org.dyn4j.Sample": verbose},
+                                         production)
+vectors["ledger"]["declaration_inventory"] = {
+    "plain": plain,
+    "verbose": verbose,
+    "production": production,
+    "inventory": [[key, value[0], value[1], value[2]]
+                  for key, value in inventory.items()],
+}
+
+# candidate_source_binding against a fixed-date git repository
+with tempfile.TemporaryDirectory() as directory:
+    repo = Path(directory)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "file.txt").write_text("first\n")
+    environment = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+                   "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+                   "GIT_AUTHOR_DATE": "2020-01-01T00:00:00 +0000",
+                   "GIT_COMMITTER_DATE": "2020-01-01T00:00:00 +0000"}
+    subprocess.run(["git", "-C", str(repo), "add", "file.txt"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "first"], check=True,
+                   env={**os.environ, **environment})
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True,
+                          capture_output=True, text=True).stdout.strip()
+    tree = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD^{tree}"], check=True,
+                          capture_output=True, text=True).stdout.strip()
+    (repo / "file.txt").write_text("second\n")
+    subprocess.run(["git", "-C", str(repo), "commit", "-qam", "second"], check=True,
+                   env={**os.environ, **environment})
+    second = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True,
+                            capture_output=True, text=True).stdout.strip()
+    import candidate_coverage
+    binding = []
+    for name, source, requested in (
+            ("bound", {"revision": head, "tree": tree}, head),
+            ("historical", {"revision": head, "tree": tree}, second),
+            ("invalid revision", {"revision": "0" * 40, "tree": tree}, second),
+            ("tree differs", {"revision": head, "tree": "0" * 40}, head),
+            ("requested invalid", {"revision": head, "tree": tree}, "nope")):
+        try:
+            status, reason = ledger.candidate_source_binding(source, requested, repo)
+        except Exception as error:  # noqa: BLE001
+            status, reason = "raised", str(error)
+        binding.append({"case": name, "source": source, "requested": requested,
+                        "status": status, "reason": reason})
+    vectors["ledger"]["binding"] = {"head": head, "tree": tree, "second": second,
+                                    "cases": binding}
+
+# -------------------------------------------------------- exception_ci.mutate_uid
+uid = exception_ci.UIDS["ArgumentNullException"]
+source_zip = Path("/tmp/opencode/uid-source.jar")
+target_zip = Path("/tmp/opencode/uid-target.jar")
+with zipfile.ZipFile(source_zip, "w") as archive:
+    info = zipfile.ZipInfo("org/dyn4j/exception/ArgumentNullException.class",
+                           date_time=(2020, 1, 1, 0, 0, 0))
+    info.compress_type = zipfile.ZIP_STORED
+    archive.writestr(info, b"header" + struct.pack(">q", uid) + b"tail")
+    info = zipfile.ZipInfo("other.txt", date_time=(2020, 1, 1, 0, 0, 0))
+    info.compress_type = zipfile.ZIP_STORED
+    archive.writestr(info, b"hello")
+exception_ci.mutate_uid(source_zip, target_zip)
+with zipfile.ZipFile(target_zip) as archive:
+    entries = {info.filename: digest(archive.read(info.filename))
+               for info in archive.infolist()}
+vectors["exception_ci"] = {
+    "uid_source_base64": __import__("base64").b64encode(source_zip.read_bytes()).decode(),
+    "mutated_entries": entries,
 }
 
 OUTPUT = HERE.parents[1] / "build/vectors/compatibility-vectors.json"

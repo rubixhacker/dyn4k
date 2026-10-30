@@ -1,31 +1,9 @@
 package io.github.rubixhacker.harness.compatibility
 
 import de.infix.testBalloon.framework.core.testSuite
-import io.github.rubixhacker.harness.contract.Sha256
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.assertFailsWith
-
-/** The repository filesystem, used only to hold the port against the frozen sources on disk. */
-private class JvmCorpusFiles : CorpusFiles {
-    override fun isSymlink(path: String): Boolean = Files.isSymbolicLink(Path.of(path))
-    override fun isFile(path: String): Boolean = Files.isRegularFile(Path.of(path))
-    override fun digest(path: String): String = Sha256.of(Files.readAllBytes(Path.of(path)))
-    override fun readText(path: String): String = Files.readString(Path.of(path))
-
-    override fun filesBelow(root: String): List<String> {
-        val base = Path.of(root)
-        val result = mutableListOf<String>()
-        Files.walk(base).use { stream ->
-            val iterator = stream.iterator()
-            while (iterator.hasNext()) {
-                val path = iterator.next()
-                if (Files.isRegularFile(path)) result.add(base.relativize(path).toString())
-            }
-        }
-        return result
-    }
-}
 
 internal fun repositoryRoot(): Path {
     var directory: Path? = Path.of("").toAbsolutePath()

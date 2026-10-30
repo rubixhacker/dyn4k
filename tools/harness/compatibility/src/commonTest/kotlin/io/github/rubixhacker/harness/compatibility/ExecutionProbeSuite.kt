@@ -1,7 +1,9 @@
 package io.github.rubixhacker.harness.compatibility
 
 import de.infix.testBalloon.framework.core.testSuite
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
 
 /**
@@ -24,5 +26,24 @@ val ExecutionProbeContract by testSuite {
             listOf("ACC_PUBLIC", "ACC_PROTECTED", "ACC_BRIDGE", "ACC_SYNTHETIC"),
             ExecutionProbe.DECLARATION_FLAGS,
         )
+    }
+
+    test("declarations match the recorded javap inventory") {
+        val recorded = Vectors.executionProbe.obj("declarations")
+        val (header, members) = ExecutionProbe.declarations(
+            recorded.str("plain"),
+            recorded.str("verbose"),
+            BaselineOracle,
+        )
+        assertEquals(recorded.str("header"), header)
+        val expected = recorded.array("members").map {
+            val row = it.jsonArray
+            (row[0].jsonPrimitive.content to row[1].jsonPrimitive.content) to
+                ExecutionProbe.DeclaredMember(
+                    row[2].jsonPrimitive.content,
+                    row[3].jsonArray.map { flag -> flag.jsonPrimitive.content },
+                )
+        }.toMap()
+        assertEquals(expected, members)
     }
 }

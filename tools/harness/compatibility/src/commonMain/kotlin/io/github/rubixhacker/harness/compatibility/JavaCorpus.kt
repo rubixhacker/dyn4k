@@ -20,6 +20,37 @@ object JavaCorpus {
     val PARAMETER_PATTERN = Regex("""([^\[]+)\[([^@\]]+)@([0-9a-fA-F]+)\]""")
 
     /**
+     * Reads one JUnit XML report, requiring the exact passing case count and complete identities.
+     * The Python module reads the file with `ET.parse`; the port takes the decoded text.
+     */
+    fun readXml(text: String, expected: Int): List<Pair<String, String>> {
+        val suite = MiniXml.parse(text)
+        if (suite.tag != "testsuite" ||
+            listOf("tests" to expected, "failures" to 0, "errors" to 0, "skipped" to 0)
+                .any { (key, value) -> suite.attributes[key] != value.toString() }
+        ) {
+            throw IllegalArgumentException("JUnit XML count or status differs")
+        }
+        val cases = suite.children.filter { it.tag == "testcase" }
+        if (cases.size != expected ||
+            cases.any {
+                it.attributes["classname"].isNullOrEmpty() ||
+                    it.attributes["name"].isNullOrEmpty() ||
+                    it.children.isNotEmpty()
+            }
+        ) {
+            throw IllegalArgumentException("JUnit XML lacks complete passing case identities")
+        }
+        val identities = cases.map {
+            requireNotNull(it.attributes["classname"]).trim() to requireNotNull(it.attributes["name"]).trim()
+        }
+        if (identities.toSet().size != expected) {
+            throw IllegalArgumentException("JUnit XML has duplicate or missing case identities")
+        }
+        return identities
+    }
+
+    /**
      * Collapses repeated parameterised runs onto one case identity per parameter, numbering the
      * parameters in the order the corpus first ran them.
      */

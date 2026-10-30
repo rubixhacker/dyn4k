@@ -5,7 +5,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve()
 vectors = json.loads((HERE.parents[1] / "build/vectors/compatibility-vectors.json").read_text())
 target = HERE.parents[1] / "src/commonTest/kotlin/io/github/rubixhacker/harness/compatibility"
-REVISION = "df640f26be0a61d8db5c6e7624114595aebf379a"
+REVISION = "233edd085db9427e7feb19fd150d504b5d43be1b"
 CHUNK = 30000
 
 names = {
@@ -16,6 +16,10 @@ names = {
     "java_corpus": "JavaCorpusVectors",
     "execution_probe": "ExecutionProbeVectors",
     "governing_disposition": "GoverningDispositionVectors",
+    "full_ci": "FullCiVectors",
+    "module_probe": "ModuleProbeVectors",
+    "ledger": "LedgerVectors",
+    "exception_ci": "ExceptionCiVectors",
 }
 
 for key, name in names.items():

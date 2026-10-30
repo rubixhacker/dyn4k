@@ -22,6 +22,10 @@ internal object Vectors {
     val javaCorpus: JsonObject = parse(JavaCorpusVectors.json)
     val executionProbe: JsonObject = parse(ExecutionProbeVectors.json)
     val governingDisposition: JsonObject = parse(GoverningDispositionVectors.json)
+    val fullCi: JsonObject = parse(FullCiVectors.json)
+    val moduleProbe: JsonObject = parse(ModuleProbeVectors.json)
+    val ledger: JsonObject = parse(LedgerVectors.json)
+    val exceptionCi: JsonObject = parse(ExceptionCiVectors.json)
 
     private fun parse(text: String): JsonObject = Json.parseToJsonElement(text).jsonObject
 }
@@ -79,10 +83,12 @@ internal class MemoryFiles(
 
     override fun isSymlink(path: String): Boolean = path in symlinks
     override fun isFile(path: String): Boolean = path in entries
+    override fun isDirectory(path: String): Boolean = false
     override fun digest(path: String): String = Sha256.of(entries.getValue(path))
     override fun readText(path: String): String = entries.getValue(path)
     override fun filesBelow(root: String): List<String> =
         entries.keys.filter { it.startsWith("$root/") }.map { it.removePrefix("$root/") }
+    override fun entriesBelow(root: String): List<String> = filesBelow(root)
 }
 
 /** A JSON object rebuilt with [key] replaced. */
