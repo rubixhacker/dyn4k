@@ -20,7 +20,7 @@ from unittest import mock
 import full_hosted
 import qualify
 import publication_fixture
-from test_safari_yarn_lock import git_oid, replace_loose_object, write_loose_object
+from git_fixture import git_oid, replace_loose_object, write_loose_object
 
 
 class FullHostedTests(unittest.TestCase):
