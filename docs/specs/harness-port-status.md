@@ -23,6 +23,8 @@ Kotlin), **pending** (not started), **blocked** (needs a coordination step).
 | `tools/qualification/qualify.py` publication metadata: variants, POM dependencies, POM metadata | `tools/harness/core/.../PublicationContract.kt` | ported | vector tests; Python emits metadata pointers in hash order, so comparisons are by name |
 | `tools/qualification/qualify.py` remaining functions (archives, source contracts, audits, evaluation) | — | pending | needs JVM archive and file adapters |
 | `tools/qualification/guard_hosted_runners.py` | `tools/harness/qualification/.../GuardHostedRunners.kt` | ported | 12 cases; CLI task `:qualification:guardHostedRunners`; output matches Python on the repository |
+| `qualify.digest(path)` | `tools/harness/host/.../FileDigest.kt` | ported | streaming SHA-256; 2 cases |
+| `qualify.require_clean_checkout` | `tools/harness/host/.../CleanCheckout.kt` | ported | 5 cases: clean, wrong SHA, dirty tracked file, untracked input, generated output ignored |
 | `tools/compatibility/*` | `tools/harness/compatibility` | in progress (delegated) | |
 | `tools/performance/*` | `tools/harness/performance` | in progress (delegated) | |
 | `tools/numerical/*` | `tools/harness/numerical` | pending | |
