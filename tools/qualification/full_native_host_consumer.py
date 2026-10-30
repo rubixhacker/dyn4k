@@ -5,6 +5,7 @@ import ctypes
 import hashlib
 import io
 import json
+import junit_identity
 import os
 import platform
 import re
@@ -141,11 +142,17 @@ def original_report(raw, target, selected):
         raise ValueError("Native raw suite duration is invalid")
     observed = []
     for case in cases:
-        classname, method = case.get("classname", ""), case.get("name", "")
+        # TestBalloon writes `suite_<class>` / `<method>[<target>]`; the approved JUnit shape
+        # writes `<target>Test.<class>` / `<method>[<target>]`. Normalise, then accept either
+        # the task-prefixed or the bare class name.
+        classname = junit_identity.normalized_class(case.get("classname", ""))
+        method = case.get("name", "")
         prefix, suffix = f"{target}Test.", f"[{target}]"
-        if not classname.startswith(prefix) or not method.endswith(suffix):
+        if not method.endswith(suffix):
             raise ValueError("Native raw target identity differs")
-        identity = selected.get((classname[len(prefix):], method[:-len(suffix)]))
+        if classname.startswith(prefix):
+            classname = classname[len(prefix):]
+        identity = selected.get((classname, method[:-len(suffix)]))
         if identity is None:
             raise ValueError("Native raw report contains a foreign method")
         try:

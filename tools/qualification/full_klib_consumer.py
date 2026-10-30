@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import independent_gates
+import junit_identity
 
 
 CONSUMER = "consumers/qualification/portable/full-klib"
@@ -320,11 +321,17 @@ def _report(raw, target, selected):
         raise ValueError("native raw XML records missing or failing methods")
     observed = []
     for case in cases:
-        classname, method = case.get("classname", ""), case.get("name", "")
+        # TestBalloon writes `suite_<class>` / `<method>[<target>]`; the approved JUnit shape
+        # writes `<target>Test.<class>` / `<method>[<target>]`. Normalise, then accept either
+        # the task-prefixed or the bare class name.
+        classname = junit_identity.normalized_class(case.get("classname", ""))
+        method = case.get("name", "")
         prefix, suffix = f"{target}Test.", f"[{target}]"
-        if not classname.startswith(prefix) or not method.endswith(suffix):
+        if not method.endswith(suffix):
             raise ValueError("native raw case identity differs")
-        identity = selected.get((classname[len(prefix):], method[:-len(suffix)]))
+        if classname.startswith(prefix):
+            classname = classname[len(prefix):]
+        identity = selected.get((classname, method[:-len(suffix)]))
         if identity is None:
             raise ValueError("native raw case is foreign")
         observed.append(identity)

@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import independent_gates
+import junit_identity
 
 
 CONSUMER = "consumers/qualification/portable/full-browser"
@@ -231,12 +232,17 @@ def rows(xml, expected, major, target="js", family="Chromium"):
     suffix = re.compile(r"\[" + target + r", browser, " + label + str(major)
                         + r"(?:\.\d+)+" + platform_suffix + r"\]$")
     for case in cases:
-        classname = case.get("classname", "")
+        # TestBalloon writes `suite_<class>` (no task prefix); the approved JUnit shape writes
+        # `<task>.<class>`. Normalise, then accept either form. The runtime qualifier stays in
+        # the method name and is still required.
+        classname = junit_identity.normalized_class(case.get("classname", ""))
         method = case.get("name", "")
         match = suffix.search(method)
-        if not classname.startswith(task + ".") or match is None:
+        if match is None:
             raise ValueError("original browser row has wrong runtime or task")
-        key = (classname.removeprefix(task + "."), method[:match.start()])
+        if classname.startswith(task + "."):
+            classname = classname[len(task) + 1:]
+        key = (classname, method[:match.start()])
         identity = expected.get(key)
         if identity is None:
             raise ValueError("original browser row is foreign")
