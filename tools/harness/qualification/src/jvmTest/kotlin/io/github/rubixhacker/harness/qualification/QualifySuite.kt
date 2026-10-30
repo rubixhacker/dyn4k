@@ -58,7 +58,66 @@ val QualifyContract by testSuite {
                     root,
                 ),
             )
-            assertEquals(2, QualificationCli.run(arrayOf("record", "--candidate-sha", sha, "--output", "$output"), root))
+            // `record` now runs: with no evidence and no tracked complete suite, every lane fails
+            // with the reference's suite-unavailable reason and the report is still written.
+            assertEquals(
+                1,
+                QualificationCli.run(
+                    arrayOf("record", "--candidate-sha", sha, "--output", "$output"),
+                    root,
+                ),
+            )
+            val report = StrictJson.load(Files.readString(output)) as JsonObject
+            assertEquals(
+                listOf(
+                    "candidate_sha", "total", "counts", "lanes", "bounded_hosted_probes",
+                    "full_hosted_receipts", "independent_gate_results",
+                ),
+                report.keys.toList(),
+            )
+            assertEquals("112", Py.int(report["total"]!!).toString())
+            val counts = report["counts"] as JsonObject
+            assertEquals(
+                listOf("PASSED", "FAILED", "UNAVAILABLE", "NOT_RUN"),
+                counts.keys.toList(),
+            )
+            // Without evidence every lane is NOT_RUN with the reference's reason.
+            assertEquals("112", Py.int(counts["NOT_RUN"]!!).toString())
+            assertEquals("0", Py.int(counts["FAILED"]!!).toString())
+            val firstLane = (report["lanes"] as kotlinx.serialization.json.JsonArray)[0] as JsonObject
+            assertEquals(listOf("id", "status", "reason"), firstLane.keys.toList())
+            assertEquals("NOT_RUN", Py.str(firstLane["status"]))
+            assertEquals("no evidence supplied", Py.str(firstLane["reason"]))
+            // A hosted bundle that is not a verified receipt refuses with the reference prefix.
+            val bundle = root.resolve("bad-bundle")
+            Files.createDirectories(bundle)
+            bundle.resolve("receipt.json").writeText("[]")
+            val refused = root.resolve("refused.json")
+            assertEquals(
+                2,
+                QualificationCli.run(
+                    arrayOf(
+                        "record", "--candidate-sha", sha, "--output", "$refused",
+                        "--full-hosted-bundle", bundle.toString(),
+                    ),
+                    root,
+                ),
+            )
+            // The independent-adapter branch refuses explicitly rather than accepting silently.
+            assertEquals(
+                2,
+                QualificationCli.run(
+                    arrayOf(
+                        "record", "--candidate-sha", sha, "--output", "$refused",
+                        "--independent-archives", root.resolve("a.json").toString(),
+                        "--independent-audit", root.resolve("b.json").toString(),
+                        "--independent-audit-signature", root.resolve("c.sig").toString(),
+                        "--trusted-audit-public-key", root.resolve("d.pem").toString(),
+                        "--trusted-audit-key-sha256", "a".repeat(64),
+                    ),
+                    root,
+                ),
+            )
             assertEquals(2, QualificationCli.run(arrayOf("nonsense", "--candidate-sha", sha), root))
             val graph = root.resolve("graph.txt")
             graph.writeText("io.github.rubixhacker:dyn4k-core:0.1.0-alpha.1\n")

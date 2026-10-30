@@ -152,6 +152,41 @@ object IndependentGates {
     fun archivePaths(root: Path): Set<String> = ArchiveScan.scan(root).keys
 
     /** `_inventory`: the receipt must inventory exactly the archive it seals. */
+    /**
+     * `independent_gates._bounded_bundle`: verify a bounded raw bundle against the lane.
+     *
+     * The frozen probe manifest is read from the candidate commit, never the checkout, and the
+     * bundle's route selects which artifact-hash map the independent audit must match.
+     */
+    fun boundedBundle(
+        root: Path,
+        candidateSha: String,
+        lane: JsonObject,
+        expectedArtifactHashes: JsonElement?,
+        repository: Path,
+    ): JsonObject {
+        val manifestBytes = gitShow(repository, candidateSha, "tools/qualification/foundation-probes.json")
+        val manifest = StrictJson.load(manifestBytes.toString(StandardCharsets.UTF_8)) as? JsonObject
+            ?: throw IllegalArgumentException("foundation probe manifest is not an object")
+        val summary = ArtifactCapture.verifyBundle(root, manifest, candidateSha)
+        val route = Py.str(summary["route"]) ?: ""
+        val target = if (route == "jsSafari") "js" else route
+        val hashes = summary["artifact_hashes"] as? JsonObject
+            ?: throw IllegalArgumentException("bounded archive hashes are missing")
+        if (target != Py.str(lane["target"]) && route != "ubuntu-host") {
+            throw IllegalArgumentException("bounded archive target differs from selected lane")
+        }
+        val observed: JsonElement? = if (route == "ubuntu-host") {
+            hashes[Py.str(lane["target"]) ?: ""]
+        } else {
+            hashes[target]
+        }
+        if (observed != expectedArtifactHashes) {
+            throw IllegalArgumentException("bounded archive artifacts differ from independent audit")
+        }
+        return summary
+    }
+
     fun inventory(root: Path, receipt: JsonObject): String {
         val files = receipt["files"] as? JsonArray
         if (files == null || files.isEmpty()) throw IllegalArgumentException("raw file inventory is missing")
