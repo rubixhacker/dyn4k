@@ -20,6 +20,51 @@ object PyJson {
         return out.toString()
     }
 
+    /** `json.dumps(value, indent=2, sort_keys=True)`, as the corpus files are written. */
+    fun renderSorted(value: JsonElement): String {
+        val out = StringBuilder()
+        writeSorted(value, out, 2, 0)
+        return out.toString()
+    }
+
+    private fun writeSorted(value: JsonElement, out: StringBuilder, indent: Int, level: Int) {
+        when (value) {
+            is JsonNull -> out.append("null")
+            is JsonObject -> if (value.isEmpty()) {
+                out.append("{}")
+            } else {
+                out.append('{')
+                val keys = value.keys.sortedWith(CanonicalText::compare)
+                for ((index, key) in keys.withIndex()) {
+                    if (index > 0) out.append(',')
+                    out.append('\n')
+                    repeat(indent * (level + 1)) { out.append(' ') }
+                    writeString(key, out)
+                    out.append(": ")
+                    writeSorted(value.getValue(key), out, indent, level + 1)
+                }
+                out.append('\n')
+                repeat(indent * level) { out.append(' ') }
+                out.append('}')
+            }
+            is JsonArray -> if (value.isEmpty()) {
+                out.append("[]")
+            } else {
+                out.append('[')
+                for ((index, item) in value.withIndex()) {
+                    if (index > 0) out.append(',')
+                    out.append('\n')
+                    repeat(indent * (level + 1)) { out.append(' ') }
+                    writeSorted(item, out, indent, level + 1)
+                }
+                out.append('\n')
+                repeat(indent * level) { out.append(' ') }
+                out.append(']')
+            }
+            is JsonPrimitive -> writePrimitive(value, out)
+        }
+    }
+
     /** `json.dumps(value)` with Python's default separators, as the command line prints it. */
     fun renderDefault(value: JsonElement): String {
         val out = StringBuilder()
