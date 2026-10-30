@@ -20,11 +20,58 @@ import kotlinx.serialization.json.buildJsonObject
  * `FullHosted.verifyRawFiles`. The reference writes `receipt.json` in a `finally` block, so a run
  * that fails at any point still leaves the evidence that says why.
  */
+/**
+ * The seams `full_hosted.run` needs to be driven without a real runner.
+ *
+ * The reference suite (`test_public_full_hosted_receipt_records_staging_setup_residue`) patches
+ * `load_corpus`, `hosted.discover_runtime`, `hosted.runtime_status`, `hosted.gradle_wrapper`,
+ * `hosted.tool_version`, `require_pinned_toolchain`, `run_command`, `hosted.target_hashes`,
+ * `artifact.capture_staging`, `capture_dokka_output`, `INPUTS`, `CONFIGS`, and the Windows
+ * `LockedDirectory` module. The JVM has no monkey-patching, so the same patch points are parameters.
+ * Production passes the defaults, which are the real implementations.
+ */
+class FullHostedRunSeams(
+    /** `os.name == "nt"` plus the `safari_windows_file` module the staging imports. */
+    val windows: Boolean = DefaultHostEnvironment.isWindows(),
+    val windowsDirectories: SafariLockedDirectoryFactory = SafariLockedDirectoryFactory {
+            root, relative -> LockedDirectory(root, relative) },
+    val loadCorpus: (Path, String) -> JsonObject = { repository, candidate ->
+        FullHostedRuntime.loadCorpus(repository, candidate) },
+    val discoverRuntime: (String) -> JsonObject = { target ->
+        HostedHost.discoverRuntime(target) },
+    val runtimeStatus: (String, JsonElement?) -> HostedVerdict = { target, observed ->
+        Hosted.runtimeStatus(target, observed) },
+    val gradleWrapper: (String) -> String = { repository ->
+        Hosted.gradleWrapper(repository, DefaultHostEnvironment.isWindows()) },
+    val toolVersion: (List<String>, Regex) -> String = { command, pattern ->
+        HostedHost.toolVersion(command, pattern) },
+    val requirePinnedToolchain: (JsonObject) -> Unit = { runtime ->
+        FullHosted.requirePinnedToolchain(runtime) },
+    val runCommand: (List<String>, Path, Path, String?) -> JsonObject = { command, cwd, output, invocation ->
+        FullHostedRuntime.runCommand(command, cwd, output, invocation) },
+    val targetHashes: (Path, String) -> JsonObject = { staging, target ->
+        HostedHost.targetHashes(staging, target) },
+    val captureStaging: (Path, Path, List<String>, String) -> CapturedStaging =
+        { repository, destination, targets, candidate ->
+            ArtifactCapture.captureStaging(repository, destination, targets, candidate) },
+    val captureDokkaOutput: (Path, Path, MutableMap<String, JsonElement>) -> Unit =
+        { repository, output, receipt ->
+            FullHostedRuntime.captureDokkaOutput(repository, output, receipt) },
+    val inputs: List<String> = FullHosted.INPUTS,
+    val configs: Map<String, List<String>> = FullHosted.CONFIGS,
+)
+
 object FullHostedRun {
     private const val STAGE_TASK =
         ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository"
 
-    fun run(repository: Path, candidateSha: String, target: String, outputInput: Path): JsonObject {
+    fun run(
+        repository: Path,
+        candidateSha: String,
+        target: String,
+        outputInput: Path,
+        seams: FullHostedRunSeams = FullHostedRunSeams(),
+    ): JsonObject {
         val repositoryPath = repository.toAbsolutePath().normalize()
         Files.createDirectories(outputInput)
         val output = outputInput.toAbsolutePath().normalize()
@@ -51,7 +98,7 @@ object FullHostedRun {
             if (target !in Hosted.TARGETS || !Py.SHA40.matches(candidateSha)) {
                 throw IllegalArgumentException("target or candidate SHA is invalid")
             }
-            val manifest = FullHostedRuntime.loadCorpus(repositoryPath, candidateSha)
+            val manifest = seams.loadCorpus(repositoryPath, candidateSha)
             receipt["manifest_sha256"] = JsonPrimitive(FullHosted.canonicalHash(manifest))
             receipt["source_tree_sha256"] = manifest["source_tree_sha256"] ?: JsonNull
             receipt["map_sha256"] = JsonPrimitive(
@@ -60,7 +107,7 @@ object FullHostedRun {
             receipt["reviewed_pairs_sha256"] = JsonPrimitive(
                 FullHosted.sha256(repositoryPath.resolve(FullHosted.PAIRS)),
             )
-            for (path in FullHosted.INPUTS) {
+            for (path in seams.inputs) {
                 FullHosted.archiveCopy(repositoryPath.resolve(path), output, "inputs/$path")
             }
             for (element in manifest["source_files"] as JsonArray) {
@@ -68,20 +115,17 @@ object FullHostedRun {
                 val name = Py.str(source["path"])!!
                 FullHosted.archiveCopy(repositoryPath.resolve(name), output, "sources/$name")
             }
-            val runtime = LinkedHashMap<String, JsonElement>(HostedHost.discoverRuntime(target))
+            val runtime = LinkedHashMap<String, JsonElement>(seams.discoverRuntime(target))
             receipt["runtime"] = JsonObject(runtime)
-            val verdict = Hosted.runtimeStatus(target, JsonObject(runtime))
+            val verdict = seams.runtimeStatus(target, JsonObject(runtime))
             if (verdict.status != "READY") {
                 receipt["status"] = JsonPrimitive(verdict.status)
                 receipt["reason"] = JsonPrimitive(verdict.reason)
                 return JsonObject(receipt)
             }
-            val wrapper = Hosted.gradleWrapper(
-                repositoryPath.toString(),
-                DefaultHostEnvironment.isWindows(),
-            )
+            val wrapper = seams.gradleWrapper(repositoryPath.toString())
             runtime["gradle_version"] = JsonPrimitive(
-                HostedHost.toolVersion(listOf(wrapper, "--version"), Regex("Gradle ([0-9.]+)")),
+                seams.toolVersion(listOf(wrapper, "--version"), Regex("Gradle ([0-9.]+)")),
             )
             val build = Fs.readText(repositoryPath.resolve("build.gradle.kts"))
             runtime["kgp_declared_version"] = JsonPrimitive(
@@ -96,7 +140,7 @@ object FullHostedRun {
                     Regex("id\\(\"com\\.android\\.kotlin\\.multiplatform\\.library\"\\) version \"([^\"]+)\""),
                 ),
             )
-            FullHosted.requirePinnedToolchain(JsonObject(runtime))
+            seams.requirePinnedToolchain(JsonObject(runtime))
             receipt["runtime"] = JsonObject(runtime)
             var simulatorUdid: String? = null
             val simulatorFamily = Hosted.NATIVE_TARGETS[target]?.simulator
@@ -117,16 +161,16 @@ object FullHostedRun {
                         "PublicationToStagingRepository",
                 )
             }
-            val stageProcess = FullHostedRuntime.runCommand(stage, repositoryPath, output.resolve("stage"))
+            val stageProcess = seams.runCommand(stage, repositoryPath, output.resolve("stage"), null)
             receipt["stage"] = stageProcess
             if (!Py.equalsInt(stageProcess["exit_code"], 0L)) {
                 throw IllegalArgumentException("staging command failed")
             }
             val staging = repositoryPath.resolve("build/staging-repository")
             receipt["staging_repository"] = JsonPrimitive(staging.toString())
-            val targetHashes = HostedHost.targetHashes(staging, artifactTarget)
+            val targetHashes = seams.targetHashes(staging, artifactTarget)
             receipt["artifact_hashes"] = targetHashes
-            val captured = ArtifactCapture.captureStaging(
+            val captured = seams.captureStaging(
                 repositoryPath,
                 output,
                 listOf(artifactTarget),
@@ -137,9 +181,9 @@ object FullHostedRun {
             if (captured.hashes[artifactTarget] != targetHashes) {
                 throw IllegalArgumentException("staged artifact capture differs from target hashes")
             }
-            FullHostedRuntime.captureDokkaOutput(repositoryPath, output, receipt)
+            seams.captureDokkaOutput(repositoryPath, output, receipt)
             val task = FullHosted.SOURCE_TASK.getValue(target)
-            for (config in FullHosted.CONFIGS.getValue(target)) {
+            for (config in seams.configs.getValue(target)) {
                 val folder = output.resolve(config)
                 Files.createDirectory(folder)
                 val lane = LinkedHashMap<String, JsonElement>()
@@ -178,18 +222,26 @@ object FullHostedRun {
                     if (target == "jsSafari") {
                         lane["safari_reporter_stage"] = JsonObject(emptyMap())
                         lane["safari_karma_configs"] = JsonObject(emptyMap())
-                        val staged = SafariReporterHost.stage(
-                            repositoryPath,
-                            candidateSha,
-                            listOf("dyn4k-core", "dyn4k"),
-                            folder,
-                        ) {
-                            lane["source_process"] = FullHostedRuntime.runCommand(
-                                command,
+                        val staged = try {
+                            SafariReporterHost.stage(
                                 repositoryPath,
-                                folder.resolve("source"),
-                                invocation,
-                            )
+                                candidateSha,
+                                listOf("dyn4k-core", "dyn4k"),
+                                folder,
+                                windows = seams.windows,
+                                windowsDirectories = seams.windowsDirectories,
+                            ) {
+                                lane["source_process"] = seams.runCommand(
+                                    command,
+                                    repositoryPath,
+                                    folder.resolve("source"),
+                                    invocation,
+                                )
+                            }
+                        } catch (failure: SafariStageFailure) {
+                            lane["safari_reporter_stage"] =
+                                stageResult(lane, "source", failure.result)
+                            throw failure
                         }
                         (lane["safari_reporter_stage"] as? JsonObject)?.let { _ -> }
                         lane["safari_reporter_stage"] = stageResult(lane, "source", staged)
@@ -210,7 +262,7 @@ object FullHostedRun {
                         }
                         lane["safari_karma_configs"] = JsonObject(configs)
                     } else {
-                        lane["source_process"] = FullHostedRuntime.runCommand(
+                        lane["source_process"] = seams.runCommand(
                             command,
                             repositoryPath,
                             folder.resolve("source"),
@@ -285,18 +337,26 @@ object FullHostedRun {
                         }
                     }
                     if (target == "jsSafari") {
-                        val stagedConsumer = SafariReporterHost.stage(
-                            repositoryPath,
-                            candidateSha,
-                            listOf("consumers/qualification/portable"),
-                            folder,
-                        ) {
-                            lane["consumer_process"] = FullHostedRuntime.runCommand(
-                                consumerCommand,
+                        val stagedConsumer = try {
+                            SafariReporterHost.stage(
                                 repositoryPath,
-                                folder.resolve("consumer"),
-                                invocation,
-                            )
+                                candidateSha,
+                                listOf("consumers/qualification/portable"),
+                                folder,
+                                windows = seams.windows,
+                                windowsDirectories = seams.windowsDirectories,
+                            ) {
+                                lane["consumer_process"] = seams.runCommand(
+                                    consumerCommand,
+                                    repositoryPath,
+                                    folder.resolve("consumer"),
+                                    invocation,
+                                )
+                            }
+                        } catch (failure: SafariStageFailure) {
+                            lane["safari_reporter_stage"] =
+                                stageResult(lane, "consumer", failure.result)
+                            throw failure
                         }
                         lane["safari_reporter_stage"] = stageResult(lane, "consumer", stagedConsumer)
                         if (Py.str(stagedConsumer["status"]) != "CLEAN") {
@@ -316,7 +376,7 @@ object FullHostedRun {
                             lane["safari_karma_configs"] = JsonObject(merged)
                         }
                     } else {
-                        lane["consumer_process"] = FullHostedRuntime.runCommand(
+                        lane["consumer_process"] = seams.runCommand(
                             consumerCommand,
                             repositoryPath,
                             folder.resolve("consumer"),
@@ -366,7 +426,7 @@ object FullHostedRun {
                         "-PqualificationRepository=$staging",
                         "-PqualificationInvocationId=$invocation",
                     )
-                    val graphProcess = FullHostedRuntime.runCommand(
+                    val graphProcess = seams.runCommand(
                         graphCommand,
                         repositoryPath,
                         folder.resolve("graph"),
@@ -416,7 +476,7 @@ object FullHostedRun {
                 }
                 receipt["configurations"] = JsonArray(lanes)
             }
-            FullHostedRuntime.loadCorpus(repositoryPath, candidateSha)
+            seams.loadCorpus(repositoryPath, candidateSha)
             if (lanes.all { Py.str((it as JsonObject)["status"]) == "FULL_COMMON_PASSED" }) {
                 receipt["status"] = JsonPrimitive("FULL_COMMON_PASSED")
                 receipt["reason"] = JsonPrimitive(
