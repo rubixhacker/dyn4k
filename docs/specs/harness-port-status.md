@@ -26,7 +26,7 @@ cd tools/harness && ../../gradlew checkAll
 | --- | --- | --- | --- |
 | `:core` | `qualify.py` contract: matrix, digests, canonical JSON, publication metadata, provider check | ported | 27 |
 | `:host` | `qualify.digest(path)`, `qualify.require_clean_checkout` | ported | 7 |
-| `:qualification` | `guard_hosted_runners.py` (**Python deleted**), `qualify.py` archives/audits/evaluation/CLI actions, `stage.py`, `publication.py`, `artifact.py` (collection half), `independent_gates` (part), `independent_linux_observer` (verification half), `full_corpus.py`, `full_suite_manifest.py`, `duplicate_provider.py`, `full_hosted.py` (archive foundation) | partial | 317 |
+| `:qualification` | `guard_hosted_runners.py` (**Python deleted**), `qualify.py` archives/audits/evaluation/CLI actions, `stage.py`, `publication.py`, `artifact.py`, `collection.py` (38 of 44 functions; the six Windows handle helpers are not portable), `full_hosted.py` (all but `run`), `hosted.py`, `safari_reporter.py`, `independent_gates` (most verifiers), `independent_linux_observer` (verification half), `full_corpus.py`, `full_suite_manifest.py`, `duplicate_provider.py` | partial | 507 |
 | `:compatibility` | `world_ci`, `governing_*`, `candidate_coverage`, `method_coverage`, `java_corpus`, `execution_probe`, `full_ci`, `exception_ci`, `ledger`, `module_probe`; `BaselineOracle` now delegates to `:baseline` instead of duplicating the three `javap` readers | partial | 51 |
 | `:performance` | `manifest`, `analyze`, `measure`, `candidate_*`, `sustained_archive`, `reference_study`, `host_capacity_control`, `stress_monitor`, `warmup_probe` (**Python deleted**), `calibrate` (**Python deleted**), `ccd_route_trace` | partial | 181 |
 | `:numerical` | `portable/cases.py`; `portable/receipt.py`; `portable/exact_consistency.py`; `portable/orthogonality.py`; `portable/physical.py` (`nominal_free`, `audit_physical`, sleep/wake, phases); `numeric_class_witness.read_witness`; `compare.py` (`compare`, `audit_reference`, `load_receipt`, `load_fixture`, the whole `compare_value` engine, `check_counts`, `check_snapshot`); `candidate/nominal_zero.py`; `weld_pulley_quality.py` (engine, phases, `atan`/`pi` enclosures, `Decimal`-at-80 rendering); `portable/rotation_oracle.py` (encoding, digest and manifest helpers only) | partial | 91 |
@@ -68,9 +68,32 @@ applies to every other generator in turn. The final state must therefore have no
 until then they are deliberate, and the recorded constants carry the revision and generator name that
 produced them.
 
-Harness total at the last full run: 1122 tests, 0 failures, across `:core`, `:host`,
+Harness total at the last full run: 1180 tests, 0 failures, across `:core`, `:host`,
 `:compatibility`, `:performance`, `:qualification`, `:numerical`, `:android`, `:migration` and
 `:baseline`.
+
+### What still blocks the three qualification deletions
+
+`full_hosted.py`, `artifact.py`, `collection.py` and `publication.py` are all ported, but none can be
+deleted alone. Measured on 2026-10-30:
+
+| File | Lines | Still blocking |
+| --- | ---: | --- |
+| `collection.py` | 1,503 | its own `test_collection.py` (633); `test_cross_run_collection.py` (**1,277**); `qualification.yml:963` and `:973`; `qualification-source-checks.yml:143`; three assertions in `test_qualification_workflow.py` |
+| `test_publication.py` | 1,516 | imported as a fixture builder by `test_artifact.py:41` and `test_full_hosted.py:22/1388/1558/2227`; `qualification-source-checks.yml:143`; `test_qualification_workflow.py:499/882` string-match that workflow line |
+| `artifact.py` | 621 | `full_hosted.py:25` (`run`), `qualify.py:1614` and `:1701`, `independent_gates.py:3300`, `test_artifact.py:13`, `qualification.yml:374`, `:636`, `:1074` |
+| `publication.py` | 87 | `test_publication.py:16`, `qualification.yml:361` and `:539` |
+
+### Parity gap: descriptor anchoring
+
+The reference opens directories with `dir_fd` plus `O_NOFOLLOW` and compares `fstat` of held
+descriptors. The JVM has no descriptor-relative open, so `safari_reporter`, `collection` and `archive
+digest` check a path with `NOFOLLOW_LINKS` and re-read identity afterwards. A swap between the check
+and the operation is therefore undetectable. `test_cross_run_collection.py` (1,277 lines) attacks
+exactly this, and six `_windows_*` ctypes handle helpers in `collection.py` have no JVM equivalent at
+all — on Windows the port applies the POSIX path logic instead of failing closed, which is weaker than
+the reference. This must be resolved, or explicitly accepted and recorded, before `collection.py` is
+deleted.
 
 ## Python code removed
 
