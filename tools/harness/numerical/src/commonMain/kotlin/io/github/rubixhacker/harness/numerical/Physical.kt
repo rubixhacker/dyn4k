@@ -2,6 +2,7 @@ package io.github.rubixhacker.harness.numerical
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -230,6 +231,72 @@ object Physical {
     fun defaultKeys(): List<String> =
         listOf(30, 60, 120).map { "default-sleep-$it" } +
             listOf(30, 60, 120).flatMap { hz -> listOf(1, 2).map { "configured-$hz-r$it" } }
+
+    /**
+     * `tools/numerical/physical.audit_physical`, after the baseline audit has passed: every
+     * state's represented depth is compared with its phase ceiling.
+     */
+    fun auditRows(fixture: JsonObject, records: List<Compare.Record>): JsonObject = try {
+        val schedule = phasesForFixture(fixture)
+        var phaseIndex = 0
+        var checked = 0
+        var failed = 0
+        var firstFailure: JsonObject? = null
+        for (record in records) {
+            val row = record.row
+            if (row["kind"]?.stringOrNull() != "state") continue
+            val step = row.getValue("step").intOrNull()!!
+            while (step > schedule[phaseIndex].third) phaseIndex += 1
+            val phase = schedule[phaseIndex].first
+            val depth = depthForState(row.getValue("state") as JsonObject)
+            val ceiling = Fraction.ofDecimalString(
+                pythonText(
+                    (fixture.getValue("physical_phase_ceilings_m") as JsonObject)
+                        .getValue(phase),
+                ),
+            )
+            checked += 1
+            if (depth > ceiling) {
+                failed += 1
+                if (firstFailure == null) {
+                    firstFailure = buildJsonObject {
+                        put("step", step)
+                        put("phase", phase)
+                        put("depth_m", depth.toString())
+                        put("ceiling_m", ceiling.toString())
+                    }
+                }
+            }
+        }
+        buildJsonObject {
+            put("status", if (failed != 0) "PHYSICAL_FAILED" else "PHYSICAL_PASSED")
+            put("scope", "FROZEN_BASELINE_REPRESENTED_GEOMETRY_ONLY")
+            put("states", checked)
+            put("failed", failed)
+            put("endpoint_mappings", (fixture["counts"] as JsonObject)["outer-endpoint"] ?: JsonPrimitive(0))
+            put("first_failure", firstFailure ?: JsonNull)
+        }
+    } catch (error: Rejected) {
+        buildJsonObject {
+            put("status", "INVALID")
+            put("reason", error.message.orEmpty())
+        }
+    } catch (error: NoSuchElementException) {
+        buildJsonObject {
+            put("status", "INVALID")
+            put("reason", error.message.orEmpty())
+        }
+    } catch (error: IllegalArgumentException) {
+        buildJsonObject {
+            put("status", "INVALID")
+            put("reason", error.message.orEmpty())
+        }
+    } catch (error: IndexOutOfBoundsException) {
+        buildJsonObject {
+            put("status", "INVALID")
+            put("reason", error.message.orEmpty())
+        }
+    }
 
     /** `physical.sleep_wake_rows` over already-parsed records and merged fixtures. */
     fun sleepWakeRows(

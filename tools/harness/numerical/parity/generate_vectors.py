@@ -10,6 +10,7 @@ The script writes one Kotlin constant file per suite under
 was generated from. Re-running it rewrites those files; review the diff before committing.
 """
 import base64
+import fractions as _fractions
 import copy
 import hashlib
 import json
@@ -834,3 +835,128 @@ witness_check("no-origins", good, expected_classes)
 emit("ClassWitnessVectors.kt", "WITNESS_VECTORS",
      {"revision": REVISION, "cases": witness_cases})
 print("revision", REVISION)
+
+# ---------------------------------------------------------------- compare
+sys.path.insert(0, str(REPO / "tools/numerical"))
+import gzip as _gzip
+import tempfile as _tempfile
+import compare as _compare
+import weld_pulley_quality as _quality
+
+
+def _scenario(fixture, rows, candidate=None):
+    """Writes the reference, candidate and receipt the comparator reads, then compares."""
+    with _tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        data = b"".join(
+            json.dumps(row, separators=(",", ":"), sort_keys=True).encode() + b"\n"
+            for row in rows)
+        reference = root / "reference.jsonl.gz"
+        reference.write_bytes(_gzip.compress(data, mtime=0))
+        fixture = copy.deepcopy(fixture)
+        fixture["reference"] = {
+            "file": "reference.jsonl.gz",
+            "gzip_sha256": hashlib.sha256(reference.read_bytes()).hexdigest(),
+            "stream_sha256": hashlib.sha256(data).hexdigest(),
+            "input_sha256": hashlib.sha256(data.splitlines()[0]).hexdigest(),
+        }
+        candidate_rows = rows if candidate is None else candidate
+        candidate_data = b"".join(
+            json.dumps(row, separators=(",", ":"), sort_keys=True).encode() + b"\n"
+            for row in candidate_rows)
+        candidate_path = root / "candidate.jsonl"
+        candidate_path.write_bytes(candidate_data)
+        receipt = root / "receipt.json"
+        receipt.write_text(json.dumps({
+            "source_sha256": "c" * 64,
+            "artifact_sha256": "d" * 64,
+            "candidate_commit": "1" * 40,
+            "trace_sha256": hashlib.sha256(candidate_data).hexdigest(),
+            "reference_source_revision": fixture["baseline_source_revision"],
+            "reference_artifact_sha256": fixture["baseline_jar_sha256"],
+            "reference_trace_sha256": fixture["reference"]["gzip_sha256"],
+            "expected_counts": fixture["counts"],
+            "executed_counts": fixture["counts"],
+            "skipped": 0,
+        }))
+        return _compare.compare(fixture, reference, candidate_path, receipt,
+                                "c" * 64, "d" * 64, "1" * 40)
+
+
+BASE_FIXTURE = {
+    "id": "sample",
+    "source_sha256": "a" * 64,
+    "artifact_sha256": "b" * 64,
+    "baseline_source_revision": "f" * 40,
+    "baseline_jar_sha256": "e" * 64,
+    "counts": {"inputs": 1, "event": 1, "state": 1},
+    "rules": [
+        {"path": "event.payload[].velocity[]", "metric": "scalar", "absolute": 0.1,
+         "relative": 0, "unit": "m/s"},
+        {"path": "state.state.position[]", "metric": "scalar", "absolute": 0.1,
+         "relative": 0.01, "unit": "m"},
+        {"path": "state.state.normal", "metric": "direction", "absolute": 0.01,
+         "relative": 0, "magnitude_absolute": 0.001, "unit_deviation": 0.001, "unit": "rad"},
+        {"path": "state.state.angle", "metric": "orientation", "absolute": 0.01,
+         "relative": 0, "unit": "rad"},
+        {"path": "state.state.sum", "metric": "scalar", "absolute": 0.01,
+         "relative": 0, "unit": "rad"},
+    ],
+    "exact_numeric": ["inputs.dt", "event.step", "event.order", "state.step"],
+}
+BASE_ROWS = [
+    {"kind": "inputs", "id": "sample", "dt": 0.5},
+    {"kind": "event", "step": 1, "order": 0, "listener": "StepListener", "method": "begin",
+     "payload": [{"velocity": [1.0, -2.0], "getPoint": [0.0, 0.0], "getDepth": 0.1,
+                  "getNormalImpulse": 0.25}]},
+    {"kind": "state", "step": 1, "state": {"position": [2.0, 3.0], "normal": [1.0, 0.0],
+                                          "angle": 3.141592653589793, "sum": 9.0}},
+]
+
+
+def _mutate(rows, path, value):
+    altered = copy.deepcopy(rows)
+    target = altered[2]["state"]
+    target[path] = value
+    return altered
+
+
+compare_cases = [
+    ("identical", BASE_ROWS, None),
+    ("component-limit", _mutate(BASE_ROWS, "position", [2.11, 3.12]), None),
+    ("unpassed-channel", _mutate(BASE_ROWS, "position", [2.0, 3.0]).__class__(_mutate(
+        BASE_ROWS, "sum", 9.0)), None),
+    ("scalar-exceeded", _mutate(BASE_ROWS, "sum", 9.02), None),
+    ("direction-reversed", _mutate(BASE_ROWS, "normal", [-1.0, 0.0]), None),
+    ("orientation-wrap", _mutate(BASE_ROWS, "angle", -3.141592653589793), None),
+]
+compare_vectors = []
+for name, rows, candidate in compare_cases:
+    compare_vectors.append({"name": name, "fixture": BASE_FIXTURE, "rows": rows,
+                            "candidate": candidate,
+                            "outcome": _scenario(BASE_FIXTURE, rows, candidate)})
+
+quality_root = REPO / "tools/numerical"
+declaration_bytes = (quality_root / "weld-pulley-physical-declaration.json").read_bytes()
+quality_declaration = json.loads(declaration_bytes)
+quality_manifest = json.loads(
+    (quality_root / "weld-pulley-physical-manifest.json").read_bytes())
+quality_cases = {}
+for case in ("weld-spring-equal", "pulley-taut"):
+    reference = quality_root / "references" / quality_manifest["cases"][case]["file"]
+    quality_cases[case] = _quality.audit_quality(quality_declaration, quality_manifest,
+                                                 case, reference)
+
+decimal_samples = []
+for numerator, denominator in ((1, 3), (1, 2), (0, 1), (-7, 8), (3141592653589793, 10 ** 15),
+                               (4387163687516115, 2 ** 53), (1, 10 ** 18),
+                               (4124582955192690, 2 ** 60)):
+    decimal_samples.append({"numerator": numerator, "denominator": denominator,
+                            "shown": _quality.shown(_fractions.Fraction(numerator, denominator))})
+
+emit("CompareVectors.kt", "COMPARE_VECTORS", {
+    "revision": REVISION,
+    "compare": compare_vectors,
+    "decimal_sample": decimal_samples,
+    "weld_pulley": quality_cases,
+})

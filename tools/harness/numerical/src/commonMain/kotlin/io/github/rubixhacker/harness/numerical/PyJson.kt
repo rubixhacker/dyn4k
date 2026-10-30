@@ -26,7 +26,8 @@ internal object PyJson {
      * Parses [text] as CPython's `json.loads` would with `object_pairs_hook` rejecting duplicate
      * keys and `parse_constant` rejecting `NaN`, `Infinity` and `-Infinity`.
      */
-    fun load(text: String): JsonElement = Scanner(text).document()
+    fun load(text: String, nonfinite: String = "nonfinite JSON token"): JsonElement =
+        Scanner(text, nonfinite).document()
 
     /** CPython's `JSONDecodeError.__str__`. */
     private fun describe(message: String, doc: String, position: Int): String {
@@ -42,7 +43,7 @@ internal object PyJson {
         return "$message: line $lineNumber column $column (char $position)"
     }
 
-    private class Scanner(private val doc: String) {
+    private class Scanner(private val doc: String, private val nonfinite: String) {
         private var position = 0
 
         fun document(): JsonElement {
@@ -87,7 +88,7 @@ internal object PyJson {
 
         private fun constant(token: String, missing: String): Nothing {
             if (!doc.startsWith(token, position)) throw fail(missing)
-            throw Rejected("nonfinite JSON token: $token")
+            throw Rejected("$nonfinite: $token")
         }
 
         private fun literal(token: String, value: JsonElement, missing: String): JsonElement {

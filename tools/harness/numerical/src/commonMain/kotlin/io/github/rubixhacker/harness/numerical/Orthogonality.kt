@@ -140,6 +140,9 @@ object Orthogonality {
 
     fun bits(value: Double): String = value.toRawBits().toULong().toString(16).padStart(16, '0')
 
+    /** `math.ulp`, shared with the comparison engine. */
+    fun ulpValue(value: Double): Double = ulp(value)
+
     /** `math.ulp`. */
     private fun ulp(value: Double): Double {
         val magnitude = abs(value)

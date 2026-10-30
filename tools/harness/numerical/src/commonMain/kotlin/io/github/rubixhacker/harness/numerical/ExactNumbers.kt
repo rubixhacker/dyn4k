@@ -1,5 +1,7 @@
 package io.github.rubixhacker.harness.numerical
 
+import kotlin.math.pow
+
 /**
  * Arbitrary-precision non-negative integers in base 10^5.
  *
@@ -9,7 +11,7 @@ package io.github.rubixhacker.harness.numerical
  * keeping every partial product inside a `Long`. Only the division and square root need the
  * general algorithm.
  */
-internal class BigNat private constructor(source: IntArray) : Comparable<BigNat> {
+class BigNat private constructor(source: IntArray) : Comparable<BigNat> {
     private val limbs: IntArray = normalize(source)
 
     val size: Int get() = limbs.size
@@ -137,6 +139,12 @@ internal class BigNat private constructor(source: IntArray) : Comparable<BigNat>
         }
     }
 
+    /**
+     * The nearest binary64 value. The decimal rendering is exact and its parser rounds to
+     * nearest-even, so this is correctly rounded for every magnitude a double can carry.
+     */
+    fun toDouble(): Double = toString().toDouble()
+
     /** Floor division by 10^[exponent], which is a limb shift in this base. */
     fun divByPowerOfTen(exponent: Int): BigNat {
         require(exponent >= 0)
@@ -223,7 +231,30 @@ internal class BigNat private constructor(source: IntArray) : Comparable<BigNat>
         /** 2^[exponent] for a non-negative exponent. */
         fun powerOfTwo(exponent: Int): BigNat = ONE.shiftLeft(exponent)
 
-        internal fun pow10(exponent: Int): Int {
+        /** `base ** exponent` for a non-negative exponent. */
+        fun pow(value: BigNat, exponent: Int): BigNat {
+            require(exponent >= 0)
+            var result = ONE
+            var base = value
+            var remaining = exponent
+            while (remaining > 0) {
+                if (remaining and 1 == 1) result = result.times(base)
+                remaining = remaining shr 1
+                if (remaining > 0) base = base.times(base)
+            }
+            return result
+        }
+
+        /** `math.factorial`. */
+        fun factorial(value: Int): BigNat {
+            require(value >= 0)
+            var result = ONE
+            for (factor in 2..value) result = result.timesSmall(factor.toLong())
+            return result
+        }
+
+
+        fun pow10(exponent: Int): Int {
             var value = 1
             repeat(exponent) { value *= 10 }
             return value
@@ -239,7 +270,7 @@ internal class BigNat private constructor(source: IntArray) : Comparable<BigNat>
 }
 
 /** A signed arbitrary-precision integer. */
-internal class BigInt constructor(val negative: Boolean, val magnitude: BigNat) :
+class BigInt constructor(val negative: Boolean, val magnitude: BigNat) :
     Comparable<BigInt> {
     fun isZero(): Boolean = magnitude.isZero()
 
@@ -281,7 +312,7 @@ internal class BigInt constructor(val negative: Boolean, val magnitude: BigNat) 
 }
 
 /** An exact rational with a positive denominator, as `fractions.Fraction`. */
-internal class Fraction(val numerator: BigInt, val denominator: BigNat) : Comparable<Fraction> {
+class Fraction(val numerator: BigInt, val denominator: BigNat) : Comparable<Fraction> {
     init {
         require(!denominator.isZero()) { "zero denominator" }
     }
@@ -301,6 +332,24 @@ internal class Fraction(val numerator: BigInt, val denominator: BigNat) : Compar
         numerator * BigInt.ofMagnitude(other.denominator),
         denominator.times(other.numerator.magnitude),
     )
+
+    fun pow(exponent: Int): Fraction {
+        require(exponent >= 0)
+        var result = Fraction(BigInt.of(1), BigNat.ONE)
+        repeat(exponent) { result = result * this }
+        return result
+    }
+
+    /**
+     * `float(Fraction)`: the correctly rounded quotient of the exact numerator by the exact
+     * denominator. Both renderings round to nearest-even, so the quotient is within one unit in
+     * the last place; the values that reach it here have a power-of-two denominator and are
+     * therefore exact.
+     */
+    fun toDouble(): Double {
+        val magnitude = numerator.magnitude.toDouble() / denominator.toDouble()
+        return if (numerator.negative) -magnitude else magnitude
+    }
 
     fun negated(): Fraction = Fraction(numerator.negated(), denominator)
 
@@ -377,6 +426,14 @@ internal class Fraction(val numerator: BigInt, val denominator: BigNat) : Compar
 
         fun ofRatio(numerator: BigNat, denominator: BigNat): Fraction =
             Fraction(BigInt.ofMagnitude(numerator), denominator)
+
+        fun ofMagnitude(value: BigNat): Fraction = Fraction(BigInt.ofMagnitude(value), BigNat.ONE)
+
+        fun times(left: Fraction, right: Fraction): Fraction = left * right
+
+        fun divide(left: Fraction, right: Fraction): Fraction = left / right
+
+        fun subtract(left: Fraction, right: Fraction): Fraction = left - right
 
         /** `Fraction("...")` for a plain decimal literal, as used for the phase ceilings. */
         fun ofDecimalString(text: String): Fraction {

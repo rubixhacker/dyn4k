@@ -9,6 +9,9 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":core"))
+            // The migration tools read and write JSON streams and receipts with `json.loads` and
+            // `json.dumps`, so the JSON model is part of the contract this module ports.
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
         }
 
         jvmMain.dependencies {
