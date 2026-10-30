@@ -13,6 +13,9 @@ kotlin {
             // reader is part of the contract this module ports. `:core` declares the same library
             // as an `implementation` dependency, which does not reach consumers of `:core`.
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
+            // `BaselineOracle` reads `javap` output with the `:baseline` port of
+            // `verify.surface` / `member_inventory` instead of keeping a second copy.
+            implementation(project(":baseline"))
         }
 
         commonTest.dependencies {
