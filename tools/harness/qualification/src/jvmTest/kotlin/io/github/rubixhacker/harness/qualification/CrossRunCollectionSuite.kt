@@ -433,7 +433,7 @@ val CrossRunCollectionContract by testSuite {
                         else "collection/raw/sources/failed",
                     )
                     if (alteration == "delete") {
-                        deleteRecursively(
+                        crossRunDelete(
                             folder.resolve(if (kind == "packed") "original" else "original-directory"),
                         )
                     } else if (kind == "packed") {
@@ -611,6 +611,109 @@ val CrossRunCollectionContract by testSuite {
                     ?: "")
                 assertTrue(reason in message, "$label: $message")
             }
+        }
+    }
+
+    test("collect binds the three directory enumerations of a regular directory swap") {
+        crossRunTemp { root ->
+            val source = root.resolve("source")
+            val alternate = root.resolve("alternate")
+            Files.createDirectories(source)
+            Files.createDirectories(alternate)
+            source.resolve("receipt.bin").writeText("approved")
+            alternate.resolve("receipt.bin").writeText("outside")
+            val files = CollectionRuntime.fileInventory(source)
+            val index = writeIndex(
+                root,
+                head,
+                tree,
+                directorySource(source, files),
+                lane,
+                "staged-consumer",
+                null,
+                null,
+            )
+            val io = regularDirectorySwap(source, alternate)
+            val result = CollectionRuntime.collect(
+                repositoryRoot(),
+                head,
+                emptyList(),
+                root.resolve("collection"),
+                sourceIndex = index,
+                artifactsDir = root.resolve("artifacts").also { Files.createDirectories(it) },
+                io = io,
+            )
+            // The reference's `regular_directory_swap` fires on every enumeration of the approved
+            // directory: the pre-inventory, the frozen copy, and the post-inventory.
+            assertEquals(3, io.swaps)
+            val row = ((result["cross_run"] as JsonObject)["sources"] as JsonArray)[0] as JsonObject
+            assertEquals("NOT_RUN", Py.str(row["status"]))
+            assertContentEquals(
+                "approved".toByteArray(),
+                Files.readAllBytes(
+                    root.resolve("collection/raw/sources/rawdir/original-directory/receipt.bin"),
+                ),
+            )
+            assertContentEquals(
+                "approved".toByteArray(),
+                Files.readAllBytes(source.resolve("receipt.bin")),
+            )
+            assertTrue(
+                CollectionRuntime.verifyCollection(
+                    repositoryRoot(), head, emptyList(), root.resolve("collection"),
+                ),
+            )
+        }
+    }
+
+    test("collect rejects an alternate directory pin across the three swaps") {
+        crossRunTemp { root ->
+            val source = root.resolve("source")
+            val alternate = root.resolve("alternate")
+            Files.createDirectories(source)
+            Files.createDirectories(alternate)
+            source.resolve("receipt.bin").writeText("approved")
+            alternate.resolve("receipt.bin").writeText("outside")
+            // The index pins the alternate directory's bytes while the origin names `source`.
+            val files = CollectionRuntime.fileInventory(alternate)
+            val index = writeIndex(
+                root,
+                head,
+                tree,
+                directorySource(source, files),
+                lane,
+                "staged-consumer",
+                null,
+                null,
+            )
+            val io = regularDirectorySwap(source, alternate)
+            val result = CollectionRuntime.collect(
+                repositoryRoot(),
+                head,
+                emptyList(),
+                root.resolve("collection"),
+                sourceIndex = index,
+                artifactsDir = root.resolve("artifacts").also { Files.createDirectories(it) },
+                io = io,
+            )
+            assertEquals(3, io.swaps)
+            val row = ((result["cross_run"] as JsonObject)["sources"] as JsonArray)[0] as JsonObject
+            assertEquals("FAILED", Py.str(row["status"]))
+            assertTrue(
+                "source directory byte inventory differs" in (Py.str(row["reason"]) ?: ""),
+                Py.str(row["reason"]) ?: "no reason",
+            )
+            assertContentEquals(
+                "approved".toByteArray(),
+                Files.readAllBytes(
+                    root.resolve("collection/raw/sources/rawdir/original-directory/receipt.bin"),
+                ),
+            )
+            assertTrue(
+                CollectionRuntime.verifyCollection(
+                    repositoryRoot(), head, emptyList(), root.resolve("collection"),
+                ),
+            )
         }
     }
 
@@ -1572,11 +1675,11 @@ private fun crossRunTemp(block: (Path) -> Unit) {
     try {
         block(root)
     } finally {
-        deleteRecursively(root)
+        crossRunDelete(root)
     }
 }
 
-private fun deleteRecursively(root: Path) {
+private fun crossRunDelete(root: Path) {
     if (!Files.exists(root)) return
     Files.walk(root).use { walk ->
         walk.sorted(Comparator.reverseOrder()).forEach {
@@ -1851,3 +1954,65 @@ private fun fakeResponse(request: HttpRequest, body: ByteArray): HttpResponse<By
         override fun uri(): java.net.URI = request.uri()
         override fun version(): HttpClient.Version = HttpClient.Version.HTTP_1_1
     }
+
+/**
+ * `regular_directory_swap`: every enumeration of the approved directory is performed while the
+ * alternate directory stands in for it, and the swap is undone before the names are consumed.
+ *
+ * The reference keys this on the enumerated descriptor's inode and restores in a `finally`; the
+ * port keys it on the anchor's `fileKey` and restores the same way, so the count of swaps is the
+ * count of enumerations of the approved directory.
+ */
+private class RegularDirectorySwap(
+    private val source: Path,
+    private val alternate: Path,
+) : CollectionIo() {
+    var swaps: Int = 0
+        private set
+    private val identity: Any? = Files.readAttributes(
+        source,
+        java.nio.file.attribute.BasicFileAttributes::class.java,
+    ).fileKey()
+
+    override fun directoryNames(anchor: Path): List<String> {
+        val names = super.directoryNames(anchor)
+        val key = Files.readAttributes(
+            anchor,
+            java.nio.file.attribute.BasicFileAttributes::class.java,
+        ).fileKey()
+        if (key == null || key != identity) return names
+        val parked = source.resolveSibling(source.fileName.toString() + "-parked")
+        Files.move(source, parked)
+        Files.move(alternate, source)
+        swaps++
+        try {
+            return names
+        } finally {
+            Files.move(source, alternate)
+            Files.move(parked, source)
+        }
+    }
+}
+
+private fun regularDirectorySwap(source: Path, alternate: Path): RegularDirectorySwap =
+    RegularDirectorySwap(source, alternate)
+
+/** One `directory` source of the cross-run index, pinned to an explicit file inventory. */
+private fun directorySource(source: Path, files: JsonObject): JsonObject = buildJsonObject {
+    put("id", JsonPrimitive("rawdir"))
+    put(
+        "origin",
+        buildJsonObject {
+            put("kind", JsonPrimitive("local"))
+            put("path", JsonPrimitive(source.toString()))
+        },
+    )
+    put(
+        "transport",
+        buildJsonObject {
+            put("format", JsonPrimitive("directory"))
+            put("files", files)
+            put("inventory_sha256", JsonPrimitive(CollectionRules.inventoryDigest(files)))
+        },
+    )
+}
