@@ -1,13 +1,16 @@
 package org.dyn4j.geometry
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class GeometryCopyExtensionTest {
-    @Test
-    fun curvedShapeCopiesDispatchVectorCopiesAndKeepIndependentState() {
+val GeometryCopyExtensionTest by testSuite {
+    test("curvedShapeCopiesDispatchVectorCopiesAndKeepIndependentState") { GeometryCopyExtensionTestFixture().run { curvedShapeCopiesDispatchVectorCopiesAndKeepIndependentState() } }
+}
+
+private class GeometryCopyExtensionTestFixture  {
+fun curvedShapeCopiesDispatchVectorCopiesAndKeepIndependentState() {
         val capsule = CopyAwareCapsule()
         val capsuleCopy = capsule.duplicate()
         assertTrue(capsuleCopy.firstFocus() is CopyTaggedVector)

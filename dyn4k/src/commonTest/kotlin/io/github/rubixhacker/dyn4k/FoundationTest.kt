@@ -1,11 +1,21 @@
 package io.github.rubixhacker.dyn4k
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import org.dyn4j.Copyable
 import org.dyn4j.Epsilon
+
+val FoundationTest by testSuite {
+    test("mutableVectorsAndTransformsShareObjects") { FoundationTestFixture().run { mutableVectorsAndTransformsShareObjects() } }
+    test("vectorMatrixAndRotationUseDoublePrecision") { FoundationTestFixture().run { vectorMatrixAndRotationUseDoublePrecision() } }
+    test("matrix33SolvesAndInverts") { FoundationTestFixture().run { matrix33SolvesAndInverts() } }
+    test("inverseTransformRestoresThePoint") { FoundationTestFixture().run { inverseTransformRestoresThePoint() } }
+    test("rotationAndTransformExposeMutableCompatibilityValues") { FoundationTestFixture().run { rotationAndTransformExposeMutableCompatibilityValues() } }
+    test("copyableAcceptsParentWhoseCopyIsAChild") { FoundationTestFixture().run { copyableAcceptsParentWhoseCopyIsAChild() } }
+    test("epsilonAndVectorOperationsMatchWorkedValues") { FoundationTestFixture().run { epsilonAndVectorOperationsMatchWorkedValues() } }
+}
 
 private open class CopyParent(val value: Int) : Copyable<CopyChild> {
     override fun copy() = CopyChild(value)
@@ -19,9 +29,8 @@ private class CopyOther : Copyable<CopyParent> {
 
 private fun copyParent(value: Copyable<CopyParent>): CopyParent = value.copy()
 
-class FoundationTest {
-    @Test
-    fun mutableVectorsAndTransformsShareObjects() {
+private class FoundationTestFixture  {
+fun mutableVectorsAndTransformsShareObjects() {
         val point = Vector2(3.0, 4.0)
         val samePoint: org.dyn4j.geometry.Vector2 = point
         assertSame(point, samePoint)
@@ -32,8 +41,7 @@ class FoundationTest {
         assertEquals(3.0, transform.getTransformed(point).y, 1e-12)
     }
 
-    @Test
-    fun vectorMatrixAndRotationUseDoublePrecision() {
+fun vectorMatrixAndRotationUseDoublePrecision() {
         val vector = Vector3(1.0, 2.0, 3.0)
         assertEquals(14.0, vector.getMagnitudeSquared(), 1e-12)
         val matrix = Matrix22(2.0, 0.0, 0.0, 4.0)
@@ -45,8 +53,7 @@ class FoundationTest {
         assertEquals(1.0, rotated.y, 1e-12)
     }
 
-    @Test
-    fun matrix33SolvesAndInverts() {
+fun matrix33SolvesAndInverts() {
         val matrix = Matrix33(2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0)
         val solved = matrix.solve33(Vector3(4.0, 9.0, 16.0))
         assertEquals(2.0, solved.x, 1e-12)
@@ -58,8 +65,7 @@ class FoundationTest {
         assertEquals(0.25, inverse.m22, 1e-12)
     }
 
-    @Test
-    fun inverseTransformRestoresThePoint() {
+fun inverseTransformRestoresThePoint() {
         val transform = Transform()
         transform.rotate(Rotation.rotation90())
         transform.translate(5.0, -2.0)
@@ -72,8 +78,7 @@ class FoundationTest {
         assertEquals(4.0, restored.y, 1e-12)
     }
 
-    @Test
-    fun rotationAndTransformExposeMutableCompatibilityValues() {
+fun rotationAndTransformExposeMutableCompatibilityValues() {
         val rotation = Rotation()
         val sameRotation: org.dyn4j.geometry.Rotation = rotation
         assertSame(rotation, rotation.set(kotlin.math.PI / 2.0))
@@ -92,8 +97,7 @@ class FoundationTest {
         assertEquals(0.0, sameTransform.getSint(), 1e-12)
     }
 
-    @Test
-    fun copyableAcceptsParentWhoseCopyIsAChild() {
+fun copyableAcceptsParentWhoseCopyIsAChild() {
         val parent = CopyParent(3)
         assertEquals(3, parent.copy().value)
         val copiedParent = copyParent(CopyOther())
@@ -101,8 +105,7 @@ class FoundationTest {
         assertTrue(copiedParent is CopyChild)
     }
 
-    @Test
-    fun epsilonAndVectorOperationsMatchWorkedValues() {
+fun epsilonAndVectorOperationsMatchWorkedValues() {
         assertEquals(1.1102230246251565e-16, Epsilon.E, 0.0)
         val projected = Vector2(3.0, 4.0).project(Vector2(1.0, 0.0))
         assertEquals(3.0, projected.x, 1e-12)

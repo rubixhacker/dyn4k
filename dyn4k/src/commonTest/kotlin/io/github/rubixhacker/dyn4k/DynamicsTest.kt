@@ -1,13 +1,16 @@
 package io.github.rubixhacker.dyn4k
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-class DynamicsTest {
-    @Test
-    fun kotlinNamesShareTheBodyAndFixture() {
+val DynamicsTest by testSuite {
+    test("kotlinNamesShareTheBodyAndFixture") { DynamicsTestFixture().run { kotlinNamesShareTheBodyAndFixture() } }
+}
+
+private class DynamicsTestFixture  {
+fun kotlinNamesShareTheBodyAndFixture() {
         val body: Body = Body()
         val compatibility: org.dyn4j.dynamics.PhysicsBody = body
         val fixture = body.addFixture(Circle(1.0))

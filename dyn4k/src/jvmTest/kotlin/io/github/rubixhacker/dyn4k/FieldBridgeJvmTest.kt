@@ -1,10 +1,15 @@
 package io.github.rubixhacker.dyn4k
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import org.dyn4j.geometry.Rotation
 import org.dyn4j.geometry.Transform
 import org.dyn4j.geometry.Vector2
+
+val FieldBridgeJvmTest by testSuite {
+    test("javaBeanMethodsRemainSeparateFromKotlinFields") { FieldBridgeJvmTestFixture().run { javaBeanMethodsRemainSeparateFromKotlinFields() } }
+    test("protectedFieldsKeepSubclassAccess") { FieldBridgeJvmTestFixture().run { protectedFieldsKeepSubclassAccess() } }
+}
 
 private class KotlinRotationExtension : Rotation() {
     fun setRawCost(value: Double) { cost = value }
@@ -16,9 +21,8 @@ private class KotlinTransformExtension : Transform() {
     fun rawX() = x
 }
 
-class FieldBridgeJvmTest {
-    @Test
-    fun javaBeanMethodsRemainSeparateFromKotlinFields() {
+private class FieldBridgeJvmTestFixture  {
+fun javaBeanMethodsRemainSeparateFromKotlinFields() {
         val vector = VectorAccessorExtension(4.0, 2.0)
         val shared: Vector2 = vector
         assertEquals(4.0, shared.x)
@@ -64,8 +68,7 @@ class FieldBridgeJvmTest {
         assertEquals("stored:custom", sharedReference.value)
     }
 
-    @Test
-    fun protectedFieldsKeepSubclassAccess() {
+fun protectedFieldsKeepSubclassAccess() {
         val javaRotation = FieldAccessorExtensions.RotationExtension()
         assertEquals(1.0, javaRotation.rawCost())
         javaRotation.writeBean(2.0)

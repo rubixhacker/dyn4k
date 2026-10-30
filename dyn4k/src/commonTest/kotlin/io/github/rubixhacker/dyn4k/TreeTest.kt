@@ -1,14 +1,20 @@
 package io.github.rubixhacker.dyn4k
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-class TreeTest {
-    @Test
-    fun insertsAndTraversesInSortedOrder() {
+val TreeTest by testSuite {
+    test("insertsAndTraversesInSortedOrder") { TreeTestFixture().run { insertsAndTraversesInSortedOrder() } }
+    test("searchAndRangeIteratorsFollowBaseline") { TreeTestFixture().run { searchAndRangeIteratorsFollowBaseline() } }
+    test("removesAndKeepsTreeBalanced") { TreeTestFixture().run { removesAndKeepsTreeBalanced() } }
+    test("referenceAndVersionHaveBaselineValues") { TreeTestFixture().run { referenceAndVersionHaveBaselineValues() } }
+}
+
+private class TreeTestFixture  {
+fun insertsAndTraversesInSortedOrder() {
         val tree: BinarySearchTree<Int> = AVLTree()
         val baselineObject: org.dyn4j.BinarySearchTree<Int> = tree
         assertSame(tree, baselineObject)
@@ -18,8 +24,7 @@ class TreeTest {
         assertTrue(tree.isValid())
     }
 
-    @Test
-    fun searchAndRangeIteratorsFollowBaseline() {
+fun searchAndRangeIteratorsFollowBaseline() {
         val tree = AVLTree<Int>()
         listOf(4, 2, 6, 1, 3, 5, 7).forEach { tree.insert(it) }
         val visited = mutableListOf<Int>()
@@ -36,8 +41,7 @@ class TreeTest {
         assertFailsWith<UnsupportedOperationException> { subset.remove() }
     }
 
-    @Test
-    fun removesAndKeepsTreeBalanced() {
+fun removesAndKeepsTreeBalanced() {
         val tree = AVLTree<Int>()
         (1..40).forEach { tree.insert(it) }
         (2..40 step 2).forEach { assertTrue(tree.remove(it)); assertTrue(tree.isValid()) }
@@ -46,8 +50,7 @@ class TreeTest {
         assertEquals(39, tree.removeMaximum())
     }
 
-    @Test
-    fun referenceAndVersionHaveBaselineValues() {
+fun referenceAndVersionHaveBaselineValues() {
         val reference = Reference("one")
         reference.value = "two"
         assertEquals("two", reference.toString())

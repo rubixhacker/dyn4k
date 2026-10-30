@@ -1,12 +1,15 @@
 package org.dyn4j.geometry.hull
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertNull
 import org.dyn4j.geometry.Vector2
 
-class HullSupportStateTest {
-    @Test
-    fun newVertexHasNoLinks() {
+val HullSupportStateTest by testSuite {
+    test("newVertexHasNoLinks") { HullSupportStateTestFixture().run { newVertexHasNoLinks() } }
+}
+
+private class HullSupportStateTestFixture  {
+fun newVertexHasNoLinks() {
         val vertex = LinkedVertex(Vector2(0.0, 0.0))
         assertNull(vertex.next)
         assertNull(vertex.prev)

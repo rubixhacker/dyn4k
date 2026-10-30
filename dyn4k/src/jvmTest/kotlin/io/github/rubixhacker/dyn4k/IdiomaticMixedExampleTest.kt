@@ -1,13 +1,16 @@
 package io.github.rubixhacker.dyn4k
 
+import de.infix.testBalloon.framework.core.testSuite
 import IdiomaticJavaExample
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
 
-class IdiomaticMixedExampleTest {
-    @Test
-    fun javaBodyRunsInKotlinWorldWithoutConversion() {
+val IdiomaticMixedExampleTest by testSuite {
+    test("javaBodyRunsInKotlinWorldWithoutConversion") { IdiomaticMixedExampleTestFixture().run { javaBodyRunsInKotlinWorldWithoutConversion() } }
+}
+
+private class IdiomaticMixedExampleTestFixture  {
+fun javaBodyRunsInKotlinWorldWithoutConversion() {
         val javaBody = IdiomaticJavaExample.createBody()
         val world = world {
             gravity = Vector2(0.0, 0.0)

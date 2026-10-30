@@ -1,6 +1,6 @@
 package io.github.rubixhacker.dyn4k
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
@@ -16,9 +16,20 @@ import org.dyn4j.geometry.simplify.DouglasPeucker
 import org.dyn4j.geometry.simplify.VertexClusterReduction
 import org.dyn4j.geometry.simplify.Visvalingam
 
-class PolygonAlgorithmTest {
-    @Test
-    fun shortSimplifierResultsCanBeExtended() {
+val PolygonAlgorithmTest by testSuite {
+    test("shortSimplifierResultsCanBeExtended") { PolygonAlgorithmTestFixture().run { shortSimplifierResultsCanBeExtended() } }
+    test("pointCloudBecomesAUsableSquareThroughEveryHullGenerator") { PolygonAlgorithmTestFixture().run { pointCloudBecomesAUsableSquareThroughEveryHullGenerator() } }
+    test("shortPointCloudsRetainNullElementsAcrossHullGenerators") { PolygonAlgorithmTestFixture().run { shortPointCloudsRetainNullElementsAcrossHullGenerators() } }
+    test("concaveInputBecomesConvexShapesAndTriangles") { PolygonAlgorithmTestFixture().run { concaveInputBecomesConvexShapesAndTriangles() } }
+    test("redundantBoundaryPointCanBeRemovedWithoutChangingTheSquare") { PolygonAlgorithmTestFixture().run { redundantBoundaryPointCanBeRemovedWithoutChangingTheSquare() } }
+    test("pinnedSeventeenVertexPolygonProducesValidShapesWithTheKnownArea") { PolygonAlgorithmTestFixture().run { pinnedSeventeenVertexPolygonProducesValidShapesWithTheKnownArea() } }
+    test("clockwiseConcaveInputKeepsTheSameAreaAndTriangleCount") { PolygonAlgorithmTestFixture().run { clockwiseConcaveInputKeepsTheSameAreaAndTriangleCount() } }
+    test("degenerateInputIsRejectedBeforeADecompositionIsReported") { PolygonAlgorithmTestFixture().run { degenerateInputIsRejectedBeforeADecompositionIsReported() } }
+    test("simplifiersHandleEmptyAndNullElementsAndRejectNegativeThresholds") { PolygonAlgorithmTestFixture().run { simplifiersHandleEmptyAndNullElementsAndRejectNegativeThresholds() } }
+}
+
+private class PolygonAlgorithmTestFixture  {
+fun shortSimplifierResultsCanBeExtended() {
         for (simplifier in listOf(
             VertexClusterReduction(0.0), DouglasPeucker(0.0, 0.0), Visvalingam(0.0, 0.0)
         )) {
@@ -30,8 +41,7 @@ class PolygonAlgorithmTest {
             }
         }
     }
-    @Test
-    fun pointCloudBecomesAUsableSquareThroughEveryHullGenerator() {
+fun pointCloudBecomesAUsableSquareThroughEveryHullGenerator() {
         val generators = listOf(MonotoneChain(), GrahamScan(), GiftWrap(), DivideAndConquer())
         for (generator in generators) {
             val hull = generator.generate(
@@ -43,8 +53,7 @@ class PolygonAlgorithmTest {
         }
     }
 
-    @Test
-    fun shortPointCloudsRetainNullElementsAcrossHullGenerators() {
+fun shortPointCloudsRetainNullElementsAcrossHullGenerators() {
         for (generator in listOf(MonotoneChain(), GrahamScan(), GiftWrap(), DivideAndConquer())) {
             assertEquals(0, generator.generate().size)
             val one = generator.generate(null)
@@ -56,8 +65,7 @@ class PolygonAlgorithmTest {
         }
     }
 
-    @Test
-    fun concaveInputBecomesConvexShapesAndTriangles() {
+fun concaveInputBecomesConvexShapesAndTriangles() {
         val polygon = arrayOf(
             Vector2(0.0, 0.0), Vector2(2.0, 0.0), Vector2(2.0, 1.0),
             Vector2(1.0, 1.0), Vector2(1.0, 2.0), Vector2(0.0, 2.0)
@@ -73,8 +81,7 @@ class PolygonAlgorithmTest {
         }
     }
 
-    @Test
-    fun redundantBoundaryPointCanBeRemovedWithoutChangingTheSquare() {
+fun redundantBoundaryPointCanBeRemovedWithoutChangingTheSquare() {
         val polygon = listOf(
             Vector2(0.0, 0.0), Vector2(0.05, 0.0), Vector2(2.0, 0.0),
             Vector2(2.0, 2.0), Vector2(0.0, 2.0)
@@ -89,8 +96,7 @@ class PolygonAlgorithmTest {
         }
     }
 
-    @Test
-    fun pinnedSeventeenVertexPolygonProducesValidShapesWithTheKnownArea() {
+fun pinnedSeventeenVertexPolygonProducesValidShapesWithTheKnownArea() {
         val fixture = arrayOf(
             Vector2(1.0, 1.0), Vector2(0.8, 0.9), Vector2(0.7, 1.2),
             Vector2(-0.5, 0.7), Vector2(-0.2, 0.4), Vector2(-0.6, 0.2),
@@ -111,8 +117,7 @@ class PolygonAlgorithmTest {
         }
     }
 
-    @Test
-    fun clockwiseConcaveInputKeepsTheSameAreaAndTriangleCount() {
+fun clockwiseConcaveInputKeepsTheSameAreaAndTriangleCount() {
         val clockwise = arrayOf(
             Vector2(0.0, 2.0), Vector2(1.0, 2.0), Vector2(1.0, 1.0),
             Vector2(2.0, 1.0), Vector2(2.0, 0.0), Vector2(0.0, 0.0)
@@ -125,8 +130,7 @@ class PolygonAlgorithmTest {
         }
     }
 
-    @Test
-    fun degenerateInputIsRejectedBeforeADecompositionIsReported() {
+fun degenerateInputIsRejectedBeforeADecompositionIsReported() {
         for (decomposer in listOf(Bayazit(), EarClipping(), SweepLine())) {
             assertFailsWith<IllegalArgumentException> {
                 decomposer.decompose(Vector2(0.0, 0.0), Vector2(1.0, 0.0), Vector2(0.0, 1.0))
@@ -140,8 +144,7 @@ class PolygonAlgorithmTest {
         }
     }
 
-    @Test
-    fun simplifiersHandleEmptyAndNullElementsAndRejectNegativeThresholds() {
+fun simplifiersHandleEmptyAndNullElementsAndRejectNegativeThresholds() {
         assertFailsWith<IllegalArgumentException> { VertexClusterReduction(-0.1) }
         assertFailsWith<IllegalArgumentException> { DouglasPeucker(0.0, -0.1) }
         assertFailsWith<IllegalArgumentException> { Visvalingam(0.0, -0.1) }

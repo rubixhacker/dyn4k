@@ -1,6 +1,6 @@
 package io.github.rubixhacker.dyn4k
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
@@ -12,9 +12,30 @@ import org.dyn4j.exception.InvalidIndexException
 import org.dyn4j.exception.NullElementException
 import org.dyn4j.exception.ValueOutOfRangeException
 
-class GeometryShapeTest {
-    @Test
-    fun geometryGettersDispatchThroughBaseTypes() {
+val GeometryShapeTest by testSuite {
+    test("geometryGettersDispatchThroughBaseTypes") { GeometryShapeTestFixture().run { geometryGettersDispatchThroughBaseTypes() } }
+    test("geometryExceptionsSupportCommonSubclasses") { GeometryShapeTestFixture().run { geometryExceptionsSupportCommonSubclasses() } }
+    test("cleanseReturnsTheExactEmptyListAndASeparateEmptyArray") { GeometryShapeTestFixture().run { cleanseReturnsTheExactEmptyListAndASeparateEmptyArray() } }
+    test("cleanseCopiesNonemptyListsButKeepsTheirPointsAndMutableResult") { GeometryShapeTestFixture().run { cleanseCopiesNonemptyListsButKeepsTheirPointsAndMutableResult() } }
+    test("cleanseKeepsTheBaselineNullInputErrors") { GeometryShapeTestFixture().run { cleanseKeepsTheBaselineNullInputErrors() } }
+    test("boundsShareTheCompatibilityObjectAndCopyIndependently") { GeometryShapeTestFixture().run { boundsShareTheCompatibilityObjectAndCopyIndependently() } }
+    test("projectedIntervalsRetainTheBaselineBoundaryRules") { GeometryShapeTestFixture().run { projectedIntervalsRetainTheBaselineBoundaryRules() } }
+    test("rayPreservesItsLiveStartAndCopiesBothVectors") { GeometryShapeTestFixture().run { rayPreservesItsLiveStartAndCopiesBothVectors() } }
+    test("combinedMassKeepsItsMutableCenterAndFixedModes") { GeometryShapeTestFixture().run { combinedMassKeepsItsMutableCenterAndFixedModes() } }
+    test("circleQueriesUseOneMutableShapeThroughBothApis") { GeometryShapeTestFixture().run { circleQueriesUseOneMutableShapeThroughBothApis() } }
+    test("polygonExposesLiveVerticesAndKeepsItsCopyIndependent") { GeometryShapeTestFixture().run { polygonExposesLiveVerticesAndKeepsItsCopyIndependent() } }
+    test("rectangleProjectsAndCopiesAfterRotation") { GeometryShapeTestFixture().run { rectangleProjectsAndCopiesAfterRotation() } }
+    test("triangleUsesItsBaselineContainmentRule") { GeometryShapeTestFixture().run { triangleUsesItsBaselineContainmentRule() } }
+    test("segmentQueriesAndStaticIntersectionAgreeWithWorkedCoordinates") { GeometryShapeTestFixture().run { segmentQueriesAndStaticIntersectionAgreeWithWorkedCoordinates() } }
+    test("linkKeepsNeighborIdentityAndRejectsDirectTransform") { GeometryShapeTestFixture().run { linkKeepsNeighborIdentityAndRejectsDirectTransform() } }
+    test("curvedShapesSupportQueriesThroughBothApis") { GeometryShapeTestFixture().run { curvedShapesSupportQueriesThroughBothApis() } }
+    test("halfEllipseRetainsItsLiveEllipseCenterAcrossTranslation") { GeometryShapeTestFixture().run { halfEllipseRetainsItsLiveEllipseCenterAcrossTranslation() } }
+    test("sliceRetainsItsLiveCircleCenterAndQueriesItsArc") { GeometryShapeTestFixture().run { sliceRetainsItsLiveCircleCenterAndQueriesItsArc() } }
+    test("geometryFactoriesConstructEveryCurvedBaselineShape") { GeometryShapeTestFixture().run { geometryFactoriesConstructEveryCurvedBaselineShape() } }
+}
+
+private class GeometryShapeTestFixture  {
+fun geometryGettersDispatchThroughBaseTypes() {
         class CustomEllipse : Ellipse(2.0, 1.0) {
             override fun getWidth(): Double = 9.0
             override fun getHeight(): Double = 8.0
@@ -31,8 +52,7 @@ class GeometryShapeTest {
         assertEquals(-1.0, bounds.getMinX())
     }
 
-    @Test
-    fun geometryExceptionsSupportCommonSubclasses() {
+fun geometryExceptionsSupportCommonSubclasses() {
         class Empty : EmptyCollectionException("points")
         class Index : InvalidIndexException(2)
         class Element : NullElementException("points", 2)
@@ -44,8 +64,7 @@ class GeometryShapeTest {
         assertEquals("radius cannot be 0.000000", Range().message)
     }
 
-    @Test
-    fun cleanseReturnsTheExactEmptyListAndASeparateEmptyArray() {
+fun cleanseReturnsTheExactEmptyListAndASeparateEmptyArray() {
         val immutable = emptyList<Vector2?>()
         val mutable = mutableListOf<Vector2?>()
         assertSame(immutable, Geometry.cleanse(immutable))
@@ -57,8 +76,7 @@ class GeometryShapeTest {
         assertFalse((input as Any) === output)
     }
 
-    @Test
-    fun cleanseCopiesNonemptyListsButKeepsTheirPointsAndMutableResult() {
+fun cleanseCopiesNonemptyListsButKeepsTheirPointsAndMutableResult() {
         val first = Vector2(0.0, 0.0)
         val second = Vector2(1.0, 0.0)
         val third = Vector2(0.0, 1.0)
@@ -77,15 +95,13 @@ class GeometryShapeTest {
         assertSame(first, arrayResult[0])
     }
 
-    @Test
-    fun cleanseKeepsTheBaselineNullInputErrors() {
+fun cleanseKeepsTheBaselineNullInputErrors() {
         assertFailsWith<ArgumentNullException> { Geometry.cleanse(null as List<Vector2?>?) }
         assertFailsWith<NullElementException> { Geometry.cleanse(listOf(Vector2(), null, Vector2())) }
         assertFailsWith<NullElementException> { Geometry.cleanse(Vector2(), null, Vector2()) }
     }
 
-    @Test
-    fun boundsShareTheCompatibilityObjectAndCopyIndependently() {
+fun boundsShareTheCompatibilityObjectAndCopyIndependently() {
         val bounds = AABB(-2.0, -1.0, 4.0, 3.0)
         val compatibility: org.dyn4j.geometry.AABB = bounds
         assertSame(bounds, compatibility)
@@ -100,8 +116,7 @@ class GeometryShapeTest {
         assertEquals(0.0, bounds.getMinX())
     }
 
-    @Test
-    fun projectedIntervalsRetainTheBaselineBoundaryRules() {
+fun projectedIntervalsRetainTheBaselineBoundaryRules() {
         val projection = Interval(-2.0, 3.0)
         val compatibility: org.dyn4j.geometry.Interval = projection
         assertSame(projection, compatibility)
@@ -114,8 +129,7 @@ class GeometryShapeTest {
         assertEquals(-3.0, projection.getMin())
     }
 
-    @Test
-    fun rayPreservesItsLiveStartAndCopiesBothVectors() {
+fun rayPreservesItsLiveStartAndCopiesBothVectors() {
         val start = Vector2(2.0, -3.0)
         val ray = Ray(start, Vector2(3.0, 4.0))
         val compatibility: org.dyn4j.geometry.Ray = ray
@@ -130,8 +144,7 @@ class GeometryShapeTest {
         assertSame(direction, ray.getDirectionVector())
     }
 
-    @Test
-    fun combinedMassKeepsItsMutableCenterAndFixedModes() {
+fun combinedMassKeepsItsMutableCenterAndFixedModes() {
         val mass = Mass(Vector2(1.0, 0.0), 2.0, 3.0)
         val compatibility: org.dyn4j.geometry.Mass = mass
         assertSame(mass, compatibility)
@@ -146,8 +159,7 @@ class GeometryShapeTest {
         assertEquals(3.0, mass.getInertia())
     }
 
-    @Test
-    fun circleQueriesUseOneMutableShapeThroughBothApis() {
+fun circleQueriesUseOneMutableShapeThroughBothApis() {
         val circle = Circle(2.0)
         val compatibility: org.dyn4j.geometry.Shape = circle
         assertSame(circle, compatibility)
@@ -165,8 +177,7 @@ class GeometryShapeTest {
         assertEquals(3.0, copy.getCenter().x)
     }
 
-    @Test
-    fun polygonExposesLiveVerticesAndKeepsItsCopyIndependent() {
+fun polygonExposesLiveVerticesAndKeepsItsCopyIndependent() {
         val polygon = Polygon(Vector2(-1.0, -1.0), Vector2(1.0, -1.0), Vector2(1.0, 1.0), Vector2(-1.0, 1.0))
         val compatibility: org.dyn4j.geometry.Wound = polygon
         assertSame(polygon, compatibility)
@@ -180,8 +191,7 @@ class GeometryShapeTest {
         assertEquals(1.0, vertices[0].x)
     }
 
-    @Test
-    fun rectangleProjectsAndCopiesAfterRotation() {
+fun rectangleProjectsAndCopiesAfterRotation() {
         val rectangle = Rectangle(4.0, 2.0)
         val compatibility: org.dyn4j.geometry.Polygon = rectangle
         assertSame(rectangle, compatibility)
@@ -195,8 +205,7 @@ class GeometryShapeTest {
         assertEquals(3.0, rectangle.getCenter().x, 1e-12)
     }
 
-    @Test
-    fun triangleUsesItsBaselineContainmentRule() {
+fun triangleUsesItsBaselineContainmentRule() {
         val triangle = Triangle(Vector2(0.0, 0.0), Vector2(2.0, 0.0), Vector2(0.0, 2.0))
         val compatibility: org.dyn4j.geometry.Polygon = triangle
         assertSame(triangle, compatibility)
@@ -206,8 +215,7 @@ class GeometryShapeTest {
         assertEquals(2.0, triangle.copy().getArea(), 1e-12)
     }
 
-    @Test
-    fun segmentQueriesAndStaticIntersectionAgreeWithWorkedCoordinates() {
+fun segmentQueriesAndStaticIntersectionAgreeWithWorkedCoordinates() {
         val segment = Segment(Vector2(-2.0, 0.0), Vector2(2.0, 0.0))
         val compatibility: org.dyn4j.geometry.Wound = segment
         assertSame(segment, compatibility)
@@ -222,8 +230,7 @@ class GeometryShapeTest {
         assertEquals(0.0, crossing.y, 1e-12)
     }
 
-    @Test
-    fun linkKeepsNeighborIdentityAndRejectsDirectTransform() {
+fun linkKeepsNeighborIdentityAndRejectsDirectTransform() {
         val previous = Vector2(-2.0, 0.0)
         val next = Vector2(2.0, 0.0)
         val link = Link(previous, Vector2(-1.0, 0.0), Vector2(1.0, 0.0), next)
@@ -237,8 +244,7 @@ class GeometryShapeTest {
         assertEquals(-2.0, copy.getPoint0()!!.x)
     }
 
-    @Test
-    fun curvedShapesSupportQueriesThroughBothApis() {
+fun curvedShapesSupportQueriesThroughBothApis() {
         val capsule = Capsule(4.0, 2.0)
         val compatibilityCapsule: org.dyn4j.geometry.Shape = capsule
         assertSame(capsule, compatibilityCapsule)
@@ -254,8 +260,7 @@ class GeometryShapeTest {
         assertEquals(0.0, copy.getCenter().x)
     }
 
-    @Test
-    fun halfEllipseRetainsItsLiveEllipseCenterAcrossTranslation() {
+fun halfEllipseRetainsItsLiveEllipseCenterAcrossTranslation() {
         val shape = HalfEllipse(4.0, 2.0)
         val compatibility: org.dyn4j.geometry.Shape = shape
         assertSame(shape, compatibility)
@@ -268,8 +273,7 @@ class GeometryShapeTest {
         assertEquals(null, shape.copy().getUserData())
     }
 
-    @Test
-    fun sliceRetainsItsLiveCircleCenterAndQueriesItsArc() {
+fun sliceRetainsItsLiveCircleCenterAndQueriesItsArc() {
         val slice = Slice(2.0, kotlin.math.PI / 2.0)
         val compatibility: org.dyn4j.geometry.Convex = slice
         assertSame(slice, compatibility)
@@ -283,8 +287,7 @@ class GeometryShapeTest {
         assertEquals(null, slice.copy().getUserData())
     }
 
-    @Test
-    fun geometryFactoriesConstructEveryCurvedBaselineShape() {
+fun geometryFactoriesConstructEveryCurvedBaselineShape() {
         val circle: org.dyn4j.geometry.Circle = Geometry.createCircle(2.0)
         val capsule: org.dyn4j.geometry.Capsule = Geometry.createCapsule(4.0, 2.0)
         val ellipse: org.dyn4j.geometry.Ellipse = Geometry.createEllipse(4.0, 2.0)

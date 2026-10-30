@@ -8,6 +8,7 @@ plugins {
     id("com.android.kotlin.multiplatform.library")
     `maven-publish`
     id("org.jetbrains.dokka")
+    id("de.infix.testBalloon")
 }
 
 kotlin {
@@ -73,7 +74,10 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies { api(project(":dyn4k-core")) }
-        commonTest.dependencies { implementation(kotlin("test")) }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+            implementation("de.infix.testBalloon:testBalloon-framework-core:1.2.0")
+        }
         jsTest.dependencies {
             implementation(devNpm("karma-safari-launcher", "1.0.0"))
             implementation(devNpm("karma-firefox-launcher", "^2.1.3"))

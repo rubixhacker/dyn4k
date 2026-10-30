@@ -1,14 +1,28 @@
 package io.github.rubixhacker.dyn4k
 
-import kotlin.test.Test
+import de.infix.testBalloon.framework.core.testSuite
 import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-class IdiomaticApiTest {
-    @Test
-    fun mutableVectorBindingReassignsValuesWithoutChangingSharedReferences() {
+val IdiomaticApiTest by testSuite {
+    test("mutableVectorBindingReassignsValuesWithoutChangingSharedReferences") { IdiomaticApiTestFixture().run { mutableVectorBindingReassignsValuesWithoutChangingSharedReferences() } }
+    test("fixedVectorBindingMutatesSharedStateThroughNamedMethods") { IdiomaticApiTestFixture().run { fixedVectorBindingMutatesSharedStateThroughNamedMethods() } }
+    test("builderKeepsSubclassAndDispatchesItsStepOverride") { IdiomaticApiTestFixture().run { builderKeepsSubclassAndDispatchesItsStepOverride() } }
+    test("retainedMembershipViewsTrackAddsAndRemoves") { IdiomaticApiTestFixture().run { retainedMembershipViewsTrackAddsAndRemoves() } }
+    test("removedStepCallbacksDoNotRunAgain") { IdiomaticApiTestFixture().run { removedStepCallbacksDoNotRunAgain() } }
+    test("contactEndRunsOnSeparationAndStopsAfterRemoval") { IdiomaticApiTestFixture().run { contactEndRunsOnSeparationAndStopsAfterRemoval() } }
+    test("vectorOperatorsAndShapePropertiesPreserveMutableCompatibilityObjects") { IdiomaticApiTestFixture().run { vectorOperatorsAndShapePropertiesPreserveMutableCompatibilityObjects() } }
+    test("bodyBuilderUsesLiveFixtureAndVelocityState") { IdiomaticApiTestFixture().run { bodyBuilderUsesLiveFixtureAndVelocityState() } }
+    test("worldBuilderAddsTheSameBodiesAndJointSeenByCompatibilityApi") { IdiomaticApiTestFixture().run { worldBuilderAddsTheSameBodiesAndJointSeenByCompatibilityApi() } }
+    test("queryAndStepCallbackObserveTheCompatibilityWorld") { IdiomaticApiTestFixture().run { queryAndStepCallbackObserveTheCompatibilityWorld() } }
+    test("genericJointBuilderPreservesConcreteJointIdentity") { IdiomaticApiTestFixture().run { genericJointBuilderPreservesConcreteJointIdentity() } }
+    test("queryAndContactHelpersReceiveLiveWorldObjects") { IdiomaticApiTestFixture().run { queryAndContactHelpersReceiveLiveWorldObjects() } }
+}
+
+private class IdiomaticApiTestFixture  {
+fun mutableVectorBindingReassignsValuesWithoutChangingSharedReferences() {
         var value = Vector2(2.0, 3.0)
         val shared: org.dyn4j.geometry.Vector2 = value
         value += Vector2(4.0, -1.0)
@@ -40,8 +54,7 @@ class IdiomaticApiTest {
         assertEquals(-1.0, value.y)
     }
 
-    @Test
-    fun fixedVectorBindingMutatesSharedStateThroughNamedMethods() {
+fun fixedVectorBindingMutatesSharedStateThroughNamedMethods() {
         val value = Vector2(2.0, 3.0)
         val compatibility: org.dyn4j.geometry.Vector2 = value
         value.add(Vector2(4.0, -1.0))
@@ -71,8 +84,7 @@ class IdiomaticApiTest {
         }
     }
 
-    @Test
-    fun builderKeepsSubclassAndDispatchesItsStepOverride() {
+fun builderKeepsSubclassAndDispatchesItsStepOverride() {
         val extended = ObservedWorld()
         val built = world(extended) {
             gravity = Vector2(0.0, 0.0)
@@ -86,8 +98,7 @@ class IdiomaticApiTest {
         assertSame(compatibility.getBody(0), extended.observedBody)
     }
 
-    @Test
-    fun retainedMembershipViewsTrackAddsAndRemoves() {
+fun retainedMembershipViewsTrackAddsAndRemoves() {
         val built = world { gravity = Vector2(0.0, 0.0) }
         val bodyView = built.bodies
         val jointView = built.joints
@@ -115,8 +126,7 @@ class IdiomaticApiTest {
         assertSame(first, bodyView.single())
     }
 
-    @Test
-    fun removedStepCallbacksDoNotRunAgain() {
+fun removedStepCallbacksDoNotRunAgain() {
         val built = world { gravity = Vector2(0.0, 0.0) }
         var begins = 0
         var ends = 0
@@ -138,8 +148,7 @@ class IdiomaticApiTest {
         assertEquals(1, ends)
     }
 
-    @Test
-    fun contactEndRunsOnSeparationAndStopsAfterRemoval() {
+fun contactEndRunsOnSeparationAndStopsAfterRemoval() {
         val built = world {
             gravity = Vector2(0.0, 0.0)
             body { fixture(circle(1.0)); massType = MassType.INFINITE }
@@ -173,8 +182,7 @@ class IdiomaticApiTest {
         assertEquals(endCount, ends)
     }
 
-    @Test
-    fun vectorOperatorsAndShapePropertiesPreserveMutableCompatibilityObjects() {
+fun vectorOperatorsAndShapePropertiesPreserveMutableCompatibilityObjects() {
         val left: Vector2 = Vector2(2.0, 3.0)
         val right = Vector2(4.0, -1.0)
         val result = left + right
@@ -197,8 +205,7 @@ class IdiomaticApiTest {
         assertEquals(3.0, capsule.center.x)
     }
 
-    @Test
-    fun bodyBuilderUsesLiveFixtureAndVelocityState() {
+fun bodyBuilderUsesLiveFixtureAndVelocityState() {
         val built = body {
             fixture(circle(1.0)) { density = 2.0 }
             massType = MassType.NORMAL
@@ -214,8 +221,7 @@ class IdiomaticApiTest {
         assertEquals(5.0, compatibility.getLinearVelocity().x)
     }
 
-    @Test
-    fun worldBuilderAddsTheSameBodiesAndJointSeenByCompatibilityApi() {
+fun worldBuilderAddsTheSameBodiesAndJointSeenByCompatibilityApi() {
         val built: World<Body> = world {
             gravity = Vector2(0.0, 0.0)
             val fixed = body { fixture(circle(0.5)); massType = MassType.INFINITE }
@@ -233,8 +239,7 @@ class IdiomaticApiTest {
         assertEquals(2, compatibility.getBodyCount())
     }
 
-    @Test
-    fun queryAndStepCallbackObserveTheCompatibilityWorld() {
+fun queryAndStepCallbackObserveTheCompatibilityWorld() {
         val built = world {
             gravity = Vector2(0.0, 0.0)
             body { fixture(circle(1.0)); massType = MassType.NORMAL }
@@ -250,8 +255,7 @@ class IdiomaticApiTest {
         assertTrue(built.removeStepListener(listener))
     }
 
-    @Test
-    fun genericJointBuilderPreservesConcreteJointIdentity() {
+fun genericJointBuilderPreservesConcreteJointIdentity() {
         val built = world {
             val first = body { fixture(circle(0.5)); massType = MassType.NORMAL }
             val second = body { fixture(circle(0.5)); massType = MassType.NORMAL }
@@ -265,8 +269,7 @@ class IdiomaticApiTest {
         assertTrue(built.joints[0].isCollisionAllowed())
     }
 
-    @Test
-    fun queryAndContactHelpersReceiveLiveWorldObjects() {
+fun queryAndContactHelpersReceiveLiveWorldObjects() {
         val built = world {
             gravity = Vector2(0.0, 0.0)
             body { fixture(circle(1.0)); massType = MassType.INFINITE }
