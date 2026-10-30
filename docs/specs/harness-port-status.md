@@ -13,7 +13,7 @@ cd tools/harness && ../../gradlew checkAll
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| `dyn4k` commonTest and jvmTest | ported to TestBalloon | `./gradlew :dyn4k:jvmTest` — 61 tests, 0 failures; `:dyn4k:linuxX64Test` — 58 tests, 0 failures; no non-TestBalloon suite |
+| `dyn4k` commonTest and jvmTest | ported to TestBalloon | `./gradlew :dyn4k:jvmTest` — 61 tests, 0 failures; `:dyn4k:linuxX64Test` — 58; `:dyn4k:jsNodeTest` — 58 (after `kotlinUpgradeYarnLock`); no non-TestBalloon suite |
 | `dyn4k-core` commonTest, jvmTest, diagnostic | ported to TestBalloon | `./gradlew :dyn4k-core:jvmTest` — 2465 tests, 0 failures; no non-TestBalloon suite |
 | `consumers/*`, `tools/numerical/portable` | ported to TestBalloon | `consumers/geometry-extension` 1, `consumers/performance/portable` 3, `consumers/idiomatic-api` 2, `consumers/qualification/portable` 3, `tools/numerical/portable` 55 (jvm), `pulley-jdi-sidecar-v2` 1 — 0 failures; lane builds converted but not run |
 | `tools/harness` modules | TestBalloon only | counts below |
@@ -92,6 +92,9 @@ Harness total at the last full run: 485 tests, 0 failures, across `:core`, `:hos
   treatment: `full_browser_consumer`, `full_klib_consumer`, `full_wasm_node_consumer`,
   `full_android_consumer`, `full_android_native_consumer`, `full_apple_device_consumer`,
   `full_native_host_consumer`, `tools/android-runtime`, and `tools/qualification/browser_wasi`.
+- Adding the TestBalloon test dependency changes `kotlin-js-store/yarn.lock`; run
+  `./gradlew kotlinUpgradeYarnLock` after any test dependency change or the JS tasks fail with
+  "Lock file was changed".
 - Test conversion changes every test source file, so the frozen complete-suite manifest and the
   approved corpus no longer match the checkout. Regenerating them is step 2 of "Evidence invalidation"
   in `harness-port.md`; re-approval and lane reruns are open.
