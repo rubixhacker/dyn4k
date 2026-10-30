@@ -2,7 +2,7 @@
 package io.github.rubixhacker.harness.qualification
 
 internal object SafariYarnLockVectors {
-    const val REVISION = "100b0e7ac877700afa5920ed31962c5c998b3aea"
+    const val REVISION = "a5109302cd9bbc3f45673df7d768f9d751983371"
     const val TRACKED_LOCK = "kotlin-js-store/yarn.lock"
     const val GENERATED_LOCK = "build/js/yarn.lock"
     val SOURCE_INPUTS = listOf("build.gradle.kts", "settings.gradle.kts", "gradle/wrapper/gradle-wrapper.properties")
@@ -44,6 +44,11 @@ internal object SafariYarnLockVectors {
     val FULL_HOSTED_COMMANDS = listOf(
         "development" to listOf("/repo/gradlew", "--no-daemon", "--console=plain", "--rerun-tasks", "--init-script", "/tmp/qualification.init.gradle", ":dyn4k-core:jsBrowserTest", ":dyn4k:jsBrowserTest", "-PqualificationInvocationId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
         "production" to listOf("/repo/gradlew", "--no-daemon", "--console=plain", "--rerun-tasks", "--init-script", "/tmp/qualification.init.gradle", ":dyn4k-core:jsBrowserTest", ":dyn4k:jsBrowserTest", "-PqualificationInvocationId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "-PqualificationProduction=true"),
+    )
+
+    val HOSTED_EXPECTED_FILES = listOf(
+        "development" to setOf("development/qualification.init.gradle", "generated/build/js/package.json", "generated/build/js/packages/dyn4k-dyn4k-core-test/package.json", "generated/build/js/packages/dyn4k-dyn4k-core/package.json", "generated/build/js/packages/dyn4k-dyn4k-test/package.json", "generated/build/js/packages/dyn4k-dyn4k/package.json", "generated/build/js/yarn.lock", "inputs/build.gradle.kts", "inputs/docs/archive/hosted-macos-workflows/safari-yarn-lock-diagnostic.yml", "inputs/dyn4k-core/build.gradle.kts", "inputs/dyn4k/build.gradle.kts", "inputs/gradle/wrapper/gradle-wrapper.properties", "inputs/settings.gradle.kts", "inputs/tools/harness/qualification/src/commonMain/kotlin/io/github/rubixhacker/harness/qualification/SafariReporter.kt", "inputs/tools/harness/qualification/src/jvmMain/kotlin/io/github/rubixhacker/harness/qualification/FullHosted.kt", "inputs/tools/harness/qualification/src/jvmMain/kotlin/io/github/rubixhacker/harness/qualification/SafariYarnLockHost.kt", "inputs/tools/qualification/safari-karma-reporter.js", "inputs/tools/qualification/safari-launch.sh", "stderr.txt", "stdout.txt", "tracked-after/kotlin-js-store/yarn.lock", "tracked/kotlin-js-store/yarn.lock"),
+        "production" to setOf("generated/build/js/package.json", "generated/build/js/packages/dyn4k-dyn4k-core-test/package.json", "generated/build/js/packages/dyn4k-dyn4k-core/package.json", "generated/build/js/packages/dyn4k-dyn4k-test/package.json", "generated/build/js/packages/dyn4k-dyn4k/package.json", "generated/build/js/yarn.lock", "inputs/build.gradle.kts", "inputs/docs/archive/hosted-macos-workflows/safari-yarn-lock-diagnostic.yml", "inputs/dyn4k-core/build.gradle.kts", "inputs/dyn4k/build.gradle.kts", "inputs/gradle/wrapper/gradle-wrapper.properties", "inputs/settings.gradle.kts", "inputs/tools/harness/qualification/src/commonMain/kotlin/io/github/rubixhacker/harness/qualification/SafariReporter.kt", "inputs/tools/harness/qualification/src/jvmMain/kotlin/io/github/rubixhacker/harness/qualification/FullHosted.kt", "inputs/tools/harness/qualification/src/jvmMain/kotlin/io/github/rubixhacker/harness/qualification/SafariYarnLockHost.kt", "inputs/tools/qualification/safari-karma-reporter.js", "inputs/tools/qualification/safari-launch.sh", "production/qualification.init.gradle", "stderr.txt", "stdout.txt", "tracked-after/kotlin-js-store/yarn.lock", "tracked/kotlin-js-store/yarn.lock"),
     )
 
     val LOCK_SIGNATURE_CASES = listOf(

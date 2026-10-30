@@ -65,6 +65,25 @@ val SafariYarnLockContract by testSuite {
         )
     }
 
+    test("the hosted archive inventory matches the reference for both configurations") {
+        for ((configuration, expected) in SafariYarnLockVectors.HOSTED_EXPECTED_FILES) {
+            val sourceInputs = listOf(SafariYarnLockRules.TRACKED_LOCK) +
+                SafariYarnLockRules.SOURCE_INPUTS +
+                SafariYarnLockRules.HOSTED_SOURCE_INPUTS
+            assertEquals(
+                expected,
+                SafariYarnLockRules.hostedExpectedFiles(
+                    configuration,
+                    SafariYarnLockRules.TRACKED_LOCK,
+                    SafariYarnLockRules.GENERATED_LOCK,
+                    sourceInputs,
+                    SafariYarnLockRules.REQUIRED_PACKAGE_INPUTS,
+                ),
+                configuration,
+            )
+        }
+    }
+
     test("the hosted task markers carry the lock-store outcome") {
         assertEquals(
             SafariYarnLockVectors.MARKERS_PASSED,

@@ -108,6 +108,32 @@ object SafariYarnLockRules {
             "Cannot process output: too long teamcity service message (more than 1Mb). " +
             "Event was lost." in stderr
 
+    /**
+     * `hosted_expected_files`: every archive member a hosted capture must contain.
+     *
+     * The tracked lock is archived twice (before and after), the generated lock and each package
+     * input under `generated/`, the source inputs under `inputs/`, and the init script, both logs.
+     */
+    fun hostedExpectedFiles(
+        configuration: String,
+        trackedLock: String,
+        generatedLock: String,
+        sourceInputs: List<String>,
+        packageInputs: List<String>,
+    ): Set<String> {
+        val expected = linkedSetOf(
+            "$configuration/qualification.init.gradle",
+            "stdout.txt",
+            "stderr.txt",
+            "tracked/$trackedLock",
+            "tracked-after/$trackedLock",
+            "generated/$generatedLock",
+        )
+        for (path in sourceInputs.drop(1)) expected.add("inputs/$path")
+        for (path in packageInputs) expected.add("generated/$path")
+        return expected
+    }
+
     /** `full_hosted_command`: the exact Safari source command of one configuration. */
     fun fullHostedCommand(
         repository: String,

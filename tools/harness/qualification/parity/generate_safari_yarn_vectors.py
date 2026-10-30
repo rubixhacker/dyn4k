@@ -45,6 +45,23 @@ LOCK_STDERR = ("FAILURE: Build failed with an exception.\n"
                "BUILD FAILED in 1m 2s\n")
 
 
+# The port substitutes the Kotlin tools for the archived Python ones. The inventory formatting is
+# the reference's own `hosted_expected_files`, so the vector runs it over the substituted list.
+KOTLIN_HOSTED_INPUTS = [
+    "tools/harness/qualification/src/jvmMain/kotlin/io/github/rubixhacker/harness/qualification"
+    "/FullHosted.kt",
+    "dyn4k-core/build.gradle.kts",
+    "dyn4k/build.gradle.kts",
+    "tools/qualification/safari-launch.sh",
+    "docs/archive/hosted-macos-workflows/safari-yarn-lock-diagnostic.yml",
+    "tools/harness/qualification/src/commonMain/kotlin/io/github/rubixhacker/harness/qualification"
+    "/SafariReporter.kt",
+    "tools/harness/qualification/src/jvmMain/kotlin/io/github/rubixhacker/harness/qualification"
+    "/SafariYarnLockHost.kt",
+    "tools/qualification/safari-karma-reporter.js",
+]
+
+
 def main():
     lines = []
     def add(text=""):
@@ -113,6 +130,16 @@ def main():
         add("        " + kotlin(configuration) + " to listOf("
             + ", ".join(kotlin(a) for a in s.full_hosted_command(
                 Path("/repo"), "/tmp/qualification.init.gradle", configuration, "a" * 32)) + "),")
+    add("    )")
+    add()
+    add("    val HOSTED_EXPECTED_FILES = listOf(")
+    for configuration in ("development", "production"):
+        expected = sorted(s.hosted_expected_files(
+            configuration, s.TRACKED_LOCK, s.GENERATED_LOCK,
+            (s.TRACKED_LOCK, *s.SOURCE_INPUTS, *(Path(p) for p in KOTLIN_HOSTED_INPUTS)),
+            s.REQUIRED_PACKAGE_INPUTS))
+        add("        " + kotlin(configuration) + " to setOf("
+            + ", ".join(kotlin(p) for p in expected) + "),")
     add("    )")
     add()
     add("    val LOCK_SIGNATURE_CASES = listOf(")

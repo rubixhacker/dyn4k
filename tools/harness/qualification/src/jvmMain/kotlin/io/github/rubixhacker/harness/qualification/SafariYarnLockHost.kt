@@ -7,6 +7,9 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.TimeUnit
+import io.github.rubixhacker.harness.contract.StrictJson
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -38,7 +41,9 @@ object SafariYarnLockHost {
                 throw IllegalArgumentException("symlink source path or ancestor: $relative")
             }
         }
-        if (path.toRealPath() != repository.toRealPath().resolve(relative)) {
+        if (SafariReporterHost.resolvePath(path) !=
+            SafariReporterHost.resolvePath(repository).resolve(relative)
+        ) {
             throw IllegalArgumentException("source path escapes checkout: $relative")
         }
         return path
@@ -265,7 +270,7 @@ object SafariYarnLockHost {
 
     private fun git(repository: Path, vararg arguments: String): String {
         val process = ProcessBuilder(
-            listOf("git", "-C", repository.toString()) + arguments,
+            listOf("git", "--no-replace-objects", "-C", repository.toString()) + arguments,
         ).start()
         val stdout = process.inputStream.use { it.readBytes() }
         val stderr = process.errorStream.use { it.readBytes() }
@@ -276,5 +281,139 @@ object SafariYarnLockHost {
             )
         }
         return String(stdout, StandardCharsets.UTF_8).trim()
+    }
+}
+
+/**
+ * `sorted(Path)`: `pathlib` compares the parts of a path, not its text, so `a/b` sorts before
+ * `a-b` and `x/core` before `x/core-test`.
+ */
+internal object PackagePathOrder : Comparator<String> {
+    override fun compare(left: String, right: String): Int {
+        val first = left.split('/')
+        val second = right.split('/')
+        for (index in 0 until minOf(first.size, second.size)) {
+            val order = CanonicalText.compare(first[index], second[index])
+            if (order != 0) return order
+        }
+        return first.size.compareTo(second.size)
+    }
+}
+
+/** `digest`: the SHA-256 of a file's whole contents. */
+internal fun digestFile(path: Path): String =
+    io.github.rubixhacker.harness.contract.Sha256.of(Files.readAllBytes(path))
+
+/** `pathlib` spelling of a path under [root]: `/` separators, no leading `./`. */
+internal fun posixRelative(root: Path, path: Path): String =
+    root.relativize(path).toString().replace('\\', '/')
+
+/**
+ * `capture_package_graph`: the generated workspace inventory, its JSON contract, and the Safari
+ * launcher dependency of the two test packages.
+ *
+ * Every path is read back out of the archive, not out of the working tree, so the recorded graph is
+ * the graph the diagnostic captured.
+ */
+internal fun capturePackageGraph(
+    repository: Path,
+    output: Path,
+    files: MutableList<JsonObject>,
+    receipt: MutableMap<String, JsonElement>,
+) {
+    val rootPackage = "build/js/package.json"
+    val packagesRoot = "build/js/packages"
+    val directory = SafariYarnLockHost.sourcePath(repository, packagesRoot)
+    val packages = mutableListOf<Path>()
+    if (Files.isDirectory(directory)) {
+        Files.newDirectoryStream(directory).use { stream ->
+            for (child in stream) {
+                if (packages.size > SafariYarnLockRules.MAX_PACKAGES) break
+                if (Files.exists(child.resolve("package.json"))) {
+                    packages.add(child.resolve("package.json"))
+                }
+            }
+        }
+    }
+    val tooMany = packages.size > SafariYarnLockRules.MAX_PACKAGES
+    val observed = mutableListOf<String>()
+    if (Files.isRegularFile(SafariYarnLockHost.sourcePath(repository, rootPackage))) {
+        observed.add(rootPackage)
+    }
+    observed.addAll(
+        packages.take(SafariYarnLockRules.MAX_PACKAGES)
+            .map { posixRelative(repository, it) }
+            .sortedWith(PackagePathOrder),
+    )
+    receipt["package_inputs_expected"] = JsonArray(
+        SafariYarnLockRules.REQUIRED_PACKAGE_INPUTS.map { JsonPrimitive(it) },
+    )
+    receipt["package_inputs_observed"] = JsonArray(observed.map { JsonPrimitive(it) })
+    receipt["missing_package_inputs"] = JsonArray(
+        SafariYarnLockRules.REQUIRED_PACKAGE_INPUTS.filter { it !in observed }
+            .map { JsonPrimitive(it) },
+    )
+    receipt["unexpected_package_inputs"] = JsonArray(
+        observed.filter { it !in SafariYarnLockRules.REQUIRED_PACKAGE_INPUTS }
+            .map { JsonPrimitive(it) },
+    )
+    receipt["package_count_exceeds_bound"] = JsonPrimitive(tooMany)
+    for (relative in observed) {
+        files.add(SafariYarnLockHost.copyFile(repository, relative, output, "generated"))
+    }
+    val errors = mutableListOf<String>()
+    for (relative in observed) {
+        val archived = output.resolve("generated").resolve(Path.of(relative))
+        val text = try {
+            String(Files.readAllBytes(archived), StandardCharsets.UTF_8)
+        } catch (error: java.io.IOException) {
+            errors.add("invalid JSON: $relative")
+            continue
+        }
+        val value = try {
+            StrictJson.load(text)
+        } catch (error: Exception) {
+            errors.add("invalid JSON: $relative")
+            continue
+        }
+        if (value !is JsonObject) {
+            errors.add("invalid package object: $relative")
+        } else if (relative == rootPackage) {
+            val expectedWorkspaces =
+                SafariYarnLockRules.REQUIRED_PACKAGES.map { "packages/$it" }.toSet()
+            val workspaces = value["workspaces"]
+            val items = (workspaces as? JsonArray)?.map { Py.str(it) }
+            if (Py.str(value["name"]) != "dyn4k" ||
+                workspaces !is JsonArray ||
+                items == null || items.any { it == null } ||
+                items.mapNotNull { it }.toSet() != expectedWorkspaces ||
+                items.size != expectedWorkspaces.size
+            ) {
+                errors.add("root package workspaces differ")
+            }
+        } else if (Py.str(value["name"]) != Path.of(relative).parent?.fileName?.toString()) {
+            errors.add("package name differs: $relative")
+        }
+    }
+    receipt["package_graph_errors"] = JsonArray(errors.map { JsonPrimitive(it) })
+    val configuration = Py.str(receipt["configuration"])
+    if (configuration == "development" || configuration == "production") {
+        for (name in listOf("dyn4k-dyn4k-core-test", "dyn4k-dyn4k-test")) {
+            val path = output.resolve("generated/build/js/packages").resolve(name)
+                .resolve("package.json")
+            val dependency = try {
+                val value = StrictJson.load(
+                    String(Files.readAllBytes(path), StandardCharsets.UTF_8),
+                )
+                Py.str(((value as? JsonObject)?.get("devDependencies") as? JsonObject)
+                    ?.get("karma-safari-launcher"))
+            } catch (error: Exception) {
+                null
+            }
+            if (dependency != "1.0.0") {
+                errors.add("Safari launcher dependency differs: $name")
+            }
+        }
+        receipt["package_graph_errors"] = JsonArray(errors.map { JsonPrimitive(it) })
     }
 }

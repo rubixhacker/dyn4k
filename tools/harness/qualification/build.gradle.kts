@@ -89,6 +89,14 @@ tasks.register<JavaExec>("collectQualification") {
     )
 }
 
+tasks.register<JavaExec>("safariYarnLock") {
+    entryPoint(
+        "io.github.rubixhacker.harness.qualification.SafariCaptureCli",
+        "Captures or audits a Kotlin/JS Yarn lock diagnostic; pass --candidate-sha, --output, " +
+            "and --configuration or --audit.",
+    )
+}
+
 tasks.register<JavaExec>("stageArtifact") {
     entryPoint(
         "io.github.rubixhacker.harness.qualification.ArtifactCli",
