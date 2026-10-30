@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the Kotlin parity fixtures for `warmup_probe.py`, `calibrate.py`, and
+"""Regenerate the Kotlin parity fixtures (requires the deleted Python sources, see commit 9da52538^) for `warmup_probe.py`, `calibrate.py`, and
 `ccd_route_trace.py`.
 
 Provenance
@@ -9,8 +9,9 @@ through `main()` / `capture()` with their host adapters patched (`run_scenario`,
 `compile_harness`, `host_identity`, `git`, `prepare`, `run_capture`, `verify_identity`), so
 every value a test compares was computed by Python code, not transcribed.
 
-The bootstrap intervals use the tool's own draw count (2000) and seed (17017), so the
-recorded pair intervals and noise bound are the numbers `calibrate.py` would produce.
+`calibrate.bootstrap_ratio` is patched to `analyze.bootstrap_ratio` with 20 draws instead of
+2000. That is the same function the tool calls; the smaller draw count only keeps the
+generator fast. The noise bound is calibrate's own arithmetic over those intervals.
 
 `tools/performance` is unchanged at git revision
 `233edd085db9427e7feb19fd150d504b5d43be1b`.
@@ -114,12 +115,16 @@ def warm_text(count, modulo=13, base=1000):
     return "\n".join(lines) + "\n"
 
 
-def captured_error(script, argv):
-    """Runs a CLI with bad arguments and records the message `argparse` reports."""
+def captured_error(prog, script, argv):
+    """Runs a CLI with bad arguments and records the usage block and message `argparse` reports.
+
+    `argv[0]` is the bare program name, which is what a real invocation supplies and what
+    `argparse` derives its `prog` from.
+    """
     stream = io.StringIO()
     with contextlib.redirect_stderr(stream):
         try:
-            with mock.patch.object(sys, "argv", [str(script)] + argv):
+            with mock.patch.object(sys, "argv", [prog] + argv):
                 script.main()
         except SystemExit as exc:
             code = exc.code
@@ -131,25 +136,25 @@ def captured_error(script, argv):
 
 
 out["calibrate_arguments"] = {
-    "short_warmup": captured_error(calibrate, ["--output", str(TEMP / "c1"), "--family", "pile",
+    "short_warmup": captured_error("calibrate.py", calibrate, ["--output", str(TEMP / "c1"), "--family", "pile",
                                                "--variant", "default", "--size", "small",
                                                "--hz", "60", "--warmup-seconds", "10"]),
-    "short_measurement": captured_error(calibrate, ["--output", str(TEMP / "c2"),
+    "short_measurement": captured_error("calibrate.py", calibrate, ["--output", str(TEMP / "c2"),
                                                     "--family", "pile", "--variant", "default",
                                                     "--size", "small", "--hz", "60",
                                                     "--measurement-seconds", "29"]),
-    "unknown_variant": captured_error(calibrate, ["--output", str(TEMP / "c3"),
+    "unknown_variant": captured_error("calibrate.py", calibrate, ["--output", str(TEMP / "c3"),
                                                   "--family", "pile", "--variant", "nope",
                                                   "--size", "small", "--hz", "60"]),
 }
 out["warmup_probe_arguments"] = {
-    "too_short": captured_error(warmup_probe, ["--output", str(TEMP / "w1"), "--family", "pile",
+    "too_short": captured_error("warmup_probe.py", warmup_probe, ["--output", str(TEMP / "w1"), "--family", "pile",
                                                "--variant", "default", "--size", "small",
                                                "--hz", "60", "--warmup-seconds", "119"]),
-    "too_long": captured_error(warmup_probe, ["--output", str(TEMP / "w2"), "--family", "pile",
+    "too_long": captured_error("warmup_probe.py", warmup_probe, ["--output", str(TEMP / "w2"), "--family", "pile",
                                               "--variant", "default", "--size", "small",
                                               "--hz", "60", "--warmup-seconds", "601"]),
-    "unknown_variant": captured_error(warmup_probe, ["--output", str(TEMP / "w3"),
+    "unknown_variant": captured_error("warmup_probe.py", warmup_probe, ["--output", str(TEMP / "w3"),
                                                      "--family", "pile", "--variant", "nope",
                                                      "--size", "small", "--hz", "60"]),
 }
@@ -208,7 +213,9 @@ with mock.patch.object(warmup_probe, "run_scenario", side_effect=warmup_run_scen
             warmup_probe.main()
 out["warmup_probe"] = {
     "report": json.loads((warmup_out / "warmup-probe.json").read_text()),
+    "report_text": (warmup_out / "warmup-probe.json").read_text(),
     "stdout": json.loads(printed.getvalue()),
+    "stdout_text": printed.getvalue(),
     "warmup_csv": WARMUP_TEXT,
     "measured_csv": MEASURED_TEXT,
     "hz": 60,
@@ -272,6 +279,8 @@ out["calibrate_first_pair"] = {
 }
 out["calibrate"] = {
     "report": CALIBRATION,
+    "report_text": (calibrate_out / "calibration.json").read_text(),
+    "stdout_text": printed.getvalue(),
     "pairs": CALIBRATION["unchanged_baseline_pairs"],
     "noise_bound": CALIBRATION["noise_bound"],
     "trials": CALIBRATION["trials"],
@@ -363,7 +372,9 @@ def run_trace(name, traces, identity_texts=None):
     result_file = out_dir / "result.json"
     return {
         "result": json.loads(result_file.read_text()) if result_file.is_file() else None,
+        "result_text": result_file.read_text() if result_file.is_file() else None,
         "stdout": json.loads(printed.getvalue()) if printed.getvalue() else None,
+        "stdout_text": printed.getvalue(),
         "exit_message": exit_message,
         "failure": failure,
     }
