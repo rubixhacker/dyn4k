@@ -14,6 +14,7 @@ kotlin {
 
         jvmMain.dependencies {
             implementation(project(":host"))
+            implementation(project(":numerical"))
         }
 
         commonTest.dependencies {
