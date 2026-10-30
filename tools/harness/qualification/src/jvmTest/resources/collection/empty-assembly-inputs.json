@@ -1,0 +1,338 @@
+{
+  "jvm:Java:minimum:no-optimize": {
+    "archives": {}
+  },
+  "jvm:Java:minimum:default": {
+    "archives": {}
+  },
+  "jvm:Java:current:no-optimize": {
+    "archives": {}
+  },
+  "jvm:Java:current:default": {
+    "archives": {}
+  },
+  "android:Android JVM:minimum:debug": {
+    "archives": {}
+  },
+  "android:Android JVM:minimum:r8-optimized": {
+    "archives": {}
+  },
+  "android:Android JVM:current:debug": {
+    "archives": {}
+  },
+  "android:Android JVM:current:r8-optimized": {
+    "archives": {}
+  },
+  "js:Chromium:minimum:development": {
+    "archives": {}
+  },
+  "js:Chromium:minimum:production": {
+    "archives": {}
+  },
+  "js:Chromium:current:development": {
+    "archives": {}
+  },
+  "js:Chromium:current:production": {
+    "archives": {}
+  },
+  "js:Firefox:minimum:development": {
+    "archives": {}
+  },
+  "js:Firefox:minimum:production": {
+    "archives": {}
+  },
+  "js:Firefox:current:development": {
+    "archives": {}
+  },
+  "js:Firefox:current:production": {
+    "archives": {}
+  },
+  "js:Safari:minimum:development": {
+    "archives": {}
+  },
+  "js:Safari:minimum:production": {
+    "archives": {}
+  },
+  "js:Safari:current:development": {
+    "archives": {}
+  },
+  "js:Safari:current:production": {
+    "archives": {}
+  },
+  "js:Node.js:minimum:development": {
+    "archives": {}
+  },
+  "js:Node.js:minimum:production": {
+    "archives": {}
+  },
+  "js:Node.js:current:development": {
+    "archives": {}
+  },
+  "js:Node.js:current:production": {
+    "archives": {}
+  },
+  "wasmJs:Chromium:minimum:development": {
+    "archives": {}
+  },
+  "wasmJs:Chromium:minimum:production": {
+    "archives": {}
+  },
+  "wasmJs:Chromium:current:development": {
+    "archives": {}
+  },
+  "wasmJs:Chromium:current:production": {
+    "archives": {}
+  },
+  "wasmJs:Firefox:minimum:development": {
+    "archives": {}
+  },
+  "wasmJs:Firefox:minimum:production": {
+    "archives": {}
+  },
+  "wasmJs:Firefox:current:development": {
+    "archives": {}
+  },
+  "wasmJs:Firefox:current:production": {
+    "archives": {}
+  },
+  "wasmJs:Safari:minimum:development": {
+    "archives": {}
+  },
+  "wasmJs:Safari:minimum:production": {
+    "archives": {}
+  },
+  "wasmJs:Safari:current:development": {
+    "archives": {}
+  },
+  "wasmJs:Safari:current:production": {
+    "archives": {}
+  },
+  "wasmJs:Node.js:minimum:development": {
+    "archives": {}
+  },
+  "wasmJs:Node.js:minimum:production": {
+    "archives": {}
+  },
+  "wasmJs:Node.js:current:development": {
+    "archives": {}
+  },
+  "wasmJs:Node.js:current:production": {
+    "archives": {}
+  },
+  "wasmWasi:Node.js:minimum:development": {
+    "archives": {}
+  },
+  "wasmWasi:Node.js:minimum:production": {
+    "archives": {}
+  },
+  "wasmWasi:Node.js:current:development": {
+    "archives": {}
+  },
+  "wasmWasi:Node.js:current:production": {
+    "archives": {}
+  },
+  "wasmWasi:Wasmtime:minimum:development": {
+    "archives": {}
+  },
+  "wasmWasi:Wasmtime:minimum:production": {
+    "archives": {}
+  },
+  "wasmWasi:Wasmtime:current:development": {
+    "archives": {}
+  },
+  "wasmWasi:Wasmtime:current:production": {
+    "archives": {}
+  },
+  "linuxX64:Linux x64:minimum:debug-g": {
+    "archives": {}
+  },
+  "linuxX64:Linux x64:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "linuxX64:Linux x64:current:debug-g": {
+    "archives": {}
+  },
+  "linuxX64:Linux x64:current:optimized-opt": {
+    "archives": {}
+  },
+  "linuxArm64:Linux ARM64:minimum:debug-g": {
+    "archives": {}
+  },
+  "linuxArm64:Linux ARM64:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "linuxArm64:Linux ARM64:current:debug-g": {
+    "archives": {}
+  },
+  "linuxArm64:Linux ARM64:current:optimized-opt": {
+    "archives": {}
+  },
+  "mingwX64:Windows x64:minimum:debug-g": {
+    "archives": {}
+  },
+  "mingwX64:Windows x64:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "mingwX64:Windows x64:current:debug-g": {
+    "archives": {}
+  },
+  "mingwX64:Windows x64:current:optimized-opt": {
+    "archives": {}
+  },
+  "macosArm64:macOS ARM64:minimum:debug-g": {
+    "archives": {}
+  },
+  "macosArm64:macOS ARM64:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "macosArm64:macOS ARM64:current:debug-g": {
+    "archives": {}
+  },
+  "macosArm64:macOS ARM64:current:optimized-opt": {
+    "archives": {}
+  },
+  "iosArm64:iOS physical ARM64:minimum:debug-g": {
+    "archives": {}
+  },
+  "iosArm64:iOS physical ARM64:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "iosArm64:iOS physical ARM64:current:debug-g": {
+    "archives": {}
+  },
+  "iosArm64:iOS physical ARM64:current:optimized-opt": {
+    "archives": {}
+  },
+  "iosSimulatorArm64:iOS simulator ARM64:minimum:debug-g": {
+    "archives": {}
+  },
+  "iosSimulatorArm64:iOS simulator ARM64:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "iosSimulatorArm64:iOS simulator ARM64:current:debug-g": {
+    "archives": {}
+  },
+  "iosSimulatorArm64:iOS simulator ARM64:current:optimized-opt": {
+    "archives": {}
+  },
+  "iosX64:iOS simulator x64:minimum:debug-g": {
+    "archives": {}
+  },
+  "iosX64:iOS simulator x64:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "iosX64:iOS simulator x64:current:debug-g": {
+    "archives": {}
+  },
+  "iosX64:iOS simulator x64:current:optimized-opt": {
+    "archives": {}
+  },
+  "tvosArm64:tvOS physical ARM64:minimum:debug-g": {
+    "archives": {}
+  },
+  "tvosArm64:tvOS physical ARM64:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "tvosArm64:tvOS physical ARM64:current:debug-g": {
+    "archives": {}
+  },
+  "tvosArm64:tvOS physical ARM64:current:optimized-opt": {
+    "archives": {}
+  },
+  "tvosSimulatorArm64:tvOS simulator ARM64:minimum:debug-g": {
+    "archives": {}
+  },
+  "tvosSimulatorArm64:tvOS simulator ARM64:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "tvosSimulatorArm64:tvOS simulator ARM64:current:debug-g": {
+    "archives": {}
+  },
+  "tvosSimulatorArm64:tvOS simulator ARM64:current:optimized-opt": {
+    "archives": {}
+  },
+  "watchosArm64:watchOS physical ILP32:minimum:debug-g": {
+    "archives": {}
+  },
+  "watchosArm64:watchOS physical ILP32:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "watchosArm64:watchOS physical ILP32:current:debug-g": {
+    "archives": {}
+  },
+  "watchosArm64:watchOS physical ILP32:current:optimized-opt": {
+    "archives": {}
+  },
+  "watchosDeviceArm64:watchOS physical LP64:minimum:debug-g": {
+    "archives": {}
+  },
+  "watchosDeviceArm64:watchOS physical LP64:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "watchosDeviceArm64:watchOS physical LP64:current:debug-g": {
+    "archives": {}
+  },
+  "watchosDeviceArm64:watchOS physical LP64:current:optimized-opt": {
+    "archives": {}
+  },
+  "watchosSimulatorArm64:watchOS simulator ARM64:minimum:debug-g": {
+    "archives": {}
+  },
+  "watchosSimulatorArm64:watchOS simulator ARM64:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "watchosSimulatorArm64:watchOS simulator ARM64:current:debug-g": {
+    "archives": {}
+  },
+  "watchosSimulatorArm64:watchOS simulator ARM64:current:optimized-opt": {
+    "archives": {}
+  },
+  "androidNativeArm32:Android Native armeabi-v7a:minimum:debug-g": {
+    "archives": {}
+  },
+  "androidNativeArm32:Android Native armeabi-v7a:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "androidNativeArm32:Android Native armeabi-v7a:current:debug-g": {
+    "archives": {}
+  },
+  "androidNativeArm32:Android Native armeabi-v7a:current:optimized-opt": {
+    "archives": {}
+  },
+  "androidNativeArm64:Android Native arm64-v8a:minimum:debug-g": {
+    "archives": {}
+  },
+  "androidNativeArm64:Android Native arm64-v8a:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "androidNativeArm64:Android Native arm64-v8a:current:debug-g": {
+    "archives": {}
+  },
+  "androidNativeArm64:Android Native arm64-v8a:current:optimized-opt": {
+    "archives": {}
+  },
+  "androidNativeX86:Android Native x86:minimum:debug-g": {
+    "archives": {}
+  },
+  "androidNativeX86:Android Native x86:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "androidNativeX86:Android Native x86:current:debug-g": {
+    "archives": {}
+  },
+  "androidNativeX86:Android Native x86:current:optimized-opt": {
+    "archives": {}
+  },
+  "androidNativeX64:Android Native x86_64:minimum:debug-g": {
+    "archives": {}
+  },
+  "androidNativeX64:Android Native x86_64:minimum:optimized-opt": {
+    "archives": {}
+  },
+  "androidNativeX64:Android Native x86_64:current:debug-g": {
+    "archives": {}
+  },
+  "androidNativeX64:Android Native x86_64:current:optimized-opt": {
+    "archives": {}
+  }
+}

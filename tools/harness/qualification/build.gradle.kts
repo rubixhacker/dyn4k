@@ -75,6 +75,13 @@ tasks.register<JavaExec>("hostedProbe") {
     )
 }
 
+tasks.register<JavaExec>("collectQualification") {
+    entryPoint(
+        "io.github.rubixhacker.harness.qualification.CollectionCli",
+        "Collects, verifies, or ingests the 112-lane producer artifacts; pass --repository, --candidate-sha, --artifacts-dir, and --output with --verify or --audit-input-dir.",
+    )
+}
+
 tasks.register<JavaExec>("stageArtifact") {
     entryPoint(
         "io.github.rubixhacker.harness.qualification.ArtifactCli",

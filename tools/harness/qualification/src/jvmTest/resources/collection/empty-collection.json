@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "candidate_sha": "73154a028c592a8a25e901c63638a4ad3f8f9faf",
+  "source_tree": "0b6bd5655d7884112a65e1455ec74b140f0bc7db",
+  "required_lanes": 112,
+  "artifacts": [],
+  "missing_artifacts": [
+    "duplicate-provider",
+    "full-ci",
+    "full-common",
+    "publication-ubuntu"
+  ],
+  "independent_signature": "MISSING",
+  "status": "NOT_RUN",
+  "reason": "signed external audit and complete gate routes are absent",
+  "external_inputs_required": [
+    "all 112 exact-source common gate archives and runtime identities",
+    "independently audited archive digests and 21-target artifact hashes",
+    "complete candidate manifest bound to a verified staged audit",
+    "exact staged repository bytes available to the public qualifier",
+    "detached Ed25519 audit signature and pinned trusted public-key fingerprint"
+  ]
+}
