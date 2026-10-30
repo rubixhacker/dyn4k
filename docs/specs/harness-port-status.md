@@ -104,6 +104,24 @@ equivalent and must be reproduced before the suite can retire:
 `test_full_hosted.py` import for target tuples the recorded archives do not cover, so it cannot be
 deleted before either those two suites retire or the builder is extracted into its own module.
 
+### `safari_yarn_lock.py` — 27 of 124 cases ported
+
+The pure contract and the POSIX host half are ported (`SafariYarnLockRules.kt`,
+`SafariYarnLockHost.kt`, `SafariYarnLockContract`, 9 tests covering 27 of the 124 reference cases):
+every constant, the hosted task markers, the capture timeout and overflow predicates, the
+`full_hosted_command` forms, the lock-failure signature, the bounded source read/copy, the candidate
+gate, and the process runner's 600-second deadline with truncation accounting.
+
+97 cases remain, in five groups: the yarn-lock comparison and capture receipt (~40), the
+`CONTEXT_*` karma-context enumeration (~12), the package graph (~10), the process-runner
+permutations (~10), Windows-only machinery (~10, no JVM equivalent: job objects, suspended creation,
+`CreateFileW` share modes), and the CRLF/generated-shape fixtures (3).
+
+Two divergences recorded now: `runLockTask(windows = true)` fails closed with an explicit message
+rather than pretending to lock, and the port replaces the three Python paths in `HOSTED_SOURCE_INPUTS`
+with the Kotlin tools that implement the same behaviour, so an archived `source_input_sha256` map from
+the Python diagnostic will not match the Kotlin one.
+
 ### Parity gap: descriptor anchoring
 
 The reference opens directories with `dir_fd` plus `O_NOFOLLOW` and compares `fstat` of held
