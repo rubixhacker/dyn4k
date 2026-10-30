@@ -138,6 +138,12 @@ object PublicationBundle {
 
 /** `publication.main`. */
 object PublicationCli {
+    /** Entry point of the `packagePublication` task. */
+    @JvmStatic
+    fun main(arguments: Array<String>) {
+        System.exit(run(arguments))
+    }
+
     fun run(arguments: Array<String>, repository: Path? = null): Int {
         var action: String? = null
         var candidateSha: String? = null

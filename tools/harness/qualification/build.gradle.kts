@@ -25,6 +25,16 @@ kotlin {
 
 val jvmMain = kotlin.jvm().compilations.getByName("main")
 
+/** Argument and working-directory plumbing shared by the ported command line entry points. */
+fun JavaExec.entryPoint(main: String, description: String) {
+    group = "verification"
+    this.description = description
+    dependsOn(tasks.named("jvmJar"))
+    classpath = files(jvmMain.output.allOutputs, jvmMain.runtimeDependencyFiles)
+    mainClass.set(main)
+    workingDir = rootDir.parentFile.parentFile
+}
+
 tasks.register<JavaExec>("guardHostedRunners") {
     group = "verification"
     description = "Checks active workflows for forbidden hosted macOS runner labels."
@@ -32,4 +42,25 @@ tasks.register<JavaExec>("guardHostedRunners") {
     classpath = files(jvmMain.output.allOutputs, jvmMain.runtimeDependencyFiles)
     mainClass.set("io.github.rubixhacker.harness.qualification.GuardHostedRunnersCliKt")
     args(rootDir.parentFile.parentFile.absolutePath)
+}
+
+tasks.register<JavaExec>("stagePublication") {
+    entryPoint(
+        "io.github.rubixhacker.harness.qualification.StageCli",
+        "Runs the staging publication tasks and writes the receipt; pass --candidate-sha, --target, --output, --console.",
+    )
+}
+
+tasks.register<JavaExec>("packagePublication") {
+    entryPoint(
+        "io.github.rubixhacker.harness.qualification.PublicationCli",
+        "Packages an audited staging tree into a publication bundle, or verifies one; pass package|verify with its options.",
+    )
+}
+
+tasks.register<JavaExec>("executePlan") {
+    entryPoint(
+        "io.github.rubixhacker.harness.qualification.ExecutionCli",
+        "Runs a lane execution plan and records the evidence; pass --candidate-sha, --plan, --output.",
+    )
 }

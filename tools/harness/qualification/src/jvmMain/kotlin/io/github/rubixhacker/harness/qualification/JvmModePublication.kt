@@ -21,47 +21,11 @@ fun interface ArchiveDigest {
 /**
  * Archive digest over a stable directory tree.
  *
- * The value is the one `independent_gates.archive_digest` records: the canonical digest of
- * `[{path, sha256, mtime_ns}]` over every file, sorted by path. The reference also re-verifies
- * directory and file identities around each read to detect a concurrent writer; that
- * race-detection layer is not ported here and is listed as remaining work.
+ * The value is the one `independent_gates.archive_digest` records, and the scan applies the
+ * reference's identity checks (see [ArchiveScan] for the one check the JVM cannot reproduce).
  */
 object StableTreeDigest : ArchiveDigest {
-    override fun digest(archive: Path): String {
-        if (!archive.isAbsolute || ".." in archive.toString().split('/') || !Files.isDirectory(archive)) {
-            throw IllegalArgumentException("archive path is absent or relative: $archive")
-        }
-        val files = mutableListOf<Path>()
-        Files.walk(archive).use { stream ->
-            for (path in stream) {
-                if (path == archive) continue
-                if (Files.isSymbolicLink(path)) {
-                    throw IllegalArgumentException("archive entry is not a regular file: $path")
-                }
-                if (Files.isRegularFile(path)) files.add(path)
-            }
-        }
-        val records = files.map { path ->
-            JsonObject(
-                linkedMapOf(
-                    "path" to JsonPrimitive(archive.relativize(path).toString().replace('\\', '/')),
-                    "sha256" to JsonPrimitive(Fs.digest(path)),
-                    "mtime_ns" to JsonPrimitive(
-                        Files.getLastModifiedTime(path).to(TimeUnit.NANOSECONDS),
-                    ),
-                ),
-            )
-        }.sortedWith { left, right ->
-            CanonicalText.compare(
-                (left["path"] as JsonPrimitive).content,
-                (right["path"] as JsonPrimitive).content,
-            )
-        }
-        if (records.none { (it["path"] as JsonPrimitive).content == "receipt.json" }) {
-            throw IllegalArgumentException("raw receipt is absent")
-        }
-        return Sha256.ofCanonical(JsonArray(records))
-    }
+    override fun digest(archive: Path): String = ArchiveScan.digest(archive)
 }
 
 /** Runs the public compiler-mode replay that proves both JVM modes publish separate JARs. */

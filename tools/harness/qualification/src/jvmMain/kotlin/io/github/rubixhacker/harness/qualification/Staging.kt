@@ -64,6 +64,12 @@ object Staging {
 
 /** `stage.main`: the command line of the staging task. */
 object StageCli {
+    /** Entry point of the `stagePublication` task. */
+    @JvmStatic
+    fun main(arguments: Array<String>) {
+        System.exit(run(arguments))
+    }
+
     fun run(arguments: Array<String>, repository: Path? = null): Int {
         var candidateSha: String? = null
         val targets = mutableListOf<String>()

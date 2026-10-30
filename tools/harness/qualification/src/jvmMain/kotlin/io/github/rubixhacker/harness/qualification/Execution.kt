@@ -104,6 +104,12 @@ object Execution {
 
 /** `qualify.main` action `execute`: validates the plan and reports whether every lane ran. */
 object ExecutionCli {
+    /** Entry point of the `executePlan` task. */
+    @JvmStatic
+    fun main(arguments: Array<String>) {
+        System.exit(run(arguments))
+    }
+
     fun run(arguments: Array<String>): Int {
         var candidateSha: String? = null
         var plan: Path? = null
