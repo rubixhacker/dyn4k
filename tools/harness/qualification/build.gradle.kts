@@ -15,6 +15,8 @@ kotlin {
         jvmMain.dependencies {
             implementation(project(":host"))
             implementation(project(":numerical"))
+            // `full_hosted` writes and reads PAX transport archives with nanosecond timestamps.
+            implementation("org.apache.commons:commons-compress:1.28.0")
         }
 
         commonTest.dependencies {
