@@ -63,6 +63,62 @@ object FullKlibConsumerUnavailable : FullKlibConsumerPort {
     override fun archiveDigest(archive: Path): String = ArchiveScan.digest(archive)
 }
 
+/**
+ * `full_klib_consumer.contract`: the approved manifest and its 2,523 portable selected cases.
+ *
+ * Manifest validation only, so it is ported for real; the replay stays a named seam.
+ */
+object FullKlibContract {
+    fun load(repository: Path, laneId: String): Pair<JsonObject, JsonObject> {
+        val manifest = IndependentGates.loadApprovedManifest(repository)
+        val selected = IndependentGates.consumerContract(manifest, laneId)
+        val cases = selected["cases"] as JsonArray
+        val objects = cases.map { it as JsonObject }
+        val identities = objects.mapNotNull { Py.str(it["id"]) }
+        val core = objects.count { Py.str(it["module"]) == "dyn4k-core" }
+        val facade = objects.count { Py.str(it["module"]) == "dyn4k" }
+        if (cases.size != 2523 || identities.toSet().size != 2523 || core != 2465 ||
+            facade != 58 || objects.any { Py.str(it["scope"]) != "portable" }
+        ) {
+            throw IllegalArgumentException("approved portable selected method contract differs")
+        }
+        return manifest to selected
+    }
+
+    /** `staged_binary(staging, module, variant)`: one staged KLIB artifact path. */
+    fun stagedBinary(staging: Path, module: String, variant: String): Path =
+        staging.resolve("io/github/rubixhacker").resolve("$module-$variant")
+            .resolve("0.1.0-alpha.1").resolve("$module-$variant-0.1.0-alpha.1.klib")
+}
+
+/** The retained-evidence consumer: the contract is real, the replay is the named seam. */
+object RetainedKlibConsumer : FullKlibConsumerPort {
+    override val modules: List<String> = FullKlibAdapterRules.MODULES
+    override val localLanes: Set<String> = FullKlibAdapterRules.LOCAL_LANES
+
+    override fun contract(repository: Path, laneId: String): Pair<JsonObject?, JsonObject> {
+        val (manifest, selected) = FullKlibContract.load(repository, laneId)
+        return manifest to selected
+    }
+
+    override fun verify(
+        root: Path,
+        repository: Path,
+        candidateSha: String,
+        laneId: String,
+        hashes: JsonObject,
+        runtime: String,
+        archiveDigest: String,
+        trusted: JsonObject,
+        replayNode: String?,
+    ): JsonObject = FullKlibConsumerUnavailable.verify(
+        root, repository, candidateSha, laneId, hashes, runtime, archiveDigest, trusted,
+        replayNode,
+    )
+
+    override fun archiveDigest(archive: Path): String = ArchiveScan.digest(archive)
+}
+
 /** `subprocess.run(command, env=environment, stderr=STDOUT, text=True)`. */
 fun interface KlibToolRunner {
     fun output(command: List<String>, environment: Map<String, String>): String

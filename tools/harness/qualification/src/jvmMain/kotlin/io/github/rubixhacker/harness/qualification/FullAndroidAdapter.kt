@@ -1,6 +1,5 @@
 package io.github.rubixhacker.harness.qualification
 
-import java.nio.file.Files
 import java.nio.file.Path
 import io.github.rubixhacker.harness.contract.Sha256
 import kotlinx.serialization.json.JsonArray
@@ -173,4 +172,55 @@ object FullAndroidAdapter {
         }
         return public
     }
+}
+
+/**
+ * `full_android_consumer.approved_cases`: the approved manifest and its 2,523 portable cases.
+ *
+ * This is the one Android-consumer helper the adapter needs before the archive replay, and it is
+ * pure manifest validation, so it is ported for real. The replay itself stays a named seam.
+ */
+object FullAndroidApprovedCases {
+    fun load(checkout: Path): Pair<JsonObject, List<JsonObject>> {
+        val manifest = IndependentGates.loadApprovedManifest(checkout)
+        FullSuiteManifest.validateManifest(manifest, checkout)
+        val cases = ((manifest["cases"] as? JsonArray) ?: JsonArray(emptyList()))
+            .mapNotNull { it as? JsonObject }
+            .filter { Py.str(it["scope"]) == "portable" }
+        val identities = cases.mapNotNull { Py.str(it["id"]) }
+        if (cases.size != 2523 || identities.toSet().size != cases.size) {
+            throw IllegalArgumentException("approved portable case set differs")
+        }
+        return manifest to cases
+    }
+}
+
+/** The retained-evidence consumer: the approved cases are real, the replay is the named seam. */
+object RetainedAndroidConsumer : FullAndroidConsumerPort {
+    override val modules: List<String> = FullAndroidAdapterRules.MODULES
+
+    override fun approvedCases(repository: Path): Pair<JsonObject, List<JsonObject>> =
+        FullAndroidApprovedCases.load(repository)
+
+    override fun originalSourceHashes(repository: Path): JsonObject =
+        FullAndroidConsumerUnavailable.originalSourceHashes(repository)
+
+    override fun sourceAndToolchain(repository: Path, prepared: JsonObject): JsonElement =
+        FullAndroidConsumerUnavailable.sourceAndToolchain(repository, prepared)
+
+    override fun verifyArchive(
+        repository: Path,
+        archive: Path,
+        archiveDigest: String,
+        core: String,
+        facade: String,
+        runtime: String,
+    ): JsonObject = FullAndroidConsumerUnavailable.verifyArchive(
+        repository,
+        archive,
+        archiveDigest,
+        core,
+        facade,
+        runtime,
+    )
 }

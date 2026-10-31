@@ -20,6 +20,7 @@ import full_browser_adapter as browser  # noqa: E402
 import full_browser_consumer  # noqa: E402
 import full_klib_adapter as klib  # noqa: E402
 import full_klib_consumer  # noqa: E402
+import full_staged_consumer  # noqa: E402
 
 TARGET = (ROOT / "tools/harness/qualification/src/jvmTest/kotlin/io/github/rubixhacker/harness"
           / "qualification/FullAdapterVectors.kt")
@@ -82,6 +83,13 @@ def main():
     for key in sorted(klib.NATIVE_KEYS):
         add("        " + kotlin(key) + ",")
     add("    )")
+    add()
+    add("    const val STAGED_CLASS = " + kotlin(full_staged_consumer.CLASS))
+    add("    const val STAGED_LANE = " + kotlin(full_staged_consumer.LANE))
+    add("    const val STAGED_VERSION = " + kotlin(full_staged_consumer.VERSION))
+    add("    const val STAGED_GROUP = " + kotlin(full_staged_consumer.GROUP))
+    add("    val STAGED_MODULES = listOf("
+        + ", ".join(kotlin(m) for m in full_staged_consumer.MODULES) + ")")
     add("}")
     TARGET.write_text("\n".join(lines) + "\n")
     print(f"wrote {TARGET} at {revision()}")

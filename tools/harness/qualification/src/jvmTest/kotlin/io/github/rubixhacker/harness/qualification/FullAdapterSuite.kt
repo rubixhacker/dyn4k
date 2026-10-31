@@ -500,5 +500,15 @@ val FullAdapterRulesSuite by testSuite {
         assertEquals(vector.KLIB_LOCAL_LANES, FullKlibAdapterRules.LOCAL_LANES)
         assertEquals(vector.KLIB_TOOLCHAIN_KEYS, FullKlibAdapterRules.TOOLCHAIN_KEYS)
         assertEquals(vector.KLIB_NATIVE_KEYS, FullKlibAdapterRules.NATIVE_KEYS)
+        assertEquals(vector.STAGED_CLASS, FullStagedConsumerRules.CLASS)
+        assertEquals(vector.STAGED_LANE, FullStagedConsumerRules.LANE)
+        assertEquals(vector.STAGED_VERSION, FullStagedConsumerRules.VERSION)
+        assertEquals(vector.STAGED_GROUP, FullStagedConsumerRules.GROUP)
+        assertEquals(vector.STAGED_MODULES, FullStagedConsumerRules.MODULES)
+        assertEquals(
+            "dyn4k-core/src/commonTest/kotlin/org/dyn4j/geometry/" +
+                "Vector2NormalizationParityTest.kt",
+            FullStagedConsumerRules.SOURCE,
+        )
     }
 }

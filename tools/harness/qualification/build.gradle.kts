@@ -89,6 +89,14 @@ tasks.register<JavaExec>("collectQualification") {
     )
 }
 
+tasks.register<JavaExec>("fullStagedConsumer") {
+    entryPoint(
+        "io.github.rubixhacker.harness.qualification.FullStagedConsumerCli",
+        "Runs or verifies the bounded original-source JVM consumer; pass run|verify with " +
+            "--repository and the two independent expected artifact hashes.",
+    )
+}
+
 tasks.register<JavaExec>("independentGates") {
     entryPoint(
         "io.github.rubixhacker.harness.qualification.IndependentGatesCli",

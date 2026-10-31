@@ -2,7 +2,7 @@
 package io.github.rubixhacker.harness.qualification
 
 internal object FullAdapterVectors {
-    const val REVISION = "0bd90145f756b5d05f9e484e73547b49427a2970"
+    const val REVISION = "4a6968e71ed3135babbcabfcee6625d5b76379ae"
 
     val ANDROID_MODULES = listOf("dyn4k-core", "dyn4k")
     val ANDROID_ROUTES = mapOf(
@@ -88,4 +88,10 @@ internal object FullAdapterVectors {
         "home",
         "version",
     )
+
+    const val STAGED_CLASS = "org.dyn4j.geometry.Vector2NormalizationParityTest"
+    const val STAGED_LANE = "jvm:Java:current:default"
+    const val STAGED_VERSION = "0.1.0-alpha.1"
+    const val STAGED_GROUP = "io.github.rubixhacker"
+    val STAGED_MODULES = listOf("dyn4k-core", "dyn4k")
 }
