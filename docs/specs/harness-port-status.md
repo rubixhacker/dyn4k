@@ -26,7 +26,7 @@ cd tools/harness && ../../gradlew checkAll
 | --- | --- | --- | --- |
 | `:core` | `qualify.py` contract: matrix, digests, canonical JSON, publication metadata, provider check | ported | 27 |
 | `:host` | `qualify.digest(path)`, `qualify.require_clean_checkout` | ported | 7 |
-| `:qualification` | `guard_hosted_runners.py` (**Python deleted**), `qualify.py` archives/audits/evaluation/CLI actions, `stage.py`, `publication.py`, `artifact.py`, `collection.py` (38 of 44 functions; the six Windows handle helpers are not portable), `full_hosted.py` (all but `run`), `hosted.py`, `safari_reporter.py`, `safari_yarn_lock.py` (all 124 methods), `independent_gates` (most verifiers), `independent_linux_observer` (verification half), `full_corpus.py`, `full_suite_manifest.py`, `duplicate_provider.py` | partial | 681 |
+| `:qualification` | `guard_hosted_runners.py` (**Python deleted**), `qualify.py` archives/audits/evaluation/CLI actions, `stage.py`, `publication.py`, `artifact.py`, `collection.py` (38 of 44 functions; the six Windows handle helpers are not portable), `full_hosted.py` (all but `run`), `hosted.py`, `safari_reporter.py`, `safari_yarn_lock.py` (all 124 methods), `independent_gates` (aggregation, review and full_ci gates; four Python-harness bodies fail closed), `independent_linux_observer` (verification half), `full_corpus.py`, `full_suite_manifest.py`, `duplicate_provider.py` | partial | 681 |
 | `:compatibility` | `world_ci`, `governing_*`, `candidate_coverage`, `method_coverage`, `java_corpus`, `execution_probe`, `full_ci`, `exception_ci`, `ledger`, `module_probe`; `BaselineOracle` now delegates to `:baseline` instead of duplicating the three `javap` readers | partial | 51 |
 | `:performance` | `manifest`, `analyze`, `measure`, `candidate_*`, `sustained_archive`, `reference_study`, `host_capacity_control`, `stress_monitor`, `warmup_probe` (**Python deleted**), `calibrate` (**Python deleted**), `ccd_route_trace` | partial | 181 |
 | `:numerical` | `portable/cases.py`; `portable/receipt.py`; `portable/exact_consistency.py`; `portable/orthogonality.py`; `portable/physical.py` (`nominal_free`, `audit_physical`, sleep/wake, phases); `numeric_class_witness.read_witness`; `compare.py` (`compare`, `audit_reference`, `load_receipt`, `load_fixture`, the whole `compare_value` engine, `check_counts`, `check_snapshot`); `candidate/nominal_zero.py`; `weld_pulley_quality.py` (engine, phases, `atan`/`pi` enclosures, `Decimal`-at-80 rendering); `portable/rotation_oracle.py` (encoding, digest and manifest helpers only) | partial | 91 |
@@ -71,6 +71,37 @@ produced them.
 Harness total at the last full run: 1180 tests, 0 failures, across `:core`, `:host`,
 `:compatibility`, `:performance`, `:qualification`, `:numerical`, `:android`, `:migration` and
 `:baseline`.
+
+### `independent_gates.py` — aggregation ported, four bodies fail closed
+
+`GatesAggregate.kt` (with `IndependentGatesCli` and the `independentGates` Gradle task) now ports
+`_independent_review`, `_java_full_ci` (it re-binds every raw artifact and then runs the reviewed
+`full_ci.py` verifier at its pinned revision), `evaluate_gate`, `evaluate`, `evaluate_assembly`, and
+`main`. `_prospective_checker_binding` was already `GatesProspective.checkerBinding` and
+`_bounded_bundle` was already `IndependentGates.boundedBundle`, so neither was re-ported.
+
+Four bodies still drive Python-only harnesses and return `NOT_RUN` with the harness named rather than a
+fabricated verdict: `_migration_journeys` (the Python `journeys`/`validate_plain`/`validate_scene`
+drivers), `_numerical_entries` (the Python `compare`/`physical` replay engine),
+`_performance_resource` (the Python `verify_candidate_archive` verifier), and
+`_evaluate_signed_full_consumer` with `_browser_consumption_witness` (the Python
+`full_signed_routes`/`full_browser_consumer` verifiers). `_verify_p2_host`,
+`verify_pending_prospective_bridge`, and `verify_prospective_case_subgates` are not ported either:
+the last two are pure validation except for `_verify_p2_host` (which imports `prospective_compare`)
+and the `prospective_compare` rule replay inside `verify_prospective_case_subgates`.
+
+Two pre-existing port bugs surfaced and were fixed by the new review case: `IndependentGates.binding`
+and `externalUnavailable` compared `receipt["lane"] != null`, which a JSON `null` satisfies (it is
+`JsonNull`, not Kotlin `null`), so an approved global gate with a null lane was rejected as
+"raw lane differs". The reference's `is not None` treats JSON null as absent.
+
+Porting the aggregation does **not** free `artifact.py`. `grep` for importers of
+`independent_gates.py` finds 18 non-test modules, including `duplicate_provider.py`,
+`qualify.py:602`, `independent_adapter.py`, `independent_audit_producer.py`, `linux_observed_klib.py`,
+`full_signed_routes.py`, and every `full_*_consumer.py`/`full_*_adapter.py`. Its remaining workflow
+steps are `.github/workflows/qualification.yml:444` (the reviewed full_ci replay test) and `:978`
+(`python3 tools/qualification/independent_gates.py …`), plus
+`qualification-source-checks.yml:140` (`-m unittest -v test_independent_gates`).
 
 ### What still blocks the three qualification deletions
 
@@ -204,6 +235,32 @@ workspace inventory by path parts (as `pathlib` does), not by path text. The con
 materialises one directory's entries before descending into it, so it holds no descriptor across the
 recursion; the reference keeps the `scandir` iterator open while it recurses. Both record the same
 entries in readdir order, and neither promises an order.
+
+### Why `artifact.py` cannot be freed through `independent_gates.py`
+
+`independent_gates.py` is the last Python module that imports `artifact`, so the plan was to finish it and
+delete it. Measured on 2026-10-30, that does not work yet: the module has **29 Python importers**, of
+which 16 are non-test modules —
+
+`duplicate_provider`, `full_android_adapter`, `full_android_consumer`, `full_android_native_consumer`,
+`full_apple_device_consumer`, `full_browser_adapter`, `full_browser_consumer`, `full_jvm_consumer`,
+`full_klib_adapter`, `full_klib_consumer`, `full_native_host_consumer`, `full_signed_routes`,
+`full_staged_consumer`, `full_wasm_node_consumer`, `independent_audit_producer`, `linux_observed_klib`
+
+— plus `qualify.py`, `independent_adapter.py` and every `full_*` consumer. So the order is: port the
+`full_*` consumers and `qualify.py`, then `independent_gates.py`, and only then `artifact.py` and
+`full_hosted.py`.
+
+The aggregation half of `independent_gates.py` is ported (`evaluate_gate`, `evaluate`, `evaluate_assembly`,
+`main` as `:qualification:independentGates`, `_independent_review`, `_java_full_ci`). Six gate bodies are
+**not** ported and report `NOT_RUN` naming the missing harness rather than a fabricated pass:
+`_verify_p2_host`, `verify_pending_prospective_bridge`, `verify_prospective_case_subgates`,
+`_migration_journeys`, `_numerical_entries`, `_performance_resource`, `_evaluate_signed_full_consumer`,
+`_browser_consumption_witness`.
+
+The port pass also fixed two real defects it found: `IndependentGates.binding` and `externalUnavailable`
+compared `receipt["lane"] != null`, but a JSON `null` parses to `JsonNull`, which is not Kotlin `null`, so
+an approved **global** gate with a null lane was rejected as "raw lane differs".
 
 ### Parity gap: descriptor anchoring
 
