@@ -29,7 +29,10 @@ kotlin {
 val jvmMain = kotlin.jvm().compilations.getByName("main")
 
 /** Argument and working-directory plumbing shared by the ported command line entry points. */
-fun JavaExec.entryPoint(main: String, description: String) {
+fun JavaExec.entryPoint(
+    main: String,
+    description: String,
+) {
     group = "verification"
     this.description = description
     dependsOn(tasks.named("jvmJar"))

@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues />
+  <CurrentIssues>
+    <ID>DestructuringDeclarationWithTooManyEntries:TruckTimeline.kt$TruckTimeline$(key, down, up, duration)</ID>
+    <ID>DestructuringDeclarationWithTooManyEntries:TruckTimeline.kt$TruckTimeline$(position, down, move, up)</ID>
+    <ID>SwallowedException:SceneValidation.kt$SceneValidation$error: MigrationFailure</ID>
+    <ID>SwallowedException:SceneValidation.kt$SceneValidation$error: NoSuchElementException</ID>
+    <ID>SwallowedException:SceneValidation.kt$SceneValidation$error: PyIndexError</ID>
+    <ID>SwallowedException:SceneValidation.kt$SceneValidation$error: PyKeyError</ID>
+    <ID>SwallowedException:SceneValidation.kt$SceneValidation$error: PyTypeError</ID>
+  </CurrentIssues>
+</SmellBaseline>

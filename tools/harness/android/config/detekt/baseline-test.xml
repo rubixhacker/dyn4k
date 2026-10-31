@@ -1,0 +1,7 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>NoNameShadowing:NativeReceiptSuite.kt$artifacts</ID>
+  </CurrentIssues>
+</SmellBaseline>

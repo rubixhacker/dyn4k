@@ -1,0 +1,15 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MatchingDeclarationName:Compare.kt$CompareReport</ID>
+    <ID>NoNameShadowing:Execute.kt$source</ID>
+    <ID>RethrowCaughtException:Host.kt$throw error</ID>
+    <ID>SwallowedException:Compare.kt$error: CommandFailure</ID>
+    <ID>SwallowedException:Compare.kt$error: IOException</ID>
+    <ID>SwallowedException:Compare.kt$error: IllegalArgumentException</ID>
+    <ID>SwallowedException:Execute.kt$error: IllegalArgumentException</ID>
+    <ID>SwallowedException:Sources.kt$error: IOException</ID>
+    <ID>UnreachableCatchBlock:BaselineCli.kt$BaselineCli$catch (error: kotlinx.serialization.SerializationException) { err.println(error.message) 1 }</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -39,7 +39,10 @@ val jvmMain = kotlin.jvm().compilations.getByName("main")
 // Argument and working-directory plumbing shared by the ported command line entry points.
 // The working directory is the repository root, because the tools read
 // `docs/research/performance-manifest-v1.json` and `tools/performance/*.java` relative to it.
-fun JavaExec.entryPoint(main: String, description: String) {
+fun JavaExec.entryPoint(
+    main: String,
+    description: String,
+) {
     group = "verification"
     this.description = description
     dependsOn(tasks.named("jvmJar"))

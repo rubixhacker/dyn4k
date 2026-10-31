@@ -1,0 +1,43 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>InstanceOfCheckForException:Adverse.kt$Adverse$failure is IllegalArgumentException</ID>
+    <ID>InstanceOfCheckForException:Adverse.kt$Adverse$failure is IllegalStateException</ID>
+    <ID>InstanceOfCheckForException:Adverse.kt$Adverse$failure is IndexOutOfBoundsException</ID>
+    <ID>InstanceOfCheckForException:Adverse.kt$Adverse$failure is NoSuchElementException</ID>
+    <ID>InstanceOfCheckForException:Adverse.kt$Adverse$failure is java.io.IOException</ID>
+    <ID>InstanceOfCheckForException:FullHost.kt$FullHost$failure !is IllegalArgumentException</ID>
+    <ID>InstanceOfCheckForException:FullHost.kt$FullHost$failure !is IllegalStateException</ID>
+    <ID>InstanceOfCheckForException:FullHost.kt$FullHost$failure !is java.io.IOException</ID>
+    <ID>InstanceOfCheckForException:LaneHost.kt$LaneHost$failure !is IllegalArgumentException</ID>
+    <ID>InstanceOfCheckForException:LaneHost.kt$LaneHost$failure !is IllegalStateException</ID>
+    <ID>InstanceOfCheckForException:NativeFullHost.kt$NativeFullHost$error !is IllegalArgumentException</ID>
+    <ID>InstanceOfCheckForException:NativeFullHost.kt$NativeFullHost$error !is IllegalStateException</ID>
+    <ID>InstanceOfCheckForException:NativeFullHost.kt$NativeFullHost$error !is IndexOutOfBoundsException</ID>
+    <ID>InstanceOfCheckForException:NativeFullHost.kt$NativeFullHost$error !is NoSuchElementException</ID>
+    <ID>InstanceOfCheckForException:NativeFullHost.kt$NativeFullHost$error !is java.io.IOException</ID>
+    <ID>InstanceOfCheckForException:OptimizedHost.kt$OptimizedHost$failure !is IllegalArgumentException</ID>
+    <ID>InstanceOfCheckForException:OptimizedHost.kt$OptimizedHost$failure !is IllegalStateException</ID>
+    <ID>InstanceOfCheckForException:OptimizedHost.kt$OptimizedHost$failure !is java.io.IOException</ID>
+    <ID>MemberNameEqualsClassName:Prepare.kt$Prepare$fun prepare(root: Path, rootBuildLog: Path): JsonObject</ID>
+    <ID>NoNameShadowing:LaneHost.kt$LaneHost$buildType</ID>
+    <ID>NoNameShadowing:LaneHost.kt$LaneHost$flavor</ID>
+    <ID>TooGenericExceptionCaught:Adverse.kt$Adverse$failure: Exception</ID>
+    <ID>TooGenericExceptionCaught:FullHost.kt$FullHost$failure: Exception</ID>
+    <ID>TooGenericExceptionCaught:LaneHost.kt$LaneHost$failure: Exception</ID>
+    <ID>TooGenericExceptionCaught:NativeFullHost.kt$NativeFullHost$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:OptimizedHost.kt$OptimizedHost$failure: Exception</ID>
+    <ID>UnsafeCallOnNullableType:LaneHost.kt$LaneHost$selection.devicePath!!</ID>
+    <ID>UnsafeCallOnNullableType:LaneHost.kt$LaneHost$selection.selectionPath!!</ID>
+    <ID>UnsafeCallOnNullableType:LaneHost.kt$LaneHost$selection.selectionText!!</ID>
+    <ID>UnusedParameter:NativeFullHost.kt$NativeFullHost$root: Path</ID>
+    <ID>UnusedPrivateMember:Adverse.kt$Adverse$private fun withEntry(objectValue: JsonObject, key: String, value: JsonElement): JsonObject</ID>
+    <ID>UnusedPrivateMember:Adverse.kt$Adverse$private fun withEntry(objectValue: JsonObject, key: String, value: String): JsonObject</ID>
+    <ID>UseCheckOrError:Adverse.kt$Adverse$throw IllegalStateException("adverse control was accepted: $name")</ID>
+    <ID>UseCheckOrError:AndroidFiles.kt$AndroidFiles$throw IllegalStateException("javac failed: $text")</ID>
+    <ID>UseCheckOrError:BuildIdentityFiles.kt$JvmBuildHost$throw IllegalStateException("command failed: $binary -version: $output$error")</ID>
+    <ID>UseCheckOrError:LaneHost.kt$LaneHost$throw IllegalStateException( "command failed ($code): ${args.joinToString(" ")}: ${text.takeLast(1200)}", )</ID>
+    <ID>UseOrEmpty:AndroidFiles.kt$AndroidFiles$System.getenv("JAVA_HOME") ?: ""</ID>
+  </CurrentIssues>
+</SmellBaseline>

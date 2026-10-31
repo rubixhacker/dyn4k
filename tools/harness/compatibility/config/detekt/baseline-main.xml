@@ -1,0 +1,12 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>SwallowedException:LedgerHost.kt$LedgerHost$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:FullCiHost.kt$FullCiHost$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:LedgerHost.kt$LedgerHost$error: Exception</ID>
+    <ID>UnusedParameter:Probes.kt$ModuleProbe$environment: Map&lt;String, String&gt;? = null</ID>
+    <ID>UseCheckOrError:Host.kt$Processes$throw IllegalStateException( "command ${command.joinToString(" ")} failed: ${result.stderr.trim()}", )</ID>
+    <ID>UseOrEmpty:Probes.kt$ModuleProbe$runResult?.stdout ?: ""</ID>
+  </CurrentIssues>
+</SmellBaseline>

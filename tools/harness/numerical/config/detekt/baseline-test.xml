@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>HasPlatformType:WeldPulleyQualitySuite.kt$QualityScenario$val root = Files.createTempDirectory("weld-pulley")</ID>
+    <ID>MayBeConst:CompareSuite.kt$private val FIXTURE_CATALOG = "tools/numerical/fixtures.json"</ID>
+    <ID>VarCouldBeVal:CompareSuite.kt$var outcome = result()</ID>
+  </CurrentIssues>
+</SmellBaseline>

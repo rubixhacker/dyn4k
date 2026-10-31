@@ -1,0 +1,407 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>InstanceOfCheckForException:CollectionCli.kt$CollectionCli$error !is ClassCastException</ID>
+    <ID>InstanceOfCheckForException:CollectionCli.kt$CollectionCli$error !is IllegalArgumentException</ID>
+    <ID>InstanceOfCheckForException:CollectionCli.kt$CollectionCli$error !is NoSuchElementException</ID>
+    <ID>InstanceOfCheckForException:CollectionCli.kt$CollectionCli$error !is java.io.IOException</ID>
+    <ID>InstanceOfCheckForException:QualificationCli.kt$QualificationCli$error !is ClassCastException</ID>
+    <ID>InstanceOfCheckForException:QualificationCli.kt$QualificationCli$error !is IllegalArgumentException</ID>
+    <ID>InstanceOfCheckForException:QualificationCli.kt$QualificationCli$error !is NoSuchElementException</ID>
+    <ID>InstanceOfCheckForException:QualificationCli.kt$QualificationCli$error !is java.io.IOException</ID>
+    <ID>MayBeConst:FullHosted.kt$FullHosted$val SAFARI_DIAGNOSTIC_CLASS = "org.dyn4j.collision.narrowphase.WindowsCollisionIntermediateDiagnosticTest"</ID>
+    <ID>NoNameShadowing:ArchiveScan.kt$ArchiveScan$current</ID>
+    <ID>NoNameShadowing:FullStagedConsumer.kt$FullStagedConsumer$raw</ID>
+    <ID>RethrowCaughtException:SafariReporterHost.kt$SafariReporterHost$throw error</ID>
+    <ID>SpreadOperator:SafariReporterHost.kt$SafariReporterHost$(path, options, *attributes)</ID>
+    <ID>SwallowedException:ArchiveScan.kt$ArchiveScan$error: IOException</ID>
+    <ID>SwallowedException:ArchiveScan.kt$ArchiveScan$error: IllegalArgumentException</ID>
+    <ID>SwallowedException:ArchiveScan.kt$ArchiveScan$error: UnsupportedOperationException</ID>
+    <ID>SwallowedException:CandidateSource.kt$CandidateSource$error: IOException</ID>
+    <ID>SwallowedException:CollectionRuntime.kt$CollectionRuntime$error2: IllegalArgumentException</ID>
+    <ID>SwallowedException:CollectionRuntime.kt$CollectionRuntime$error: Exception</ID>
+    <ID>SwallowedException:CollectionRuntime.kt$CollectionRuntime$error: IOException</ID>
+    <ID>SwallowedException:CollectionRuntime.kt$CollectionRuntime$error: IllegalArgumentException</ID>
+    <ID>SwallowedException:CollectionRuntime.kt$CollectionRuntime$error: NoSuchFileException</ID>
+    <ID>SwallowedException:FullBrowserAdapter.kt$FullBrowserAdapter$error: IOException</ID>
+    <ID>SwallowedException:FullHostedRuntime.kt$FullHostedRuntime$error: Exception</ID>
+    <ID>SwallowedException:FullHostedRuntime.kt$FullHostedRuntime$error: HostedXmlError</ID>
+    <ID>SwallowedException:FullHostedRuntime.kt$FullHostedRuntime$error: IOException</ID>
+    <ID>SwallowedException:FullHostedRuntime.kt$FullHostedRuntime$error: NoSuchFileException</ID>
+    <ID>SwallowedException:FullHostedRuntime.kt$FullHostedRuntime$error: java.nio.file.FileAlreadyExistsException</ID>
+    <ID>SwallowedException:FullHostedRuntime.kt$FullHostedRuntime$error: java.nio.file.NotDirectoryException</ID>
+    <ID>SwallowedException:FullKlibAdapter.kt$DefaultKlibToolRunner$error: IOException</ID>
+    <ID>SwallowedException:FullStagedConsumer.kt$FullStagedConsumer$error: Exception</ID>
+    <ID>SwallowedException:FullStagedConsumer.kt$FullStagedConsumer$error: IOException</ID>
+    <ID>SwallowedException:GateGit.kt$GateSource$error: GitObjectMissing</ID>
+    <ID>SwallowedException:GateGit.kt$GateSource$error: IOException</ID>
+    <ID>SwallowedException:GatesAggregate.kt$GatesAggregate$error: Exception</ID>
+    <ID>SwallowedException:HostedHost.kt$DefaultHostEnvironment$error: IOException</ID>
+    <ID>SwallowedException:HostedHost.kt$HostedHost$error: IOException</ID>
+    <ID>SwallowedException:LinuxObserver.kt$LinuxObserver$error: IOException</ID>
+    <ID>SwallowedException:LinuxObserver.kt$LinuxObserver$error: RuntimeException</ID>
+    <ID>SwallowedException:LinuxObserver.kt$ObserverEventLog$error: IOException</ID>
+    <ID>SwallowedException:PomContract.kt$PomContract$error: ParserConfigurationException</ID>
+    <ID>SwallowedException:PomContract.kt$PomContract$error: SAXException</ID>
+    <ID>SwallowedException:ProbeRunner.kt$ProbeRunner$error: IOException</ID>
+    <ID>SwallowedException:QualificationCli.kt$QualificationCli$error: Exception</ID>
+    <ID>SwallowedException:SafariCapture.kt$SafariCapture$error: Exception</ID>
+    <ID>SwallowedException:SafariCapture.kt$SafariCapture$error: NotDirectoryException</ID>
+    <ID>SwallowedException:SafariReporterHost.kt$SafariReporterHost$error: Exception</ID>
+    <ID>SwallowedException:SafariReporterHost.kt$SafariReporterHost$error: IOException</ID>
+    <ID>SwallowedException:SafariReporterHost.kt$SafariReporterHost$error: IllegalArgumentException</ID>
+    <ID>SwallowedException:SafariReporterHost.kt$SafariReporterHost$error: NoSuchFileException</ID>
+    <ID>SwallowedException:SafariWindowsFile.kt$PosixWindowsFileKernel$error: IOException</ID>
+    <ID>SwallowedException:SafariWindowsProcess.kt$SafariWindowsProcess$error: Exception</ID>
+    <ID>SwallowedException:SafariWindowsProcess.kt$SafariWindowsProcess$error: IOException</ID>
+    <ID>SwallowedException:SafariYarnLockHost.kt$DefaultSafariPosixGroup$error: java.io.IOException</ID>
+    <ID>SwallowedException:SafariYarnLockHost.kt$SafariYarnLockHost$error: SafariNoSuchProcess</ID>
+    <ID>SwallowedException:SafariYarnLockHost.kt$SafariYarnLockHost.Sink$error: java.io.IOException</ID>
+    <ID>SwallowedException:SafariYarnLockHost.kt$error: Exception</ID>
+    <ID>SwallowedException:SafariYarnLockHost.kt$error: java.io.IOException</ID>
+    <ID>SwallowedException:StagingAudit.kt$StageReceipt$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:ArtifactCapture.kt$ArtifactCapture$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:ArtifactCli.kt$ArtifactCli$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:CollectionCli.kt$CollectionCli$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:CollectionRuntime.kt$CollectionRuntime$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:CollectionRuntime.kt$CollectionRuntime$secondary: Exception</ID>
+    <ID>TooGenericExceptionCaught:CorpusReports.kt$CorpusReports$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:CorpusVerification.kt$CorpusVerification$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:DuplicateProvider.kt$DuplicateProviderCli$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:Execution.kt$Execution$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:FullHostedCli.kt$FullHostedCli$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:FullHostedRun.kt$FullHostedRun$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:FullHostedRuntime.kt$FullHostedRuntime$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:FullHostedRuntime.kt$FullHostedRuntime$retention: Exception</ID>
+    <ID>TooGenericExceptionCaught:FullStagedConsumer.kt$FullStagedConsumer$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:GatesAggregate.kt$GatesAggregate$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:GuardHostedRunnersCli.kt$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:LinuxObserver.kt$LinuxObserver$error: RuntimeException</ID>
+    <ID>TooGenericExceptionCaught:ProbeRunner.kt$ProbeRunner$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:QualificationCli.kt$QualificationCli$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:SafariCapture.kt$SafariCapture$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:SafariCapture.kt$SafariCapture$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:SafariCaptureCli.kt$SafariCaptureCli$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:SafariReporterHost.kt$SafariReporterHost$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:SafariReporterHost.kt$SafariReporterHost$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:SafariWindowsFile.kt$LockedDirectory$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:SafariWindowsFile.kt$LockedDirectory.Companion$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:SafariWindowsProcess.kt$SafariWindowsProcess$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:SafariWindowsProcess.kt$SafariWindowsProcess$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:SafariYarnLockHost.kt$SafariYarnLockHost$error: Throwable</ID>
+    <ID>TooGenericExceptionCaught:SafariYarnLockHost.kt$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:StagingAudit.kt$StageReceipt$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:StagingAudit.kt$StagingAudit$error: Exception</ID>
+    <ID>UnnecessaryNotNullOperator:ArtifactCapture.kt$ArtifactCapture$nonpassStatus!!</ID>
+    <ID>UnnecessaryNotNullOperator:ArtifactCapture.kt$ArtifactCapture$route!!</ID>
+    <ID>UnnecessaryNotNullOperator:ArtifactCapture.kt$ArtifactCapture$target!!</ID>
+    <ID>UnnecessaryNotNullOperator:FullBrowserAdapter.kt$FullBrowserAdapter$archiveDigest!!</ID>
+    <ID>UnnecessaryNotNullOperator:FullHostedRuntime.kt$FullHostedRuntime$consumerManifest!!</ID>
+    <ID>UnnecessaryNotNullOperator:FullHostedRuntime.kt$FullHostedRuntime$manifest!!</ID>
+    <ID>UnnecessaryNotNullOperator:FullHostedRuntime.kt$FullHostedRuntime$modulesProvenance!!</ID>
+    <ID>UnnecessaryNotNullOperator:FullHostedRuntime.kt$FullHostedRuntime$target!!</ID>
+    <ID>UnnecessaryNotNullOperator:FullKlibAdapter.kt$FullKlibAdapter$digest!!</ID>
+    <ID>UnnecessaryNotNullOperator:LinuxObserver.kt$LinuxObserver$digest!!</ID>
+    <ID>UnnecessarySafeCall:SafariCapture.kt$SafariCapture$configuration?.let { JsonPrimitive(it) }</ID>
+    <ID>UnreachableCatchBlock:ArchiveContract.kt$ArchiveContract$catch (_: ZipException) { throw IllegalArgumentException("archive has duplicate entries or a corrupt member") }</ID>
+    <ID>UnreachableCatchBlock:GatesAggregate.kt$GatesAggregate$catch (error: ObservationError) { return failure(gate, error.message, repository) }</ID>
+    <ID>UnsafeCallOnNullableType:ArtifactBundle.kt$ArtifactBundle$Py.str(group["id"])!!</ID>
+    <ID>UnsafeCallOnNullableType:ArtifactBundle.kt$ArtifactBundle$Py.str(group["report_pattern"])!!</ID>
+    <ID>UnsafeCallOnNullableType:ArtifactCapture.kt$ArtifactCapture$Py.str(item["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:ArtifactCapture.kt$ArtifactCapture$counts["reported"]!!</ID>
+    <ID>UnsafeCallOnNullableType:ArtifactCapture.kt$ArtifactCapture$counts["selected"]!!</ID>
+    <ID>UnsafeCallOnNullableType:ArtifactCapture.kt$ArtifactCapture$nonpassStatus!!</ID>
+    <ID>UnsafeCallOnNullableType:ArtifactCapture.kt$ArtifactCapture$route!!</ID>
+    <ID>UnsafeCallOnNullableType:ArtifactCapture.kt$ArtifactCapture$target!!</ID>
+    <ID>UnsafeCallOnNullableType:ArtifactCapture.kt$ArtifactCapture$top!!</ID>
+    <ID>UnsafeCallOnNullableType:CollectionRuntime.kt$CollectionRuntime$Py.str(item["frozen"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CollectionRuntime.kt$CollectionRuntime$Py.str(origin["name"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CollectionRuntime.kt$CollectionRuntime$Py.str(origin["repository"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CollectionRuntime.kt$CollectionRuntime$Py.str(pin["format"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CollectionRuntime.kt$CollectionRuntime$Py.str(report["source_tree"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CollectionRuntime.kt$CollectionRuntime$Py.str(source["id"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CollectionRuntime.kt$CollectionRuntime$artifact["size_in_bytes"]!!</ID>
+    <ID>UnsafeCallOnNullableType:CollectionRuntime.kt$CollectionRuntime$origin["api_size_in_bytes"]!!</ID>
+    <ID>UnsafeCallOnNullableType:CollectionRuntime.kt$CollectionRuntime$origin["artifact_id"]!!</ID>
+    <ID>UnsafeCallOnNullableType:CollectionRuntime.kt$CollectionRuntime$origin["run_attempt"]!!</ID>
+    <ID>UnsafeCallOnNullableType:CollectionRuntime.kt$CollectionRuntime$origin["run_id"]!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusFiles.kt$CorpusFiles$Py.str(image["executable_path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusFiles.kt$CorpusFiles$Py.str(left["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusFiles.kt$CorpusFiles$Py.str(request["execPath"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusFiles.kt$CorpusFiles$Py.str(right["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusFiles.kt$CorpusFiles$Py.str(row["original_case"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusFiles.kt$CorpusFiles$Py.str(row["original_identity"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusFiles.kt$CorpusFiles$Py.str(row["portable_case"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusReports.kt$CorpusReports$Py.str((element as JsonObject)["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusReports.kt$CorpusReports$Py.str((element as JsonObject)["payload_path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusReports.kt$CorpusReports$Py.str((it as JsonObject)["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusReports.kt$CorpusReports$Py.str(it["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusReports.kt$CorpusReports$Py.str(row["payload_path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusReports.kt$CorpusReports$Py.str(row["request_name"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusVerification.kt$CorpusVerification$Py.str(row["executable_path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:CorpusVerification.kt$CorpusVerification$Py.str(row["requested_exec_path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:Execution.kt$Execution$unavailable!!</ID>
+    <ID>UnsafeCallOnNullableType:FullAndroidAdapter.kt$FullAndroidAdapter$archiveDigest!!</ID>
+    <ID>UnsafeCallOnNullableType:FullAndroidAdapter.kt$FullAndroidAdapter$runtime!!</ID>
+    <ID>UnsafeCallOnNullableType:FullBrowserAdapter.kt$FullBrowserAdapter$Py.str(toolchain["browser"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullBrowserAdapter.kt$FullBrowserAdapter$Py.str(toolchain["browser_sha256"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullBrowserAdapter.kt$FullBrowserAdapter$Py.str(toolchain["gradle"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullBrowserAdapter.kt$FullBrowserAdapter$Py.str(toolchain["gradle_sha256"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullBrowserAdapter.kt$FullBrowserAdapter$Py.str(toolchain["java_home"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullBrowserAdapter.kt$FullBrowserAdapter$Py.str(toolchain["java_sha256"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullBrowserAdapter.kt$FullBrowserAdapter$archiveDigest!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRun.kt$FullHostedRun$Py.str( (((lane["safari_karma_configs"] as JsonObject) .getValue("consumer") as JsonObject)["input_path"]), )!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRun.kt$FullHostedRun$Py.str( ((lane["safari_karma_configs"] as JsonObject).getValue(module) as JsonObject)["input_path"], )!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRun.kt$FullHostedRun$Py.str(item["file"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRun.kt$FullHostedRun$Py.str(lane["invocation_id"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRun.kt$FullHostedRun$Py.str(source["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRun.kt$FullHostedRun$item["size"]!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str((element as JsonObject)["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(checked.reports[index]["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(consumerChecked.reports[index]["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(group["report_pattern"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(item["module"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(lane["configuration"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(product["archive_path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(product["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(receipt["candidate_sha"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(receipt["gradle_user_home"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(receipt["staging_repository"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(receipt["target"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(selected["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$Py.str(source["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$buildRoot!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$compiler["size"]!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$configuration!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$consumerManifest!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$graph["components"]!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$karma["size"]!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$last!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$manifest!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$modulesProvenance!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$name!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$observedRuntime!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$process!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$selectedInput!!</ID>
+    <ID>UnsafeCallOnNullableType:FullHostedRuntime.kt$FullHostedRuntime$target!!</ID>
+    <ID>UnsafeCallOnNullableType:FullKlibAdapter.kt$FullKlibAdapter$Py.str(trusted["gradle_user_home"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullKlibAdapter.kt$FullKlibAdapter$Py.str(trusted["gradle_version"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullKlibAdapter.kt$FullKlibAdapter$Py.str(trusted["java_version"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullKlibAdapter.kt$FullKlibAdapter$digest!!</ID>
+    <ID>UnsafeCallOnNullableType:FullKlibAdapter.kt$FullKlibAdapter$runtime!!</ID>
+    <ID>UnsafeCallOnNullableType:FullStagedConsumer.kt$FullStagedConsumer$Py.str(graphProcess["stdout"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullStagedConsumer.kt$FullStagedConsumer$Py.str(item["file"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullStagedConsumer.kt$FullStagedConsumer$Py.str(item["name"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullStagedConsumer.kt$FullStagedConsumer$Py.str(receipt["consumer_xml"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullStagedConsumer.kt$FullStagedConsumer$Py.str(test["stdout"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullStagedConsumer.kt$FullStagedConsumer$graphProcess["exit_code"]!!</ID>
+    <ID>UnsafeCallOnNullableType:FullStagedConsumer.kt$FullStagedConsumer$graphProcess["started_ns"]!!</ID>
+    <ID>UnsafeCallOnNullableType:FullStagedConsumer.kt$FullStagedConsumer$test["exit_code"]!!</ID>
+    <ID>UnsafeCallOnNullableType:FullStagedConsumer.kt$FullStagedConsumer$test["finished_ns"]!!</ID>
+    <ID>UnsafeCallOnNullableType:FullStagedConsumer.kt$FullStagedConsumer$test["started_ns"]!!</ID>
+    <ID>UnsafeCallOnNullableType:FullSuiteManifest.kt$FullSuiteManifest$Py.str(case["classname"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullSuiteManifest.kt$FullSuiteManifest$Py.str(case["method"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullSuiteManifest.kt$FullSuiteManifest$Py.str(case["module"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullSuiteManifest.kt$FullSuiteManifest$Py.str(corpus["source_tree_sha256"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullSuiteManifest.kt$FullSuiteManifest$Py.str(left["id"])!!</ID>
+    <ID>UnsafeCallOnNullableType:FullSuiteManifest.kt$FullSuiteManifest$Py.str(right["id"])!!</ID>
+    <ID>UnsafeCallOnNullableType:GatesAggregate.kt$GatesAggregate$IndependentGates.consumerContract(suite, laneId)["cases"]!!</ID>
+    <ID>UnsafeCallOnNullableType:GatesAggregate.kt$GatesAggregate$Py.str(element)!!</ID>
+    <ID>UnsafeCallOnNullableType:GatesAggregate.kt$GatesAggregate$Py.str(value)!!</ID>
+    <ID>UnsafeCallOnNullableType:GatesAggregate.kt$GatesAggregate$process["exit_code"]!!</ID>
+    <ID>UnsafeCallOnNullableType:GatesAggregate.kt$GatesAggregate$relative!!</ID>
+    <ID>UnsafeCallOnNullableType:GatesNumerical.kt$GatesNumerical$Py.str(row["id"])!!</ID>
+    <ID>UnsafeCallOnNullableType:GatesNumerical.kt$GatesNumerical$Py.str(value["executable"])!!</ID>
+    <ID>UnsafeCallOnNullableType:GatesNumerical.kt$GatesNumerical$Py.str(value["version"])!!</ID>
+    <ID>UnsafeCallOnNullableType:GatesProspective.kt$GatesProspective$Py.str(identity["candidate_commit"])!!</ID>
+    <ID>UnsafeCallOnNullableType:GatesProspective.kt$GatesProspective$Py.str(identity["case_id"])!!</ID>
+    <ID>UnsafeCallOnNullableType:GatesProspective.kt$GatesProspective$gitPath!!</ID>
+    <ID>UnsafeCallOnNullableType:IndependentGates.kt$IndependentGates$Py.str((element as JsonObject)["id"])!!</ID>
+    <ID>UnsafeCallOnNullableType:IndependentGates.kt$IndependentGates$Py.str((left as JsonObject)["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:IndependentGates.kt$IndependentGates$Py.str((right as JsonObject)["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:IndependentGates.kt$IndependentGates$Py.str(binaries[module])!!</ID>
+    <ID>UnsafeCallOnNullableType:IndependentGates.kt$IndependentGates$Py.str(element)!!</ID>
+    <ID>UnsafeCallOnNullableType:IndependentGates.kt$IndependentGates$Py.str(group!!["report_pattern"])!!</ID>
+    <ID>UnsafeCallOnNullableType:IndependentGates.kt$IndependentGates$Py.str(item["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:IndependentGates.kt$IndependentGates$Py.str(lane["target"])!!</ID>
+    <ID>UnsafeCallOnNullableType:IndependentGates.kt$IndependentGates$Py.str(sha)!!</ID>
+    <ID>UnsafeCallOnNullableType:IndependentGates.kt$IndependentGates$Py.str(value)!!</ID>
+    <ID>UnsafeCallOnNullableType:IndependentGates.kt$IndependentGates$relative!!</ID>
+    <ID>UnsafeCallOnNullableType:JvmModePublication.kt$JvmModePublication$candidateSha!!</ID>
+    <ID>UnsafeCallOnNullableType:LinuxObserver.kt$LinuxObserver$Py.str(left["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:LinuxObserver.kt$LinuxObserver$Py.str(right["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:LinuxObserver.kt$LinuxObserver$digest!!</ID>
+    <ID>UnsafeCallOnNullableType:ProbeRunner.kt$ProbeRunner$manifest!!</ID>
+    <ID>UnsafeCallOnNullableType:PublicationBundle.kt$PublicationBundle$Py.str(audit["candidate_sha"])!!</ID>
+    <ID>UnsafeCallOnNullableType:PublicationBundle.kt$PublicationBundle$Py.str(entry["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:QualificationCli.kt$QualificationCli$Py.str(result["id"])!!</ID>
+    <ID>UnsafeCallOnNullableType:QualificationCli.kt$QualificationCli$Py.str(scoped["target"])!!</ID>
+    <ID>UnsafeCallOnNullableType:SafariCapture.kt$SafariCapture$Py.str(item["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:SafariCapture.kt$SafariCapture$Py.str(item["sha256"])!!</ID>
+    <ID>UnsafeCallOnNullableType:SafariCapture.kt$SafariCapture$Py.str(item["source_path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:SafariCapture.kt$SafariCapture$Py.str(receipt["invocation_id"])!!</ID>
+    <ID>UnsafeCallOnNullableType:SafariCapture.kt$SafariCapture$bodyFailure!!</ID>
+    <ID>UnsafeCallOnNullableType:SafariCapture.kt$SafariCapture$execution["exit_code"]!!</ID>
+    <ID>UnsafeCallOnNullableType:SafariCapture.kt$SafariCapture$process!!</ID>
+    <ID>UnsafeCallOnNullableType:SafariCapture.kt$SafariCapture$process["stderr_bytes_seen"]!!</ID>
+    <ID>UnsafeCallOnNullableType:SafariCapture.kt$SafariCapture$process["stdout_bytes_seen"]!!</ID>
+    <ID>UnsafeCallOnNullableType:SafariCapture.kt$SafariCapture$record["retained_size"]!!</ID>
+    <ID>UnsafeCallOnNullableType:SafariWindowsProcess.kt$SafariWindowsProcess$job!!</ID>
+    <ID>UnsafeCallOnNullableType:StagingAudit.kt$StagingAudit$Py.str(data["candidate_sha"])!!</ID>
+    <ID>UnsafeCallOnNullableType:StagingAudit.kt$StagingAudit$Py.str(entry["path"])!!</ID>
+    <ID>UnsafeCallOnNullableType:StagingAudit.kt$StagingAudit$Py.str(sha)!!</ID>
+    <ID>UnsafeCallOnNullableType:StagingAudit.kt$StagingAudit$Py.str(value)!!</ID>
+    <ID>UnsafeCallOnNullableType:SuiteBindings.kt$SuiteBindings$Py.str(it)!!</ID>
+    <ID>UnusedParameter:Execution.kt$Execution$candidateSha: String</ID>
+    <ID>UnusedParameter:FullHostedRuntime.kt$FullHostedRuntime$namespace: String</ID>
+    <ID>UnusedParameter:FullHostedRuntime.kt$FullHostedRuntime$pathTarget: String = target</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$candidateSha: String</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$expectedArtifactHashes: JsonElement?</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$expectedDigest: String?</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$family: String</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$gate: String</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$hashes: JsonElement?</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$laneId: String</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$physicalOnly: Boolean</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$prospectiveScope: JsonElement?</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$receipt: JsonObject</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$repository: Path</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$repository: Path?</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$root: Path</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$runtime: JsonElement?</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$scope: JsonElement?</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$signedLane: JsonElement?</ID>
+    <ID>UnusedParameter:GatesAggregate.kt$GatesAggregate$trustedKey: String?</ID>
+    <ID>UnusedParameter:GatesPhysical.kt$GatesPhysical$candidateSha: String</ID>
+    <ID>UnusedParameter:GatesPhysical.kt$GatesPhysical$expectedArtifactHashes: Map&lt;String, String&gt;</ID>
+    <ID>UnusedParameter:GatesProspective.kt$GatesProspective$payload: JsonElement</ID>
+    <ID>UnusedParameter:GatesProspective.kt$GatesProspective.RotationOracleModule$artifactBytes: ByteArray</ID>
+    <ID>UnusedParameter:GatesProspective.kt$GatesProspective.RotationOracleModule$audit: JsonElement?</ID>
+    <ID>UnusedParameter:GatesProspective.kt$GatesProspective.RotationOracleModule$binding: JsonElement?</ID>
+    <ID>UnusedParameter:GatesProspective.kt$GatesProspective.RotationOracleModule$case: JsonObject</ID>
+    <ID>UnusedParameter:GatesProspective.kt$GatesProspective.RotationOracleModule$header: JsonObject</ID>
+    <ID>UnusedParameter:GatesProspective.kt$GatesProspective.RotationOracleModule$payloadBytes: ByteArray</ID>
+    <ID>UnusedParameter:GatesProspective.kt$GatesProspective.RotationOracleModule$receiptBytes: ByteArray</ID>
+    <ID>UnusedParameter:GatesProspective.kt$GatesProspective.RotationOracleModule$rotationCap: JsonElement?</ID>
+    <ID>UnusedParameter:GatesProspective.kt$GatesProspective.RotationOracleModule$sourceBytes: ByteArray</ID>
+    <ID>UnusedParameter:GatesProspective.kt$GatesProspective.RotationOracleModule$states: Map&lt;Long, JsonElement&gt;</ID>
+    <ID>UnusedParameter:GatesProspective.kt$GatesProspective.RotationOracleModule$traceBytes: ByteArray</ID>
+    <ID>UnusedParameter:SafariReporterHost.kt$SafariReporterHost$anchor: Path</ID>
+    <ID>UnusedParameter:SafariWindowsProcess.kt$SafariWindowsProcess$flags: Int</ID>
+    <ID>UnusedParameter:StagingAudit.kt$StagingAudit$selected: Set&lt;String&gt;</ID>
+    <ID>UnusedPrivateMember:GatesAggregate.kt$GatesAggregate$private fun gitBytes(repository: Path, arguments: List&lt;String&gt;): ByteArray</ID>
+    <ID>UnusedPrivateProperty:CandidateSource.kt$CandidateSource$private val SOURCE_SUFFIXES = setOf(".kt", ".java")</ID>
+    <ID>UnusedPrivateProperty:CollectionRuntime.kt$CollectionRuntime$private const val MAX_EXPANDED_BYTES = 20L * 1024 * 1024 * 1024</ID>
+    <ID>UnusedPrivateProperty:CollectionRuntime.kt$CollectionRuntime$private const val MAX_MEMBERS = 200_000</ID>
+    <ID>UnusedPrivateProperty:CollectionRuntime.kt$CollectionRuntime$val char = text[index]</ID>
+    <ID>UnusedPrivateProperty:CorpusFiles.kt$CorpusFiles$step</ID>
+    <ID>UnusedPrivateProperty:FullHostedRun.kt$FullHostedRun$private const val STAGE_TASK = ":dyn4k-core:publishKotlinMultiplatformPublicationToStagingRepository"</ID>
+    <ID>UnusedPrivateProperty:FullStagedConsumer.kt$FullStagedConsumer$private const val IDENTITY = "jvm:Java:current:default"</ID>
+    <ID>UseCheckOrError:GateGit.kt$GateSource$throw IllegalStateException( "the checkout holding tools/qualification is not reachable from the working directory", )</ID>
+    <ID>UseIsNullOrEmpty:StagingAudit.kt$StageReceipt$targets == null || targets.isEmpty()</ID>
+    <ID>UseOrEmpty:ArtifactCapture.kt$ArtifactCapture$Py.str(it) ?: ""</ID>
+    <ID>UseOrEmpty:ArtifactCapture.kt$ArtifactCapture$Py.str(left["path"]) ?: ""</ID>
+    <ID>UseOrEmpty:ArtifactCapture.kt$ArtifactCapture$Py.str(right["path"]) ?: ""</ID>
+    <ID>UseOrEmpty:ArtifactCapture.kt$ArtifactCapture$host.environment("ImageOS") ?: ""</ID>
+    <ID>UseOrEmpty:ArtifactCapture.kt$ArtifactCapture$host.environment("ImageVersion") ?: ""</ID>
+    <ID>UseOrEmpty:ArtifactCapture.kt$ArtifactCapture$target ?: ""</ID>
+    <ID>UseOrEmpty:ArtifactCapture.kt$ArtifactCapture$values["ID"] ?: ""</ID>
+    <ID>UseOrEmpty:ArtifactCapture.kt$ArtifactCapture$values["VERSION_ID"] ?: ""</ID>
+    <ID>UseOrEmpty:CollectionRuntime.kt$CollectionRuntime$Py.str(origin["path"]) ?: ""</ID>
+    <ID>UseOrEmpty:CollectionRuntime.kt$CollectionRuntime$Py.str(run["path"]) ?: ""</ID>
+    <ID>UseOrEmpty:CollectionRuntime.kt$CollectionRuntime$Py.str(selected) ?: ""</ID>
+    <ID>UseOrEmpty:CollectionRuntime.kt$CollectionRuntime$error.message ?: ""</ID>
+    <ID>UseOrEmpty:CollectionRuntime.kt$CollectionRuntime$githubToken ?: ""</ID>
+    <ID>UseOrEmpty:CollectionRuntime.kt$CollectionRuntime$performanceKeySha256 ?: ""</ID>
+    <ID>UseOrEmpty:CollectionRuntime.kt$CollectionRuntime$trustedKeySha256 ?: ""</ID>
+    <ID>UseOrEmpty:CorpusFiles.kt$CorpusFiles$Py.str(it) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusFiles.kt$CorpusFiles$Py.str(request["nonce"]) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusFiles.kt$CorpusFiles$Py.str(row["owner"]) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusReports.kt$CorpusReports$Py.str(binding["log"]) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusReports.kt$CorpusReports$Py.str(binding["node_observation_dir"]) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusReports.kt$CorpusReports$Py.str(it) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusReports.kt$CorpusReports$Py.str(item["original"]) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusReports.kt$CorpusReports$Py.str(item["original_source"]) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusReports.kt$CorpusReports$Py.str(item["review"]) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusVerification.kt$CorpusVerification$Py.str(binding["node_observation_dir"]) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusVerification.kt$CorpusVerification$Py.str(identity["sha256"]) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusVerification.kt$CorpusVerification$Py.str(it) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusVerification.kt$CorpusVerification$Py.str(row["nonce"]) ?: ""</ID>
+    <ID>UseOrEmpty:CorpusVerification.kt$CorpusVerification$Py.str(row["request_name"]) ?: ""</ID>
+    <ID>UseOrEmpty:DuplicateProvider.kt$DuplicateProvider$error.message ?: ""</ID>
+    <ID>UseOrEmpty:DuplicateProvider.kt$DuplicateProviderCli$error.message ?: ""</ID>
+    <ID>UseOrEmpty:FullHosted.kt$FullHosted$Py.str(it["classname"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullHosted.kt$FullHosted$Py.str(it["method"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullHosted.kt$FullHosted$Py.str(runtime?.get("java_version")) ?: ""</ID>
+    <ID>UseOrEmpty:FullHosted.kt$FullHosted$pattern.find(build)?.groupValues?.get(1) ?: ""</ID>
+    <ID>UseOrEmpty:FullHosted.kt$FullHosted$value ?: ""</ID>
+    <ID>UseOrEmpty:FullHostedRuntime.kt$FullHostedRuntime$Py.str(item["sha256"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullHostedRuntime.kt$FullHostedRuntime$Py.str(process["invocation_id"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullHostedRuntime.kt$FullHostedRuntime$Py.str(receipt["candidate_sha"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullHostedRuntime.kt$FullHostedRuntime$Py.str(receipt["target"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullHostedRuntime.kt$FullHostedRuntime$Py.str(runtime["machine"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullHostedRuntime.kt$FullHostedRuntime$Py.str(runtime["system"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullHostedRuntime.kt$FullHostedRuntime$Py.str(selected["udid"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullHostedRuntime.kt$FullHostedRuntime$outputNodes[0].textContent ?: ""</ID>
+    <ID>UseOrEmpty:FullStagedConsumer.kt$FullStagedConsumer$Py.str(it["component"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullStagedConsumer.kt$FullStagedConsumer$Py.str(item["file"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullStagedConsumer.kt$FullStagedConsumer$Py.str(receipt["staging_repository"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullStagedConsumer.kt$FullStagedConsumer$Py.str(toolchain?.get("java_version")) ?: ""</ID>
+    <ID>UseOrEmpty:FullStagedConsumer.kt$FullStagedConsumer$Py.str(toolchain[it]) ?: ""</ID>
+    <ID>UseOrEmpty:FullSuiteManifest.kt$FullSuiteManifest$Py.str(case["classname"]) ?: ""</ID>
+    <ID>UseOrEmpty:GatesAggregate.kt$GatesAggregate$Py.str(content["text"]) ?: ""</ID>
+    <ID>UseOrEmpty:GatesAggregate.kt$GatesAggregate$Py.str(it) ?: ""</ID>
+    <ID>UseOrEmpty:GatesAggregate.kt$GatesAggregate$Py.str(item["id"]) ?: ""</ID>
+    <ID>UseOrEmpty:GatesAggregate.kt$GatesAggregate$error.message ?: ""</ID>
+    <ID>UseOrEmpty:GatesAggregate.kt$GatesAggregate$message ?: ""</ID>
+    <ID>UseOrEmpty:GatesNumerical.kt$GatesNumerical$Py.str(it) ?: ""</ID>
+    <ID>UseOrEmpty:GatesNumerical.kt$GatesNumerical$Py.str(value["baseline_attestation_path"]) ?: ""</ID>
+    <ID>UseOrEmpty:GatesNumerical.kt$GatesNumerical$Py.str(value["baseline_attestation_sha256"]) ?: ""</ID>
+    <ID>UseOrEmpty:GatesNumerical.kt$GatesNumerical$Py.str(value["runtime_identity"]) ?: ""</ID>
+    <ID>UseOrEmpty:GatesNumerical.kt$GatesNumerical$Py.str(value[it]) ?: ""</ID>
+    <ID>UseOrEmpty:GatesNumerical.kt$GatesNumerical$method ?: ""</ID>
+    <ID>UseOrEmpty:GatesNumerical.kt$GatesNumerical$receipt ?: ""</ID>
+    <ID>UseOrEmpty:GatesProspective.kt$GatesProspective$Py.str(reviewed["status"]) ?: ""</ID>
+    <ID>UseOrEmpty:HostedHost.kt$DefaultHostEnvironment$System.getProperty("os.arch") ?: ""</ID>
+    <ID>UseOrEmpty:HostedHost.kt$DefaultHostEnvironment$System.getProperty("os.name") ?: ""</ID>
+    <ID>UseOrEmpty:HostedHost.kt$DefaultHostEnvironment$System.getProperty("os.version") ?: ""</ID>
+    <ID>UseOrEmpty:HostedHost.kt$HostedHost$error.message ?: ""</ID>
+    <ID>UseOrEmpty:HostedHost.kt$HostedHost$host.environment("ImageOS") ?: ""</ID>
+    <ID>UseOrEmpty:HostedHost.kt$HostedHost$host.environment("ImageVersion") ?: ""</ID>
+    <ID>UseOrEmpty:HostedHost.kt$HostedHost$kgp?.groupValues?.get(1) ?: ""</ID>
+    <ID>UseOrEmpty:HostedHost.kt$HostedHost$match?.groupValues?.get(1) ?: ""</ID>
+    <ID>UseOrEmpty:HostedHost.kt$HostedHost$output.fileName?.toString() ?: ""</ID>
+    <ID>UseOrEmpty:IndependentGates.kt$IndependentGates$Py.str(it) ?: ""</ID>
+    <ID>UseOrEmpty:IndependentGates.kt$IndependentGates$Py.str(item["sha256"]) ?: ""</ID>
+    <ID>UseOrEmpty:IndependentGates.kt$IndependentGates$Py.str(lane["target"]) ?: ""</ID>
+    <ID>UseOrEmpty:IndependentGates.kt$IndependentGates$Py.str(scope[it]) ?: ""</ID>
+    <ID>UseOrEmpty:IndependentGates.kt$IndependentGates$Py.str(summary["route"]) ?: ""</ID>
+    <ID>UseOrEmpty:IndependentGates.kt$IndependentGates$duplicate.message ?: ""</ID>
+    <ID>UseOrEmpty:JvmModePublication.kt$JvmModePublication$Py.str(data["archive_digest"]) ?: ""</ID>
+    <ID>UseOrEmpty:JvmModePublication.kt$JvmModePublication$Py.str(data["publication_archive"]) ?: ""</ID>
+    <ID>UseOrEmpty:JvmModePublication.kt$JvmModePublication$Py.str(data["source_checkout"]) ?: ""</ID>
+    <ID>UseOrEmpty:JvmModePublication.kt$JvmModePublication$Py.str(item) ?: ""</ID>
+    <ID>UseOrEmpty:JvmModePublication.kt$JvmModePublication$Py.str(item?.get("path")) ?: ""</ID>
+    <ID>UseOrEmpty:JvmModePublication.kt$JvmModePublication$candidateSha ?: ""</ID>
+    <ID>UseOrEmpty:LinuxObserver.kt$ObserverEventLog$requested.fileName?.toString() ?: ""</ID>
+    <ID>UseOrEmpty:PomContract.kt$PomContract$tail(child) ?: ""</ID>
+    <ID>UseOrEmpty:PomContract.kt$PomContract$text(element) ?: ""</ID>
+    <ID>UseOrEmpty:PomContract.kt$PomContract$text(it) ?: ""</ID>
+    <ID>UseOrEmpty:ProbeRunner.kt$ProbeRunner$Py.str(group["report_pattern"]) ?: ""</ID>
+    <ID>UseOrEmpty:ProbeRunner.kt$ProbeRunner$error.message ?: ""</ID>
+    <ID>UseOrEmpty:SafariCapture.kt$SafariCapture$Py.str(receipt["invocation_id"]) ?: ""</ID>
+    <ID>UseOrEmpty:SafariCapture.kt$SafariCapture$Py.str(record["sha256"]) ?: ""</ID>
+    <ID>UseOrEmpty:SafariCapture.kt$SafariCapture$error.message ?: ""</ID>
+    <ID>UseOrEmpty:SafariCapture.kt$SafariCapture$reason ?: ""</ID>
+    <ID>UseOrEmpty:SafariContext.kt$SafariContext$error.message ?: ""</ID>
+    <ID>UseOrEmpty:SafariContext.kt$SafariContext.Scan$error.message ?: ""</ID>
+    <ID>UseOrEmpty:SafariReporterHost.kt$SafariReporterHost$Py.str(it["path"]) ?: ""</ID>
+    <ID>UseOrEmpty:SafariReporterHost.kt$SafariReporterHost$error.message ?: ""</ID>
+    <ID>UseOrEmpty:Staging.kt$Staging$error.message ?: ""</ID>
+    <ID>UseOrEmpty:StagingAudit.kt$StagingAudit$Py.str(data["candidate_sha"]) ?: ""</ID>
+    <ID>UseOrEmpty:StagingAudit.kt$StagingAudit$Py.str(it) ?: ""</ID>
+    <ID>UseOrEmpty:StagingAudit.kt$StagingAudit$Py.str(sha) ?: ""</ID>
+    <ID>VarCouldBeVal:QualificationCli.kt$QualificationCli$var graph: Path? = null</ID>
+  </CurrentIssues>
+</SmellBaseline>

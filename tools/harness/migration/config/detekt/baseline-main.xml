@@ -1,0 +1,26 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>SpreadOperator:FixedReplayRunner.kt$FixedReplayRunner$( *listOf( "world_code_source", "java_home", "java_version", "jvm_identity_hash_mode", "jvm_identity_hash_probe", "jvm_input_arguments", ).map { it to firstRows[0].get(it) }.toTypedArray(), )</ID>
+    <ID>SwallowedException:Cli.kt$ValidatePlainCli$error: IllegalArgumentException</ID>
+    <ID>SwallowedException:FixedReplayRunner.kt$FixedReplayRunner$error: IOException</ID>
+    <ID>SwallowedException:JourneyRunner.kt$JourneyRunner$error: Exception</ID>
+    <ID>SwallowedException:JourneyRunner.kt$JourneyRunner$error: IOException</ID>
+    <ID>SwallowedException:JourneyRunner.kt$JourneyRunner$error: IllegalArgumentException</ID>
+    <ID>SwallowedException:MigrationHost.kt$MigrationFiles$error: IOException</ID>
+    <ID>SwallowedException:MigrationHost.kt$Processes$error: IOException</ID>
+    <ID>SwallowedException:TruckRun.kt$PngDecoders$error: IOException</ID>
+    <ID>SwallowedException:TruckRun.kt$PngDecoders$error: ProcessTimeout</ID>
+    <ID>TooGenericExceptionCaught:JourneyRunner.kt$JourneyRunner$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:TruckRun.kt$TruckRun$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:TruckRun.kt$TruckRun$error: Throwable</ID>
+    <ID>UnsafeCallOnNullableType:JourneyRunner.kt$JourneyRunner$module!!</ID>
+    <ID>UnsafeCallOnNullableType:JourneyRunner.kt$JourneyRunner$pom!!</ID>
+    <ID>UnsafeCallOnNullableType:MigrationHost.kt$Processes$timeoutSeconds!!</ID>
+    <ID>UnusedParameter:TruckRun.kt$TruckRun$deadline: Long</ID>
+    <ID>UseOrEmpty:JourneyRunner.kt$JourneyRunner$directText(key) ?: anyText(key) ?: ""</ID>
+    <ID>UseOrEmpty:JourneyRunner.kt$JourneyRunner$error.message ?: ""</ID>
+    <ID>UseOrEmpty:MigrationHost.kt$MigrationFiles$readText(path) ?: ""</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -1,0 +1,33 @@
+<?xml version='1.0' encoding='utf-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues />
+  <CurrentIssues>
+    <ID>SwallowedException:Compare.kt$Compare$error: Exception</ID>
+    <ID>SwallowedException:Compare.kt$Compare$failure: JsonDecodeFailure</ID>
+    <ID>SwallowedException:Records.kt$failure: JsonDecodeFailure</ID>
+    <ID>TooGenericExceptionCaught:Compare.kt$Compare$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:ExactConsistency.kt$ExactConsistency$error: IndexOutOfBoundsException</ID>
+    <ID>TooGenericExceptionCaught:ExactConsistency.kt$ExactConsistency$error: NullPointerException</ID>
+    <ID>TooGenericExceptionCaught:Physical.kt$Physical$error: IndexOutOfBoundsException</ID>
+    <ID>TooGenericExceptionCaught:Physical.kt$Physical$error: NullPointerException</ID>
+    <ID>TooGenericExceptionCaught:WeldPulleyQuality.kt$WeldPulleyQuality$error: Exception</ID>
+    <ID>UnusedParameter:Compare.kt$state: CompareState</ID>
+    <ID>UnusedParameter:Orthogonality.kt$Orthogonality$post: Pair&lt;Double, Double&gt;</ID>
+    <ID>UnusedParameter:Receipt.kt$Receipt$settings: JsonObject</ID>
+    <ID>UnusedParameter:RotationOracle.kt$RotationOracle$angleBits: JsonElement?</ID>
+    <ID>UnusedParameter:RotationOracle.kt$RotationOracle$audit: JsonElement?</ID>
+    <ID>UnusedParameter:RotationOracle.kt$RotationOracle$marker: JsonElement?</ID>
+    <ID>UnusedParameter:RotationOracle.kt$RotationOracle$payloadBytes: ByteArray</ID>
+    <ID>UnusedParameter:RotationOracle.kt$RotationOracle$receiptBytes: ByteArray</ID>
+    <ID>UnusedParameter:RotationOracle.kt$RotationOracle$states: Map&lt;Int, JsonObject&gt;</ID>
+    <ID>UnusedParameter:RotationOracle.kt$RotationOracle$traceBytes: ByteArray</ID>
+    <ID>UnusedPrivateMember:Cases.kt$Cases$private fun array(values: List&lt;JsonElement&gt;): JsonArray</ID>
+    <ID>UnusedPrivateMember:Compare.kt$Compare$private fun require(condition: Boolean, message: String)</ID>
+    <ID>UnusedPrivateMember:Compare.kt$private fun compareResultOf(state: CompareState): Unit</ID>
+    <ID>UnusedPrivateMember:Receipt.kt$private fun list(value: JsonElement?): JsonArray?</ID>
+    <ID>UnusedPrivateMember:WeldPulleyQuality.kt$WeldPulleyQuality$private fun require(condition: Boolean, message: String)</ID>
+    <ID>UnusedPrivateProperty:Compare.kt$Compare$private val U = Fraction.ofRatio(BigNat.ONE, BigNat.powerOfTwo(53))</ID>
+    <ID>UnusedPrivateProperty:Orthogonality.kt$Orthogonality$private val LOADER = Regex("(?:bootstrap|system|L[1-9][0-9]*)")</ID>
+    <ID>UnusedPrivateProperty:RotationOracle.kt$RotationOracle$private val SHA = Regex("[0-9a-f]{64}")</ID>
+  </CurrentIssues>
+</SmellBaseline>

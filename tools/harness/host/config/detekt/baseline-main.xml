@@ -1,0 +1,7 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>UseCheckOrError:CleanCheckout.kt$CleanCheckout$throw IllegalStateException("git ${arguments.joinToString(" ")} failed: ${error.trim()}")</ID>
+  </CurrentIssues>
+</SmellBaseline>

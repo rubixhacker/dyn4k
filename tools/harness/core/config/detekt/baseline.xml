@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues />
+  <CurrentIssues>
+    <ID>MatchingDeclarationName:Decimal.kt$DecimalParts</ID>
+  </CurrentIssues>
+</SmellBaseline>

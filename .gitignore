@@ -3,3 +3,9 @@
 build/
 **/build/
 local.properties
+# Local-only artifacts: never tracked (see harness-port-status.md).
+__pycache__/
+*.pyc
+*.pyo
+.omo/
+pixel_2/

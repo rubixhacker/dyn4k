@@ -367,6 +367,7 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                     "Test source-only numerical regressions including bounded live-process tests",
                     "Test bounded JDI wait on JDK 21",
                     "Test numeric class witness on JDK 21",
+                    "Run harness static analysis gates",
                 ):
                     required_condition = (
                         "${{ !cancelled() && steps.checkout.outcome == 'success' "
@@ -403,6 +404,17 @@ class QualificationWorkflowContractTest(unittest.TestCase):
                 ("uses: actions/setup-java@v4", None),
                 ("name: Reject hosted macOS routes",
                  "./gradlew -p tools/harness :qualification:guardHostedRunners --console=plain -q"),
+                ("name: Guard harness sources and tracked files",
+                 "set -euo pipefail "
+                 "junk=\"$(git ls-files | grep -E '__pycache__|\\.pyc$|^\\.omo/|pixel_2/' || true)\" "
+                 "test -z \"$junk\" "
+                 "pinned=\"$(grep -rn 'Workspace/dyn4k' tools/harness/*/src/commonMain tools/harness/*/src/jvmMain || true)\" "
+                 "test -z \"$pinned\" "
+                 "spawn=\"$(grep -rn '\"python3\",' tools/harness/*/src/commonMain tools/harness/*/src/jvmMain | "
+                 "grep -v 'JvmModePublication.kt\\|CollectionRuntime.kt\\|GatesAggregate.kt\\|IndependentGates.kt' || true)\" "
+                 "test -z \"$spawn\""),
+                ("name: Run harness static analysis gates",
+                 "JAVA_HOME=\"$JAVA_HOME_21_X64\" ./gradlew -p tools/harness detekt spotlessCheck --console=plain -q"),
                 ("name: Test qualification workflow contracts",
                  "python3 -B -m unittest tools.compatibility.test_qualification_workflow"),
                 ("name: Test declaration ledger contracts",
@@ -1023,6 +1035,8 @@ class QualificationWorkflowContractTest(unittest.TestCase):
             ["      - uses: actions/checkout@v4",
              "      - uses: actions/setup-java@v4",
              "      - name: Reject hosted macOS routes",
+             "      - name: Guard harness sources and tracked files",
+             "      - name: Run harness static analysis gates",
              "      - name: Test qualification workflow contracts",
              "      - name: Test declaration ledger contracts",
              "      - name: Verify pinned GNU MPFR runtime",

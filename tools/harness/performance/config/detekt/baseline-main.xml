@@ -1,0 +1,18 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>SpreadOperator:CcdRouteTraceCli.kt$CcdRouteTraceCli$( java, *CandidateRunner.flags.toTypedArray(), "-cp", "$classes${File.pathSeparator}$jar", "BaselinePilot", )</ID>
+    <ID>SpreadOperator:CcdRouteTraceCli.kt$CcdRouteTraceCli$(java, *CandidateRunner.flags.toTypedArray(), "-cp", classpath, entrypoint)</ID>
+    <ID>SpreadOperator:MeasureHost.kt$MeasureHost$( java, *CandidateRunner.flags.toTypedArray(), "-cp", classpath, entrypoint, family, variant, size, hz.toString(), steps.toString(), mode, warmup.toString(), )</ID>
+    <ID>SpreadOperator:MeasureHost.kt$MeasureHost$(java, *CandidateRunner.flags.toTypedArray(), "-cp", "$classes${File.pathSeparator}$jar", "BaselinePilot")</ID>
+    <ID>SwallowedException:CandidateStaging.kt$CandidateStaging$error: IllegalStateException</ID>
+    <ID>SwallowedException:CcdRouteTraceCli.kt$CcdRouteTraceCli$error: IllegalStateException</ID>
+    <ID>SwallowedException:MeasureClis.kt$PortedCommand$error: IllegalArgumentException</ID>
+    <ID>UseCheckOrError:MeasureHost.kt$MeasureHost$throw IllegalStateException( "command ${command} returned non-zero exit status $code: $output", )</ID>
+    <ID>UseOrEmpty:MeasureClis.kt$PortedCommand$error.message ?: ""</ID>
+    <ID>UseOrEmpty:MeasureHost.kt$MeasureHost$System.getenv("HOSTNAME") ?: ""</ID>
+    <ID>UseOrEmpty:MeasureHost.kt$MeasureHost$stderrPrefix?.invoke(process.pid()) ?: ""</ID>
+    <ID>VarCouldBeVal:MeasureHost.kt$MeasureHost$var errorOutput = (stderrPrefix?.invoke(process.pid()) ?: "") + captured.readText()</ID>
+  </CurrentIssues>
+</SmellBaseline>

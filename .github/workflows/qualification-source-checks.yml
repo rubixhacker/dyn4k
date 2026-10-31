@@ -27,6 +27,19 @@ jobs:
       - name: Reject hosted macOS routes
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: ./gradlew -p tools/harness :qualification:guardHostedRunners --console=plain -q
+      - name: Guard harness sources and tracked files
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          junk="$(git ls-files | grep -E '__pycache__|\.pyc$|^\.omo/|pixel_2/' || true)"
+          test -z "$junk"
+          pinned="$(grep -rn 'Workspace/dyn4k' tools/harness/*/src/commonMain tools/harness/*/src/jvmMain || true)"
+          test -z "$pinned"
+          spawn="$(grep -rn '"python3",' tools/harness/*/src/commonMain tools/harness/*/src/jvmMain | grep -v 'JvmModePublication.kt\|CollectionRuntime.kt\|GatesAggregate.kt\|IndependentGates.kt' || true)"
+          test -z "$spawn"
+      - name: Run harness static analysis gates
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.java-setup.outcome == 'success' }}
+        run: JAVA_HOME="$JAVA_HOME_21_X64" ./gradlew -p tools/harness detekt spotlessCheck --console=plain -q
       - name: Test qualification workflow contracts
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 -B -m unittest tools.compatibility.test_qualification_workflow

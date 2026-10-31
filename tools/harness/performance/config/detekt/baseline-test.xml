@@ -1,0 +1,7 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>UnusedPrivateMember:MeasureHostSuite.kt$private fun sha256Hex(text: String): String</ID>
+  </CurrentIssues>
+</SmellBaseline>

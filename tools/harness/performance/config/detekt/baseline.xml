@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues />
+  <CurrentIssues>
+    <ID>UnusedParameter:Measure.kt$Measure$variant: String</ID>
+    <ID>UnusedParameter:PerformanceManifest.kt$PerformanceManifest$runtime: String</ID>
+    <ID>UnusedPrivateProperty:SustainedArchive.kt$SustainedArchive$val kind = item.str("kind")</ID>
+    <ID>UseCheckOrError:LeafTools.kt$CcdRouteTrace$throw IllegalStateException("staged candidate CCD routes differ")</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MatchingDeclarationName:GitIdentitySuite.kt$GitFixture</ID>
+    <ID>UnusedPrivateMember:AddedMemberSuite.kt$private fun risks(report: CompareReport): List&lt;MemberRisk&gt;</ID>
+    <ID>UseOrEmpty:SourceIntegritySuite.kt$rejected.exceptionOrNull()?.message ?: ""</ID>
+  </CurrentIssues>
+</SmellBaseline>

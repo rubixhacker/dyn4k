@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>SwallowedException:TruckTimelineSuite.kt$error: IllegalArgumentException</ID>
+    <ID>UnusedParameter:TruckTimelineSuite.kt$valid: ByteArray</ID>
+    <ID>VariableNaming:TruckTimelineSuite.kt$val when_ = 1000 + position * 500_000_000L</ID>
+  </CurrentIssues>
+</SmellBaseline>

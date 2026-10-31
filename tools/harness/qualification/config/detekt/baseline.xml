@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='utf-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues />
+  <CurrentIssues>
+    <ID>MatchingDeclarationName:PyValues.kt$Py</ID>
+    <ID>SwallowedException:SafariReporter.kt$SafariReporter$error: ConfigBindingError</ID>
+    <ID>SwallowedException:SafariReporter.kt$SafariReporter$error: IllegalArgumentException</ID>
+    <ID>SwallowedException:SafariReporter.kt$SafariReporter$error: JsonShapeException</ID>
+    <ID>TooGenericExceptionCaught:LaneEvaluation.kt$LaneEvaluation$error: Exception</ID>
+    <ID>UnusedPrivateProperty:CollectionRules.kt$CollectionRules$val format = Py.str(transport["format"])</ID>
+  </CurrentIssues>
+</SmellBaseline>

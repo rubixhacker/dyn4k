@@ -1,0 +1,60 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>DestructuringDeclarationWithTooManyEntries:HostedSuite.kt$(xcode, version, build, status)</ID>
+    <ID>DestructuringDeclarationWithTooManyEntries:SafariLaunchWrapperSuite.kt$(failure, function, original, replacement, marker)</ID>
+    <ID>EmptyFunctionBlock:SafariFullHostedResidueSuite.kt$&lt;no name provided&gt;${}</ID>
+    <ID>EmptyFunctionBlock:SafariWindowsCaptureSuite.kt$&lt;no name provided&gt;${}</ID>
+    <ID>EmptyFunctionBlock:SafariWindowsCaptureSuite.kt$&lt;no name provided&gt;.&lt;no name provided&gt;${}</ID>
+    <ID>EmptyFunctionBlock:SafariWindowsFileSuite.kt$&lt;no name provided&gt;${}</ID>
+    <ID>EmptyFunctionBlock:SafariWindowsFileSuite.kt$&lt;no name provided&gt;.&lt;no name provided&gt;${}</ID>
+    <ID>EmptyFunctionBlock:SafariWindowsFileSuite.kt$SafariDirectoryFake${}</ID>
+    <ID>EmptyFunctionBlock:SafariWindowsFileSuite.kt$SafariPathHandle${}</ID>
+    <ID>EmptyFunctionBlock:SafariWindowsProcessSuite.kt$ScriptedStream${}</ID>
+    <ID>MatchingDeclarationName:SafariContextSuite.kt$SafariContextFixture</ID>
+    <ID>MatchingDeclarationName:SafariWindowsFileSuite.kt$SafariPathHandle : SafariHandle</ID>
+    <ID>MayBeConst:ArtifactVectors.kt$ArtifactVectors$/** `verify_bundle` over the reference bundle. */ val VERIFIED_EXECUTED = 3</ID>
+    <ID>MayBeConst:ArtifactVectors.kt$ArtifactVectors$val VERIFIED_WITHOUT_MATRIX = "bundle runtime matrix is missing"</ID>
+    <ID>SwallowedException:CrossRunCollectionSuite.kt$error: Exception</ID>
+    <ID>SwallowedException:GatesProspectiveSuite.kt$error: java.io.IOException</ID>
+    <ID>SwallowedException:SafariLaunchWrapperSuite.kt$error: java.io.IOException</ID>
+    <ID>SwallowedException:SafariWindowsCaptureSuite.kt$error: java.io.IOException</ID>
+    <ID>TooGenericExceptionThrown:SafariWindowsCaptureSuite.kt$throw RuntimeException("injected reader start failure")</ID>
+    <ID>TooGenericExceptionThrown:SafariWindowsProcessSuite.kt$throw RuntimeException("injected second reader start failure")</ID>
+    <ID>UnusedParameter:CrossRunCollectionSuite.kt$lane: String</ID>
+    <ID>UnusedParameter:CrossRunCollectionSuite.kt$target: String?</ID>
+    <ID>UnusedParameter:CrossRunCollectionSuite.kt$unusedDigest: String?</ID>
+    <ID>UnusedParameter:IndependentGateSuite.kt$record: JsonObject</ID>
+    <ID>UnusedParameter:PublicationTransportSuite.kt$candidate: String</ID>
+    <ID>UnusedPrivateMember:FullStagedConsumerSuite.kt$private fun sha256(path: Path): String</ID>
+    <ID>UnusedPrivateMember:GatesProspectiveSuite.kt$private fun checkoutMatchesCommit(repository: Path, paths: List&lt;String&gt;): Boolean</ID>
+    <ID>UnusedPrivateMember:SafariContextSuite.kt$private fun glob(directory: Path, prefix: String, suffix: String): List&lt;Path&gt;</ID>
+    <ID>UnusedPrivateMember:SafariPosixProcessSuite.kt$private fun posixFailure( block: (SafariFixture) -&gt; Unit, )</ID>
+    <ID>UnusedPrivateProperty:FullHostedFixtures.kt$round</ID>
+    <ID>UnusedPrivateProperty:SafariWindowsCaptureSuite.kt$val expectedCommand = buildJsonObject { put("__expected", JsonPrimitive(true)) }</ID>
+    <ID>UnusedPrivateProperty:SafariWindowsFileSuite.kt$/** The stage state is only reachable through the snapshot; keep the helper referenced. */ private val unusedPrimitive = JsonPrimitive("")</ID>
+    <ID>UseOrEmpty:ArtifactCaptureSuite.kt$Py.str(missing["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:ArtifactCaptureSuite.kt$Py.str(rejected["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:ArtifactCaptureSuite.kt$Py.str(stale["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:CollectionSuite.kt$Py.str(((changed["artifacts"] as JsonArray)[0] as JsonObject)["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:CollectionSuite.kt$Py.str(row["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:CollectionSuite.kt$Py.str(secondRow["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:CrossRunCollectionSuite.kt$Py.str((((result["cross_run"] as JsonObject)["sources"] as JsonArray)[0] as JsonObject)["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:CrossRunCollectionSuite.kt$Py.str((result["cross_run"] as JsonObject)["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:CrossRunCollectionSuite.kt$Py.str(crossRun["reason"]) ?: Py.str(((crossRun["sources"] as JsonArray)[0] as JsonObject)["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:CrossRunCollectionSuite.kt$Py.str(row["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:FullHostedFixtures.kt$node.nodeValue ?: ""</ID>
+    <ID>UseOrEmpty:HostedSuite.kt$Py.str(partial.report["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:HostedSuite.kt$Py.str(stale.report["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:HostedSuite.kt$error.message ?: ""</ID>
+    <ID>UseOrEmpty:IndependentReviewSuite.kt$Py.str((result["gates"] as JsonObject) .getValue("independent-review").let { (it as JsonObject)["reason"] }) ?: ""</ID>
+    <ID>UseOrEmpty:ObserverSuites.kt$Py.str(image["executable_sha256"]) ?: ""</ID>
+    <ID>UseOrEmpty:SafariCaptureSuite.kt$Py.str(receipt["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:SafariContextSuite.kt$Py.str(it["error"]) ?: ""</ID>
+    <ID>UseOrEmpty:SafariFullHostedResidueSuite.kt$Py.str(lane["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:SafariPosixProcessSuite.kt$Py.str(receipt["reason"]) ?: ""</ID>
+    <ID>UseOrEmpty:SafariReporterSuite.kt$Py.str(it["sha256"]) ?: ""</ID>
+    <ID>UseOrEmpty:SafariWindowsCaptureSuite.kt$Py.str(receipt["reason"]) ?: ""</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -3,11 +3,16 @@
 This file tracks the port of the Python harness to Kotlin. It is the working record for
 `docs/specs/harness-port.md`. Update it when a module or suite changes state.
 
-Run every harness test with one command:
+Run every harness test with one command, and every static gate with another:
 
 ```
 cd tools/harness && ../../gradlew checkAll
+cd tools/harness && JAVA_HOME=<jdk21> ../../gradlew staticAll
 ```
+
+`staticAll` runs `detekt` and `spotlessCheck` in every module. Detekt 1.23 needs
+Gradle on JDK 21 (its bundled compiler cannot parse a 25+ runtime version); the
+CI step pins `JAVA_HOME` to the Temurin 21 home for the same reason.
 
 ## Test frameworks
 
@@ -26,7 +31,7 @@ cd tools/harness && ../../gradlew checkAll
 | --- | --- | --- | --- |
 | `:core` | `qualify.py` contract: matrix, digests, canonical JSON, publication metadata, provider check | ported | 27 |
 | `:host` | `qualify.digest(path)`, `qualify.require_clean_checkout` | ported | 7 |
-| `:qualification` | `guard_hosted_runners.py` (**Python deleted**), `qualify.py` archives/audits/evaluation/CLI actions, `stage.py`, `publication.py`, `artifact.py`, `collection.py` (38 of 44 functions; the six Windows handle helpers are not portable), `full_hosted.py` (all but `run`), `hosted.py`, `safari_reporter.py`, `safari_yarn_lock.py` (all 124 methods), `independent_gates` (aggregation, review and full_ci gates; four Python-harness bodies fail closed), the `full_*` adapter layer (android, browser, klib; the consumer replays are named seams), `full_staged_consumer` (contract, graph and inventory ported; the Gradle replay is the CLI), `independent_linux_observer` (verification half), `full_corpus.py`, `full_suite_manifest.py`, `duplicate_provider.py` | partial | 681 |
+| `:qualification` | `guard_hosted_runners.py` (**Python deleted**), `qualify.py` archives/audits/evaluation/CLI actions, `stage.py`, `publication.py`, `artifact.py`, `collection.py` (38 of 44 functions; the six Windows handle helpers are not portable), `full_hosted.py` (all but `run`), `hosted.py`, `safari_reporter.py`, `safari_yarn_lock.py` (all 124 methods), `independent_gates` (aggregation, review and full_ci gates; four Python-harness bodies fail closed), the `full_*` adapter layer (android, browser, klib; the consumer replays are named seams), `full_staged_consumer` (contract, graph and inventory ported; the Gradle replay is the CLI), `full_jvm_consumer` (lane table, contract shape, inventory, input files, report comparison, worker proof; the Gradle replay and archive replay tail fail closed), `independent_linux_observer` (verification half), `full_corpus.py`, `full_suite_manifest.py`, `duplicate_provider.py` | partial | 720 |
 | `:compatibility` | `world_ci`, `governing_*`, `candidate_coverage`, `method_coverage`, `java_corpus`, `execution_probe`, `full_ci`, `exception_ci`, `ledger`, `module_probe`; `BaselineOracle` now delegates to `:baseline` instead of duplicating the three `javap` readers | partial | 51 |
 | `:performance` | `manifest`, `analyze`, `measure`, `candidate_*`, `sustained_archive`, `reference_study`, `host_capacity_control`, `stress_monitor`, `warmup_probe` (**Python deleted**), `calibrate` (**Python deleted**), `ccd_route_trace` | partial | 181 |
 | `:numerical` | `portable/cases.py`; `portable/receipt.py`; `portable/exact_consistency.py`; `portable/orthogonality.py`; `portable/physical.py` (`nominal_free`, `audit_physical`, sleep/wake, phases); `numeric_class_witness.read_witness`; `compare.py` (`compare`, `audit_reference`, `load_receipt`, `load_fixture`, the whole `compare_value` engine, `check_counts`, `check_snapshot`); `candidate/nominal_zero.py`; `weld_pulley_quality.py` (engine, phases, `atan`/`pi` enclosures, `Decimal`-at-80 rendering); `portable/rotation_oracle.py` (encoding, digest and manifest helpers only) | partial | 91 |
@@ -68,7 +73,8 @@ applies to every other generator in turn. The final state must therefore have no
 until then they are deliberate, and the recorded constants carry the revision and generator name that
 produced them.
 
-Harness total at the last full run: 1180 tests, 0 failures, across `:core`, `:host`,
+Harness total at the last full run: 1393 tests, 0 failures (11 skipped retained-evidence
+gates), across `:core`, `:host`,
 `:compatibility`, `:performance`, `:qualification`, `:numerical`, `:android`, `:migration` and
 `:baseline`.
 
@@ -350,6 +356,40 @@ big ones (`native_host`, `browser`, `signed_routes`) remain the hardest.
 Suggested order: the three adapters (335 lines, 20 cases) as the shared helper layer, then the staged,
 jvm and klib consumers, then the big three (`native_host`, `browser`, `signed_routes`), then
 `qualify.py` and `independent_gates.py`, and only then `artifact.py` and `full_hosted.py`.
+
+### Completion bar: what "ported" means
+
+A module counts as ported only when every item below holds. Scaffolding that shells out to
+Python, hardcodes a workstation path, or duplicates a pin table is not a port, even when
+the surrounding suite is green:
+
+1. Golden vectors replay the Python result byte for byte.
+2. The differential run passes while the Python file still exists.
+3. Its workflow step is switched to the Kotlin command and the affected workflow ran once.
+4. No `python3` subprocess outside the named interim seams (`JvmModePublication.PythonModeReplay`,
+   `CollectionRuntime.ingestExternal`, `GatesAggregate` verifiers). `qualification-source-checks.yml`
+   enforces this with the harness source guard.
+5. No workstation repo-root literal (`Workspace/dyn4k`) in `tools/harness/*/src`; repository
+   roots arrive as parameters or are discovered by walking up to `tools/qualification`.
+6. Pin tables have one home (for example `FullJvmConsumerRules`, not a copy in the consumer).
+7. `detekt` and `spotlessCheck` pass; new findings fail the build rather than joining a baseline.
+
+### Retained-evidence gates, in one place
+
+Every gate below reports skipped without its variables, so absence can never look like a pass.
+Gradle declares them as test inputs, so a warm build directory cannot mask a provided archive.
+
+| Variables | Suites | Unblocks |
+| --- | --- | --- |
+| `DYN4K_RETAINED_ANDROID_EVIDENCE` | `FullAndroidAdapterRetained` (4 cases) | `full_android_consumer` port |
+| `DYN4K_KLIB_EVIDENCE_ROOT` | `FullKlibAdapterRetained` (4 cases) | `full_klib_consumer` port |
+| `DYN4K_SUITE_ARCHIVE` + `DYN4K_SUITE_REPOSITORY`, `DYN4K_SUITE_EXPECTED_CORE`, `DYN4K_SUITE_EXPECTED_FACADE` | staged-consumer `verify` (3 cases) | retained suite archive from a scheduled lane |
+| `DYN4K_FULL_JVM_ARCHIVE` + `DYN4K_JVM_MODE_PUBLICATION` (+ `DYN4K_FULL_JVM_LANE`, `DYN4K_FULL_JVM_CANDIDATE`) | `test_full_jvm_consumer.py` (Python, 7 cases) | `full_jvm_consumer` replay tail + lane re-capture |
+| `DYN4K_FULL_CI_REPLAY_*`, `DYN4K_HOSTED_JOINED_EVIDENCE_DIR`, `DYN4K_BROWSER_*` | remaining Python consumer suites | their respective consumer ports |
+
+The lane re-capture itself (frozen manifest, approved corpus, scheduled-lane receipts) waits on
+the lane scheduler, which this tree cannot see. Until that run lands, no lane may be reported
+as passing, and the Python qualification suite stays red by design, not by defect.
 
 ### The `full_*` adapters: ported, with 8 retained-evidence cases outstanding
 

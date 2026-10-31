@@ -1,0 +1,12 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MatchingDeclarationName:Physical.kt$PhysicalHost</ID>
+    <ID>SwallowedException:CompareHost.kt$TraceFiles$error: NoSuchFileException</ID>
+    <ID>SwallowedException:NumericalTrace.kt$NumericalTrace$error: java.nio.charset.CharacterCodingException</ID>
+    <ID>SwallowedException:WeldPulleyHost.kt$WeldPulleyHost$error: IOException</ID>
+    <ID>SwallowedException:WeldPulleyHost.kt$WeldPulleyHost$error: NoSuchFileException</ID>
+    <ID>TooGenericExceptionCaught:CompareHost.kt$CompareHost$error: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>
