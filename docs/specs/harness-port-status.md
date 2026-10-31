@@ -262,6 +262,39 @@ The port pass also fixed two real defects it found: `IndependentGates.binding` a
 compared `receipt["lane"] != null`, but a JSON `null` parses to `JsonNull`, which is not Kotlin `null`, so
 an approved **global** gate with a null lane was rejected as "raw lane differs".
 
+### The `full_*` consumer family — measured
+
+This is the largest untouched block and the last one that stands between here and deleting
+`artifact.py`, `full_hosted.py`, `qualify.py` and `independent_gates.py`. Measured on 2026-10-30
+(module lines / its test file / test cases):
+
+| Module | Lines | Test lines | Cases |
+| --- | ---: | ---: | ---: |
+| `full_android_adapter.py` | 86 | 147 | 6 |
+| `full_android_consumer.py` | 761 | 227 | 13 |
+| `full_android_native_consumer.py` | 869 | 284 | 8 |
+| `full_apple_device_consumer.py` | 881 | 211 | 11 |
+| `full_browser_adapter.py` | 112 | 146 | 8 |
+| `full_browser_consumer.py` | 1,725 | 1,873 | 52 |
+| `full_jvm_consumer.py` | 554 | 387 | 7 |
+| `full_klib_adapter.py` | 137 | 181 | 6 |
+| `full_klib_consumer.py` | 1,020 | 596 | 14 |
+| `full_native_host_consumer.py` | 2,385 | 1,733 | 38 |
+| `full_signed_routes.py` | 1,127 | 2,200 | 31 |
+| `full_staged_consumer.py` | 388 | 159 | 7 |
+| `full_wasm_node_consumer.py` | 711 | 158 | 10 |
+| `independent_adapter.py` | 585 | 1,419 | 21 |
+| `independent_audit_producer.py` | 371 | 1,013 | 28 |
+| **subtotal** | **11,712** | **10,734** | **280** |
+
+With `qualify.py` (1,727 + 924) and `independent_gates.py` (4,234 + 6,418) the whole remaining
+qualification block is **19,400 module lines and 18,076 test lines, 465 cases**. That is the scope, stated
+once rather than re-estimated per pass.
+
+Suggested order: the three adapters (335 lines, 20 cases) as the shared helper layer, then the staged,
+jvm and klib consumers, then the big three (`native_host`, `browser`, `signed_routes`), then
+`qualify.py` and `independent_gates.py`, and only then `artifact.py` and `full_hosted.py`.
+
 ### Parity gap: descriptor anchoring
 
 The reference opens directories with `dir_fd` plus `O_NOFOLLOW` and compares `fstat` of held
