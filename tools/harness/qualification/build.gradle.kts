@@ -89,6 +89,14 @@ tasks.register<JavaExec>("collectQualification") {
     )
 }
 
+tasks.register<JavaExec>("independentGates") {
+    entryPoint(
+        "io.github.rubixhacker.harness.qualification.IndependentGatesCli",
+        "Evaluates the independent gate routes of one lane or a whole assembly; pass " +
+            "--candidate-sha and --lane with GATE=PATH archives, or --assembly.",
+    )
+}
+
 tasks.register<JavaExec>("safariYarnLock") {
     entryPoint(
         "io.github.rubixhacker.harness.qualification.SafariCaptureCli",

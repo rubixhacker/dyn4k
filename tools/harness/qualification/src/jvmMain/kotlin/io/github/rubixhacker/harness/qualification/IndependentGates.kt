@@ -412,7 +412,8 @@ object IndependentGates {
         if (Py.str(receipt["source_tree"]) != sourceTree) {
             throw IllegalArgumentException("raw Git source tree differs from exact candidate")
         }
-        if (gate !in GLOBAL_GATES || receipt["lane"] != null) {
+        val rawLane = receipt["lane"]
+        if (gate !in GLOBAL_GATES || (rawLane != null && rawLane !is JsonNull)) {
             if (Py.str(receipt["lane"]) != laneId) throw IllegalArgumentException("raw lane differs")
             for (key in listOf("target", "runtime", "version", "configuration")) {
                 if (receipt[key] != lane[key]) {
@@ -583,7 +584,8 @@ object IndependentGates {
         if (!Py.equalsInt(receipt["schema"], 1) ||
             Py.str(receipt["candidate_sha"]) != candidateSha ||
             (gate !in GLOBAL_GATES && Py.str(receipt["lane"]) != laneId) ||
-            (receipt["lane"] != null && Py.str(receipt["lane"]) != laneId) ||
+            (receipt["lane"] != null && receipt["lane"] !is JsonNull &&
+                Py.str(receipt["lane"]) != laneId) ||
             reason.isNullOrBlank() ||
             Py.str(receipt["observed_by"]).isNullOrBlank() ||
             !Py.isInt(receipt["observed_at_ns"]) || Py.int(receipt["observed_at_ns"]) <= 0
