@@ -126,3 +126,20 @@ tasks.register<JavaExec>("fullHosted") {
         "Packages or verifies a hosted full-common-corpus archive; pass --package, --verify-tar, or --verify with its options.",
     )
 }
+
+/**
+ * The retained-evidence suites are gated on environment variables, but Gradle does not treat the
+ * environment as a task input, so a warm build directory would report them skipped even when CI has
+ * provided the evidence. Declaring them makes the gate honest: a run with the variables set cannot
+ * reuse an earlier run's result.
+ */
+tasks.withType<Test>().configureEach {
+    inputs.property(
+        "retainedEvidence",
+        listOf(
+            "DYN4K_RETAINED_ANDROID_EVIDENCE",
+            "DYN4K_KLIB_EVIDENCE_ROOT",
+            "DYN4K_SUITE_ARCHIVE",
+        ).joinToString("|") { System.getenv(it) ?: "" },
+    )
+}
