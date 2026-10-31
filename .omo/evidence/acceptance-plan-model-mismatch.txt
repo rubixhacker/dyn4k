@@ -1,0 +1,7 @@
+Scenario: verify required gpt-6-sol before research
+Invocation: Python JSON parse of session turn_context records
+Source: /var/home/stewart/.codex/sessions/2026/10/17/rollout-2026-10-17T11-06-24-01a14a9d-485b-76a1-9a69-670ae1adadc1.jsonl
+Actual command output:
+line=10 model=gpt-6-astra
+Observable: model differs from required gpt-6-sol
+Result: BLOCKED; research and issue claim unstarted.

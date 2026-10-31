@@ -1,0 +1,85 @@
+$ node .omo/evidence/quality-experiment/validate-publication.mjs
+PASS external manifest equals archived candidate index plus exact archive identity
+PASS remote archive bytes/hash, six raw member hashes, source hashes, release target/asset size
+PASS six completed journeys; 432000 states; 252000 endpoints; 5615802 listener events
+PASS all six phase proposals and normalized full inner sequence hashes agree
+PASS no physical acceptance computed; no placeholder remains in report
+exit=0
+$ git ls-remote origin refs/heads/research/sleep-wake-quality-experiment
+a7718eb6380b8fc51179a953dff4f3f33949c801	refs/heads/research/sleep-wake-quality-experiment
+exit=0
+$ git show --stat --oneline HEAD
+a7718eb docs: publish reviewed sleep-wake quality capture candidates
+ .../sleep-wake-quality-candidate-manifest.json     | 1093 ++++++++++++++++++++
+ docs/research/sleep-wake-quality-experiment.md     |   85 ++
+ 2 files changed, 1178 insertions(+)
+exit=0
+$ sha256sum .omo/evidence/quality-experiment/remote/dyn4j-sleep-wake-quality-20261014.tar.gz
+057d96767dcf4ef863afb61417f8ef9cc6b7fc1442e0e39df55bbe006cb1212c  .omo/evidence/quality-experiment/remote/dyn4j-sleep-wake-quality-20261014.tar.gz
+exit=0
+$ sha256sum -c SHA256SUMS (fresh remote extraction)
+README.md: OK
+UPSTREAM-LICENSE.md: OK
+candidate-index.json: OK
+classes/Capture$NonFinite.class: OK
+classes/Capture.class: OK
+classes/SleepWakeQuality.class: OK
+compile.log: OK
+dyn4j-6.0.0.jar: OK
+execution.log: OK
+frozen-after.log: OK
+frozen-before.sha256: OK
+initial-reference-review-manifest.json: OK
+outer120-repeat1/Q-sleep-wake-outer120-repeat1-0.jsonl.gz: OK
+outer120-repeat1/queries.jsonl: OK
+outer120-repeat1/summary.jsonl: OK
+outer120-repeat1.audit.json: OK
+outer120-repeat1.audit.stderr: OK
+outer120-repeat1.capture.log: OK
+outer120-repeat1.preflight.log: OK
+outer120-repeat2/Q-sleep-wake-outer120-repeat2-0.jsonl.gz: OK
+outer120-repeat2/queries.jsonl: OK
+outer120-repeat2/summary.jsonl: OK
+outer120-repeat2.audit.json: OK
+outer120-repeat2.audit.stderr: OK
+outer120-repeat2.capture.log: OK
+outer120-repeat2.preflight.log: OK
+outer30-repeat1/Q-sleep-wake-outer30-repeat1-0.jsonl.gz: OK
+outer30-repeat1/queries.jsonl: OK
+outer30-repeat1/summary.jsonl: OK
+outer30-repeat1.audit.json: OK
+outer30-repeat1.audit.stderr: OK
+outer30-repeat1.capture.log: OK
+outer30-repeat1.preflight.log: OK
+outer30-repeat2/Q-sleep-wake-outer30-repeat2-0.jsonl.gz: OK
+outer30-repeat2/queries.jsonl: OK
+outer30-repeat2/summary.jsonl: OK
+outer30-repeat2.audit.json: OK
+outer30-repeat2.audit.stderr: OK
+outer30-repeat2.capture.log: OK
+outer30-repeat2.preflight.log: OK
+outer60-repeat1/Q-sleep-wake-outer60-repeat1-0.jsonl.gz: OK
+outer60-repeat1/queries.jsonl: OK
+outer60-repeat1/summary.jsonl: OK
+outer60-repeat1.audit.json: OK
+outer60-repeat1.audit.stderr: OK
+outer60-repeat1.capture.log: OK
+outer60-repeat1.preflight.log: OK
+outer60-repeat2/Q-sleep-wake-outer60-repeat2-0.jsonl.gz: OK
+outer60-repeat2/queries.jsonl: OK
+outer60-repeat2/summary.jsonl: OK
+outer60-repeat2.audit.json: OK
+outer60-repeat2.audit.stderr: OK
+outer60-repeat2.capture.log: OK
+outer60-repeat2.preflight.log: OK
+plan-check.log: OK
+recorder.diff: OK
+run-approved-six.sh: OK
+runtime-after.log: OK
+runtime.txt: OK
+source/Capture.java: OK
+source/SleepWakeQuality.java: OK
+source/audit.mjs: OK
+source-class-hashes.txt: OK
+exit=0
+Judgment: six approved captures complete and independently audited; archive remotely retrieved and verified. Candidate identities/phases PENDING_HUMAN_REVIEW; physical acceptance NOT_EVALUATED. Full evidence ledger: /tmp/dyn4k-sleep-wake-quality-experiment/.omo/evidence/quality-experiment/README.md

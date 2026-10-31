@@ -143,3 +143,10 @@ tasks.withType<Test>().configureEach {
         ).joinToString("|") { System.getenv(it) ?: "" },
     )
 }
+
+tasks.register<JavaExec>("fullJvmConsumer") {
+    entryPoint(
+        "io.github.rubixhacker.harness.qualification.FullJvmConsumerCli",
+        "Runs or verifies the complete JVM consumer; pass prepare|verify with its options.",
+    )
+}

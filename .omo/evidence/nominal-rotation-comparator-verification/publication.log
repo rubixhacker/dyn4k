@@ -1,0 +1,5 @@
+f5053629d68dc134092434310c3d130ee1c0d9b5
+f5053629d68dc134092434310c3d130ee1c0d9b5	refs/heads/task/nominal-rotation-comparator
+?? .omo/
+?? docs/research/__pycache__/
+PASS: all three source hashes/syntax, embedded evidence bindings, 144000 current checks and 36000 inherited checks; zero failed/inconclusive; 251640 archived float lexemes independently matched.

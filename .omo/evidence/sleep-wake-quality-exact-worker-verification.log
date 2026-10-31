@@ -1,0 +1,71 @@
+Configured exact audit verification receipt; no physics execution
+$ git rev-parse HEAD 
+exit 0 
+44dd7cf05502fa4b5fdc3523e3271c3cba335de8
+
+$ git ls-remote origin refs/heads/research/sleep-wake-quality-exact-checks 
+exit 0 
+44dd7cf05502fa4b5fdc3523e3271c3cba335de8	refs/heads/research/sleep-wake-quality-exact-checks
+
+$ git status --short 
+exit 0 
+?? .omo/
+
+$ git diff HEAD --exit-code 
+exit 0 
+
+ARTIFACT audit.log 
+ Q-sleep-wake-outer30-repeat1: exact checks pass; 72000 inner states, 18000 endpoint copies
+Q-sleep-wake-outer30-repeat2: exact checks pass; 72000 inner states, 18000 endpoint copies
+Q-sleep-wake-outer60-repeat1: exact checks pass; 72000 inner states, 36000 endpoint copies
+Q-sleep-wake-outer60-repeat2: exact checks pass; 72000 inner states, 36000 endpoint copies
+Q-sleep-wake-outer120-repeat1: exact checks pass; 72000 inner states, 72000 endpoint copies
+Q-sleep-wake-outer120-repeat2: exact checks pass; 72000 inner states, 72000 endpoint copies
+{"status":"BOUNDED_CONFIGURED_EXACT_CHECKS_PASS_NOT_PORT_QUALIFICATION","totals":{"initial":6,"inner":432000,"before":6,"after":6,"impulse":6,"timestep":1296006,"endpoints":252000,"sleepingStates":431112,"sleepPoseComparisons":431100}}
+
+ARTIFACT tests.log 
+ 92 actual-profile semantic assertions passed
+2 independent identity rejection scenarios passed
+✔ docs/research/sleep-wake-quality-exact-checks.test.mjs (7140.80717ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7147.084664
+
+ARTIFACT reused-tests.log 
+ ✔ 120Hz step 2: rejects timestep getDeltaTimeRatio (0.029586ms)
+✔ compressed hash guard rejects altered bytes before semantic decoding (58.673444ms)
+ℹ tests 649
+ℹ suites 0
+ℹ pass 649
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4531.344927
+ARTIFACT publication.log 
+ [research/sleep-wake-quality-exact-checks 44dd7cf] docs: verify configured sleep-wake exact consistency
+ 6 files changed, 908 insertions(+)
+ create mode 100644 docs/research/sleep-wake-exact-checks.mjs
+ create mode 100644 docs/research/sleep-wake-exact-checks.test.mjs
+ create mode 100644 docs/research/sleep-wake-quality-exact-checks.md
+ create mode 100644 docs/research/sleep-wake-quality-exact-checks.mjs
+ create mode 100644 docs/research/sleep-wake-quality-exact-checks.test.mjs
+ create mode 100644 docs/research/sleep-wake-quality-exact-observations.json
+remote: 
+remote: Create a pull request for 'research/sleep-wake-quality-exact-checks' on GitHub by visiting:        
+remote:      https://github.com/rubixhacker/dyn4k/pull/new/research/sleep-wake-quality-exact-checks        
+remote: 
+To github.com:rubixhacker/dyn4k.git
+ * [new branch]      research/sleep-wake-quality-exact-checks -> research/sleep-wake-quality-exact-checks
+branch 'research/sleep-wake-quality-exact-checks' set up to track 'origin/research/sleep-wake-quality-exact-checks'.
+
+Observed totals verified: {"initial": 6, "inner": 432000, "before": 6, "after": 6, "impulse": 6, "timestep": 1296006, "endpoints": 252000, "sleepingStates": 431112, "sleepPoseComparisons": 431100}
+observations SHA256 e464a6d87ca1c50aa6ebe313797c1b6e5c943ac9118372acd18e5eb6679e654b
+VERBATIM original equality: sleep-wake-exact-checks.mjs
+VERBATIM original equality: sleep-wake-exact-checks.test.mjs
+PASS: direct audit/test logs, totals, exact helper copies, committed tree and remote revision checked.

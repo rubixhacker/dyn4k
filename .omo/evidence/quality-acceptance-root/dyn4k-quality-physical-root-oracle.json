@@ -1,0 +1,422 @@
+{
+  "semantics": "Exact Fraction four-vertex mathematical geometry of frozen binary64 coefficients",
+  "states": 432000,
+  "endpoints": 252000,
+  "failures": 0,
+  "results": [
+    {
+      "hz": 30,
+      "repetition": 1,
+      "states": 72000,
+      "endpoints": 18000,
+      "endpointFailures": 0,
+      "phases": {
+        "approach": {
+          "count": 4,
+          "failures": 0,
+          "maximumStep": 1,
+          "nearestStep": 1,
+          "failedRanges": [],
+          "maximumApproxM": 0.0,
+          "maximumExact": "0",
+          "minimumHeadroomExact": "0"
+        },
+        "impact": {
+          "count": 3,
+          "failures": 0,
+          "maximumStep": 6,
+          "nearestStep": 6,
+          "failedRanges": [],
+          "maximumApproxM": 0.004083333333333328,
+          "maximumExact": "36779396956859/9007199254740992",
+          "minimumHeadroomExact": "1332314889763773/225179981368524800"
+        },
+        "settling": {
+          "count": 58,
+          "failures": 0,
+          "maximumStep": 8,
+          "nearestStep": 8,
+          "failedRanges": [],
+          "maximumApproxM": 0.0006395658955666427,
+          "maximumExact": "11797908393790709/18446744073709551616",
+          "minimumHeadroomExact": "2010895299368926227/461168601842738790400"
+        },
+        "rest-before": {
+          "count": 35935,
+          "failures": 0,
+          "maximumStep": 66,
+          "nearestStep": 66,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441535540929695,
+          "maximumExact": "1180654141974671427033/4835703278458516698824704",
+          "minimumHeadroomExact": "456881142060480658973963/604462909807314587353088000"
+        },
+        "wake-settling": {
+          "count": 83,
+          "failures": 0,
+          "maximumStep": 36001,
+          "nearestStep": 36001,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441514414041744,
+          "maximumExact": "1180643925638538702175/4835703278458516698824704",
+          "minimumHeadroomExact": "574946811666351119798713/120892581961462917470617600"
+        },
+        "rest-after": {
+          "count": 35917,
+          "failures": 0,
+          "maximumStep": 36084,
+          "nearestStep": 36084,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441406250039669,
+          "maximumExact": "4951760157221978524158073757/20282409603651670423947251286016",
+          "minimumHeadroomExact": "1916331180803711487473647191127/2535301200456458802993406410752000"
+        }
+      }
+    },
+    {
+      "hz": 30,
+      "repetition": 2,
+      "states": 72000,
+      "endpoints": 18000,
+      "endpointFailures": 0,
+      "phases": {
+        "approach": {
+          "count": 4,
+          "failures": 0,
+          "maximumStep": 1,
+          "nearestStep": 1,
+          "failedRanges": [],
+          "maximumApproxM": 0.0,
+          "maximumExact": "0",
+          "minimumHeadroomExact": "0"
+        },
+        "impact": {
+          "count": 3,
+          "failures": 0,
+          "maximumStep": 6,
+          "nearestStep": 6,
+          "failedRanges": [],
+          "maximumApproxM": 0.004083333333333328,
+          "maximumExact": "36779396956859/9007199254740992",
+          "minimumHeadroomExact": "1332314889763773/225179981368524800"
+        },
+        "settling": {
+          "count": 58,
+          "failures": 0,
+          "maximumStep": 8,
+          "nearestStep": 8,
+          "failedRanges": [],
+          "maximumApproxM": 0.0006395658955666427,
+          "maximumExact": "11797908393790709/18446744073709551616",
+          "minimumHeadroomExact": "2010895299368926227/461168601842738790400"
+        },
+        "rest-before": {
+          "count": 35935,
+          "failures": 0,
+          "maximumStep": 66,
+          "nearestStep": 66,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441535540929695,
+          "maximumExact": "1180654141974671427033/4835703278458516698824704",
+          "minimumHeadroomExact": "456881142060480658973963/604462909807314587353088000"
+        },
+        "wake-settling": {
+          "count": 83,
+          "failures": 0,
+          "maximumStep": 36001,
+          "nearestStep": 36001,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441514414041744,
+          "maximumExact": "1180643925638538702175/4835703278458516698824704",
+          "minimumHeadroomExact": "574946811666351119798713/120892581961462917470617600"
+        },
+        "rest-after": {
+          "count": 35917,
+          "failures": 0,
+          "maximumStep": 36084,
+          "nearestStep": 36084,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441406250039669,
+          "maximumExact": "4951760157221978524158073757/20282409603651670423947251286016",
+          "minimumHeadroomExact": "1916331180803711487473647191127/2535301200456458802993406410752000"
+        }
+      }
+    },
+    {
+      "hz": 60,
+      "repetition": 1,
+      "states": 72000,
+      "endpoints": 36000,
+      "endpointFailures": 0,
+      "phases": {
+        "approach": {
+          "count": 4,
+          "failures": 0,
+          "maximumStep": 1,
+          "nearestStep": 1,
+          "failedRanges": [],
+          "maximumApproxM": 0.0,
+          "maximumExact": "0",
+          "minimumHeadroomExact": "0"
+        },
+        "impact": {
+          "count": 3,
+          "failures": 0,
+          "maximumStep": 6,
+          "nearestStep": 6,
+          "failedRanges": [],
+          "maximumApproxM": 0.004083333333333328,
+          "maximumExact": "36779396956859/9007199254740992",
+          "minimumHeadroomExact": "1332314889763773/225179981368524800"
+        },
+        "settling": {
+          "count": 58,
+          "failures": 0,
+          "maximumStep": 8,
+          "nearestStep": 8,
+          "failedRanges": [],
+          "maximumApproxM": 0.0006395658955666427,
+          "maximumExact": "11797908393790709/18446744073709551616",
+          "minimumHeadroomExact": "2010895299368926227/461168601842738790400"
+        },
+        "rest-before": {
+          "count": 35935,
+          "failures": 0,
+          "maximumStep": 66,
+          "nearestStep": 66,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441535540929695,
+          "maximumExact": "1180654141974671427033/4835703278458516698824704",
+          "minimumHeadroomExact": "456881142060480658973963/604462909807314587353088000"
+        },
+        "wake-settling": {
+          "count": 83,
+          "failures": 0,
+          "maximumStep": 36001,
+          "nearestStep": 36001,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441514414041744,
+          "maximumExact": "1180643925638538702175/4835703278458516698824704",
+          "minimumHeadroomExact": "574946811666351119798713/120892581961462917470617600"
+        },
+        "rest-after": {
+          "count": 35917,
+          "failures": 0,
+          "maximumStep": 36084,
+          "nearestStep": 36084,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441406250039669,
+          "maximumExact": "4951760157221978524158073757/20282409603651670423947251286016",
+          "minimumHeadroomExact": "1916331180803711487473647191127/2535301200456458802993406410752000"
+        }
+      }
+    },
+    {
+      "hz": 60,
+      "repetition": 2,
+      "states": 72000,
+      "endpoints": 36000,
+      "endpointFailures": 0,
+      "phases": {
+        "approach": {
+          "count": 4,
+          "failures": 0,
+          "maximumStep": 1,
+          "nearestStep": 1,
+          "failedRanges": [],
+          "maximumApproxM": 0.0,
+          "maximumExact": "0",
+          "minimumHeadroomExact": "0"
+        },
+        "impact": {
+          "count": 3,
+          "failures": 0,
+          "maximumStep": 6,
+          "nearestStep": 6,
+          "failedRanges": [],
+          "maximumApproxM": 0.004083333333333328,
+          "maximumExact": "36779396956859/9007199254740992",
+          "minimumHeadroomExact": "1332314889763773/225179981368524800"
+        },
+        "settling": {
+          "count": 58,
+          "failures": 0,
+          "maximumStep": 8,
+          "nearestStep": 8,
+          "failedRanges": [],
+          "maximumApproxM": 0.0006395658955666427,
+          "maximumExact": "11797908393790709/18446744073709551616",
+          "minimumHeadroomExact": "2010895299368926227/461168601842738790400"
+        },
+        "rest-before": {
+          "count": 35935,
+          "failures": 0,
+          "maximumStep": 66,
+          "nearestStep": 66,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441535540929695,
+          "maximumExact": "1180654141974671427033/4835703278458516698824704",
+          "minimumHeadroomExact": "456881142060480658973963/604462909807314587353088000"
+        },
+        "wake-settling": {
+          "count": 83,
+          "failures": 0,
+          "maximumStep": 36001,
+          "nearestStep": 36001,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441514414041744,
+          "maximumExact": "1180643925638538702175/4835703278458516698824704",
+          "minimumHeadroomExact": "574946811666351119798713/120892581961462917470617600"
+        },
+        "rest-after": {
+          "count": 35917,
+          "failures": 0,
+          "maximumStep": 36084,
+          "nearestStep": 36084,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441406250039669,
+          "maximumExact": "4951760157221978524158073757/20282409603651670423947251286016",
+          "minimumHeadroomExact": "1916331180803711487473647191127/2535301200456458802993406410752000"
+        }
+      }
+    },
+    {
+      "hz": 120,
+      "repetition": 1,
+      "states": 72000,
+      "endpoints": 72000,
+      "endpointFailures": 0,
+      "phases": {
+        "approach": {
+          "count": 4,
+          "failures": 0,
+          "maximumStep": 1,
+          "nearestStep": 1,
+          "failedRanges": [],
+          "maximumApproxM": 0.0,
+          "maximumExact": "0",
+          "minimumHeadroomExact": "0"
+        },
+        "impact": {
+          "count": 3,
+          "failures": 0,
+          "maximumStep": 6,
+          "nearestStep": 6,
+          "failedRanges": [],
+          "maximumApproxM": 0.004083333333333328,
+          "maximumExact": "36779396956859/9007199254740992",
+          "minimumHeadroomExact": "1332314889763773/225179981368524800"
+        },
+        "settling": {
+          "count": 58,
+          "failures": 0,
+          "maximumStep": 8,
+          "nearestStep": 8,
+          "failedRanges": [],
+          "maximumApproxM": 0.0006395658955666427,
+          "maximumExact": "11797908393790709/18446744073709551616",
+          "minimumHeadroomExact": "2010895299368926227/461168601842738790400"
+        },
+        "rest-before": {
+          "count": 35935,
+          "failures": 0,
+          "maximumStep": 66,
+          "nearestStep": 66,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441535540929695,
+          "maximumExact": "1180654141974671427033/4835703278458516698824704",
+          "minimumHeadroomExact": "456881142060480658973963/604462909807314587353088000"
+        },
+        "wake-settling": {
+          "count": 83,
+          "failures": 0,
+          "maximumStep": 36001,
+          "nearestStep": 36001,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441514414041744,
+          "maximumExact": "1180643925638538702175/4835703278458516698824704",
+          "minimumHeadroomExact": "574946811666351119798713/120892581961462917470617600"
+        },
+        "rest-after": {
+          "count": 35917,
+          "failures": 0,
+          "maximumStep": 36084,
+          "nearestStep": 36084,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441406250039669,
+          "maximumExact": "4951760157221978524158073757/20282409603651670423947251286016",
+          "minimumHeadroomExact": "1916331180803711487473647191127/2535301200456458802993406410752000"
+        }
+      }
+    },
+    {
+      "hz": 120,
+      "repetition": 2,
+      "states": 72000,
+      "endpoints": 72000,
+      "endpointFailures": 0,
+      "phases": {
+        "approach": {
+          "count": 4,
+          "failures": 0,
+          "maximumStep": 1,
+          "nearestStep": 1,
+          "failedRanges": [],
+          "maximumApproxM": 0.0,
+          "maximumExact": "0",
+          "minimumHeadroomExact": "0"
+        },
+        "impact": {
+          "count": 3,
+          "failures": 0,
+          "maximumStep": 6,
+          "nearestStep": 6,
+          "failedRanges": [],
+          "maximumApproxM": 0.004083333333333328,
+          "maximumExact": "36779396956859/9007199254740992",
+          "minimumHeadroomExact": "1332314889763773/225179981368524800"
+        },
+        "settling": {
+          "count": 58,
+          "failures": 0,
+          "maximumStep": 8,
+          "nearestStep": 8,
+          "failedRanges": [],
+          "maximumApproxM": 0.0006395658955666427,
+          "maximumExact": "11797908393790709/18446744073709551616",
+          "minimumHeadroomExact": "2010895299368926227/461168601842738790400"
+        },
+        "rest-before": {
+          "count": 35935,
+          "failures": 0,
+          "maximumStep": 66,
+          "nearestStep": 66,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441535540929695,
+          "maximumExact": "1180654141974671427033/4835703278458516698824704",
+          "minimumHeadroomExact": "456881142060480658973963/604462909807314587353088000"
+        },
+        "wake-settling": {
+          "count": 83,
+          "failures": 0,
+          "maximumStep": 36001,
+          "nearestStep": 36001,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441514414041744,
+          "maximumExact": "1180643925638538702175/4835703278458516698824704",
+          "minimumHeadroomExact": "574946811666351119798713/120892581961462917470617600"
+        },
+        "rest-after": {
+          "count": 35917,
+          "failures": 0,
+          "maximumStep": 36084,
+          "nearestStep": 36084,
+          "failedRanges": [],
+          "maximumApproxM": 0.0002441406250039669,
+          "maximumExact": "4951760157221978524158073757/20282409603651670423947251286016",
+          "minimumHeadroomExact": "1916331180803711487473647191127/2535301200456458802993406410752000"
+        }
+      }
+    }
+  ]
+}
