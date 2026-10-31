@@ -1,6 +1,6 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" ?>
 <SmellBaseline>
-  <ManuallySuppressedIssues />
+  <ManuallySuppressedIssues/>
   <CurrentIssues>
     <ID>MatchingDeclarationName:PyValues.kt$Py</ID>
     <ID>SwallowedException:SafariReporter.kt$SafariReporter$error: ConfigBindingError</ID>

@@ -143,7 +143,7 @@ object Ledger {
                         "signature" to JsonPrimitive(tuple[1].textOrNull().orEmpty()),
                     )
                     if (flags != null && flags !is JsonNull) pairs.add("flags" to flags)
-                    JsonObject(linkedMapOf(*pairs.toTypedArray()))
+                    JsonObject(pairs.toMap())
                 },
             ),
         )

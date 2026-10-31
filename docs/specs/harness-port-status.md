@@ -374,6 +374,15 @@ the surrounding suite is green:
 6. Pin tables have one home (for example `FullJvmConsumerRules`, not a copy in the consumer).
 7. `detekt` and `spotlessCheck` pass; new findings fail the build rather than joining a baseline.
 
+Detekt keeps one baseline per compilation per module: `baseline-main.xml` for the JVM
+main compilation, `baseline-test.xml` for JVM test, and `baseline.xml` for the
+metadata (common) compilation, which is the only baseline task that honors the
+configured path. Regenerate with
+`./gradlew detektBaselineJvmMain detektBaselineJvmTest detektBaselineMetadataMain`
+from `tools/harness`, then confirm `detekt` is green; never hand-edit a baseline
+to silence a new finding. `commonTest` has no baseline task and no baseline file,
+so it must stay fully clean.
+
 ### Retained-evidence gates, in one place
 
 Every gate below reports skipped without its variables, so absence can never look like a pass.

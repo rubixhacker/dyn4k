@@ -25,6 +25,10 @@ subprojects {
 
     configure<io.gitlab.arturbosch.detekt.extensions.DetektExtension> {
         config.setFrom(rootProject.files("config/detekt/detekt.yml"))
+        // Analysis tasks read this file. The per-compilation baseline tasks
+        // write `baseline-main.xml` / `baseline-test.xml`; union them here
+        // after regenerating (see the status doc), because the analysis tasks
+        // do not read the per-compilation files.
         baseline = file("config/detekt/baseline.xml")
         buildUponDefaultConfig = true
         allRules = false
